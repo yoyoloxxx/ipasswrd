@@ -1,0 +1,11 @@
+bin/
+obj/
+dist/
+dist-host/
+*.log
+*.user
+.vs/
+tools/ImportCheck/bin/
+tools/ImportCheck/obj/
+install-maui.cmd
+publish-host.cmd

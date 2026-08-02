@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="100%" height="100%">
+  <!-- IPasswrd app icon, упрощённая версия для 16–32 px: без микрокапель, штрихи толще -->
+  <defs>
+    <g id="kbase" fill="none" stroke-linecap="round">
+      <g stroke-width="17">
+        <circle cx="52" cy="118" r="29"/>
+        <path d="M84 118 L224 118"/>
+      </g>
+      <g stroke-width="12">
+        <path d="M102 130 L111 142 M120 130 L111 142 M111 142 L111 164"/>
+        <path d="M134 130 L134 158"/>
+        <circle cx="156" cy="143" r="11"/>
+        <path d="M180 130 L202 152 M202 130 L180 152"/>
+      </g>
+    </g>
+    <path id="blob1" d="M64 34 C104 18 148 28 168 56 C190 78 196 108 184 134 C200 156 192 190 162 202 C136 214 104 226 78 210 C46 226 16 202 24 172 C6 152 10 116 30 98 C18 70 34 46 64 34 Z"/>
+  </defs>
+  <g fill="#17191D">
+    <use href="#blob1"/>
+    <circle cx="208" cy="76" r="10"/>
+  </g>
+  <g stroke="#BC9F5C" transform="translate(0 10)"><use href="#kbase"/></g>
+  <path d="M228 36 L246 54 L228 72 L210 54 Z" fill="#BC9F5C"/>
+</svg>

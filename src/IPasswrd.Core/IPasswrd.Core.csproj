@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>IPasswrd.Core</AssemblyName>
+    <RootNamespace>IPasswrd.Core</RootNamespace>
+    <Description>IPasswrd security core: Argon2id KDF + AES-256-GCM envelope-encrypted vault. Transport-agnostic.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Argon2id (pure-managed, cross-platform incl. iOS/Android). AES-256-GCM is built into .NET. -->
+    <PackageReference Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,164 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="IPasswrd.App.MainWindow"
+        Width="1080" Height="700" MinWidth="860" MinHeight="540"
+        Title="IPasswrd"
+        Background="{DynamicResource IpBgDeep}"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="NoChrome"
+        ExtendClientAreaTitleBarHeightHint="-1">
+
+  <Grid RowDefinitions="38,*">
+
+    <!-- ===== custom title bar ===== -->
+    <Grid x:Name="TitleBar" Grid.Row="0" Background="{DynamicResource IpBgDeep}" ColumnDefinitions="*,Auto"
+          PointerPressed="OnTitleBarPressed">
+      <StackPanel Grid.Column="1" Orientation="Horizontal">
+        <Button Classes="caption" Content="—" Click="OnMinimize"/>
+        <Button Classes="caption" Content="▢" Click="OnMaximize"/>
+        <Button Classes="caption close" Content="✕" Click="OnClose"/>
+      </StackPanel>
+    </Grid>
+
+    <Grid Grid.Row="1">
+
+      <!-- ===== unlock / create ===== -->
+      <Border x:Name="UnlockScreen" Background="{DynamicResource IpBgDeep}">
+        <Border Width="424" HorizontalAlignment="Center" VerticalAlignment="Center"
+                Background="{DynamicResource IpSurface}" CornerRadius="14" Padding="34,30"
+                BorderBrush="{DynamicResource IpHairStrong}" BorderThickness="1">
+          <StackPanel Spacing="14">
+            <ContentControl x:Name="LogoUnlock" Width="58" Height="58" HorizontalAlignment="Center"/>
+            <TextBlock Text="IPasswrd" FontSize="21" FontWeight="Bold" HorizontalAlignment="Center" Foreground="{DynamicResource IpText}"/>
+            <TextBlock x:Name="UnlockSub" Text="Введите мастер-пароль"
+                       Foreground="{DynamicResource IpText2}" HorizontalAlignment="Center"/>
+            <TextBox x:Name="MasterBox" PasswordChar="●" Watermark="Мастер-пароль"
+                     FontFamily="Cascadia Code, Consolas, monospace" KeyDown="OnMasterKeyDown"/>
+            <TextBox x:Name="MasterBox2" PasswordChar="●" Watermark="Повторите пароль"
+                     FontFamily="Cascadia Code, Consolas, monospace" IsVisible="False" KeyDown="OnMasterKeyDown"/>
+            <TextBlock x:Name="UnlockError" Foreground="{DynamicResource IpBad}" TextWrapping="Wrap" IsVisible="False"/>
+            <Button x:Name="UnlockButton" Classes="primary" Content="Открыть" Click="OnUnlockClick"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="10"/>
+          </StackPanel>
+        </Border>
+      </Border>
+
+      <!-- ===== vault ===== -->
+      <Grid x:Name="VaultScreen" IsVisible="False" ColumnDefinitions="232,332,*">
+
+        <!-- sidebar -->
+        <DockPanel Grid.Column="0" Background="{DynamicResource IpBgDeep}">
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="16,14,0,12">
+            <ContentControl x:Name="LogoSide" Width="24" Height="24" VerticalAlignment="Center"/>
+            <TextBlock Text="IPasswrd" FontWeight="Bold" FontSize="15" Foreground="{DynamicResource IpText}" VerticalAlignment="Center"/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Margin="10,0,10,10" Spacing="8">
+            <Border Background="{DynamicResource IpBg}" BorderBrush="{DynamicResource IpHair}" BorderThickness="1" CornerRadius="10" Padding="10,9">
+              <StackPanel Orientation="Horizontal" Spacing="9">
+                <Path Data="M7 18a4.5 4.5 0 0 1-.4-9A6 6 0 0 1 18.3 10 4 4 0 0 1 17.5 18H7z"
+                      Stroke="{DynamicResource IpOk}" StrokeThickness="1.5" Width="17" Height="17" Stretch="Uniform"
+                      StrokeLineCap="Round" StrokeJoin="Round" VerticalAlignment="Center"/>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock x:Name="SyncTitle" Text="Локальный сейф" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IpText}"/>
+                  <TextBlock x:Name="SyncSub" Text="без синхронизации" FontSize="11" Foreground="{DynamicResource IpText3}"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+            <Button Click="OnLockClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Background="#BC9F5C" Foreground="#241A06" BorderThickness="0" CornerRadius="9" Padding="10,9">
+              <Button.Styles>
+                <Style Selector="Button:pointerover /template/ ContentPresenter">
+                  <Setter Property="Background" Value="#CDB06C"/>
+                </Style>
+                <Style Selector="Button:pressed /template/ ContentPresenter">
+                  <Setter Property="Background" Value="#A2853F"/>
+                </Style>
+              </Button.Styles>
+              <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                <Path Data="M5 11h14v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9zm3 0V7a4 4 0 0 1 8 0v4"
+                      Stroke="#241A06" StrokeThickness="1.7" Width="15" Height="15" Stretch="Uniform"
+                      StrokeLineCap="Round" StrokeJoin="Round"/>
+                <TextBlock Text="Заблокировать" FontWeight="SemiBold" VerticalAlignment="Center"/>
+              </StackPanel>
+            </Button>
+          </StackPanel>
+          <ScrollViewer>
+            <StackPanel x:Name="SectionHost" Margin="8,4" Spacing="2"/>
+          </ScrollViewer>
+        </DockPanel>
+
+        <!-- list -->
+        <Grid Grid.Column="1" Background="{DynamicResource IpBgList}" RowDefinitions="Auto,Auto,*">
+          <Grid Grid.Row="0" Margin="14,12,12,4" ColumnDefinitions="*,Auto">
+            <TextBlock x:Name="ListTitle" Text="Все записи" FontWeight="Bold" FontSize="15"
+                       Foreground="{DynamicResource IpText}" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Classes="icon" Click="OnAddClick" ToolTip.Tip="Новая запись">
+              <Path Data="M12 5v14M5 12h14" Stroke="{DynamicResource IpAccent}" StrokeThickness="1.7" Width="18" Height="18"
+                    Stretch="Uniform" StrokeLineCap="Round"/>
+            </Button>
+          </Grid>
+          <TextBox x:Name="SearchBox" Grid.Row="1" Watermark="Поиск" Margin="12,4,12,8"
+                   TextChanged="OnSearchChanged">
+            <TextBox.InnerLeftContent>
+              <Path Data="M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM20 20l-4.9-4.9"
+                    Stroke="{DynamicResource IpText3}" StrokeThickness="1.5" Width="15" Height="15" Stretch="Uniform"
+                    StrokeLineCap="Round" Margin="8,0,0,0"/>
+            </TextBox.InnerLeftContent>
+          </TextBox>
+          <ListBox x:Name="EntryList" Grid.Row="2" Background="Transparent" BorderThickness="0"
+                   SelectionChanged="OnEntrySelected">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Grid ColumnDefinitions="Auto,*,Auto" Height="40">
+                  <Border Width="34" Height="34" CornerRadius="9" Background="{Binding TileBg}"
+                          BorderBrush="{Binding TileBorder}" BorderThickness="1" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Mono}" FontWeight="Bold" FontSize="14" Foreground="{Binding TileFg}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <StackPanel Grid.Column="1" Margin="11,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{DynamicResource IpText}" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Subtitle}" Foreground="{DynamicResource IpText3}" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                    <Border Background="{DynamicResource IpSurface}" BorderBrush="{DynamicResource IpHair}" BorderThickness="1"
+                            CornerRadius="8" Padding="7,1" IsVisible="{Binding IsGroup}" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding CountLabel}" Foreground="{DynamicResource IpText2}" FontSize="11" FontWeight="Bold"/>
+                    </Border>
+                    <TextBlock Text="★" Foreground="{DynamicResource IpAccent}" FontSize="12" IsVisible="{Binding Fav}"/>
+                    <Ellipse Width="7" Height="7" Fill="{DynamicResource IpBad}" IsVisible="{Binding HasBad}"/>
+                    <Ellipse Width="7" Height="7" Fill="{DynamicResource IpWarn}" IsVisible="{Binding HasWarn}"/>
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+
+        <!-- detail -->
+        <ScrollViewer Grid.Column="2" Background="{DynamicResource IpBg}">
+          <StackPanel x:Name="DetailPanel" Margin="30,26" Spacing="10"/>
+        </ScrollViewer>
+
+        <!-- tool pane (overlays list + detail when a tool is active) -->
+        <ScrollViewer x:Name="ToolPane" Grid.Column="1" Grid.ColumnSpan="2" Background="{DynamicResource IpBg}"
+                      HorizontalScrollBarVisibility="Disabled" IsVisible="False">
+          <StackPanel x:Name="ToolHost" Margin="34,28" MaxWidth="720" HorizontalAlignment="Stretch"/>
+        </ScrollViewer>
+      </Grid>
+
+      <!-- ===== editor ===== -->
+      <Grid x:Name="EditorScreen" IsVisible="False" Background="{DynamicResource IpBg}" RowDefinitions="Auto,*">
+        <Grid Grid.Row="0" Background="{DynamicResource IpBgDeep}" ColumnDefinitions="Auto,*">
+          <Button Grid.Column="0" Content="← Отмена" Click="OnEditorCancel" Margin="12,10"/>
+          <TextBlock Grid.Column="1" x:Name="EditorTitle" Text="Новая запись" FontWeight="Bold"
+                     Foreground="{DynamicResource IpText}" VerticalAlignment="Center" HorizontalAlignment="Center"
+                     Margin="0,0,80,0"/>
+        </Grid>
+        <ScrollViewer Grid.Row="1">
+          <StackPanel x:Name="EditorForm" MaxWidth="560" Margin="24" Spacing="12"/>
+        </ScrollViewer>
+      </Grid>
+
+    </Grid>
+  </Grid>
+</Window>
