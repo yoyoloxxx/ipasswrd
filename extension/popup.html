@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  body{margin:0;background:#17191D;color:#F4F1E8;font:13px 'Segoe UI',system-ui,sans-serif;width:250px;padding:14px}
+  .hd{display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:10px}
+  .hd img{width:18px;height:18px}
+  input{box-sizing:border-box;width:100%;background:#17191D;color:#F4F1E8;border:1px solid #BC9F5C55;border-radius:8px;padding:8px 10px;font:13px 'Segoe UI',system-ui,sans-serif;outline:none}
+  input:focus{border-color:#BC9F5C}
+  button{width:100%;margin-top:8px;border:0;border-radius:8px;padding:8px 10px;font:600 12.5px 'Segoe UI',system-ui,sans-serif;cursor:pointer}
+  .pri{background:#BC9F5C;color:#17191D}
+  .pri:hover{background:#CDB06C}
+  .sec{background:transparent;color:#F4F1E8;opacity:.8;border:1px solid #F4F1E833}
+  .sec:hover{opacity:1}
+  .err{color:#E5484D;font-size:12px;margin-top:6px;display:none}
+  .ok{color:#BC9F5C;font-size:12.5px;margin:2px 0 4px}
+</style></head>
+<body>
+  <div class="hd"><img src="icon48.png" alt="">IPasswrd</div>
+  <div id="locked" style="display:none">
+    <input id="pw" type="password" placeholder="Мастер-пароль" autocomplete="off">
+    <div id="err" class="err"></div>
+    <button id="unlock" class="pri">Разблокировать</button>
+  </div>
+  <div id="open" style="display:none">
+    <div class="ok">Сейф открыт — заполняйте пароли на сайтах.</div>
+  </div>
+  <button id="app" class="sec">Открыть приложение</button>
+  <script src="popup.js"></script>
+</body></html>

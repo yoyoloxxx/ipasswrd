@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- «Тотем» — вертикальный скелетный ключ, читается сверху вниз: y (головка-вилка), l (ствол), o (кольцо-воротник), x (бородка). yoyoloxxx Dev. -->
+  <g stroke="#2A2D33" stroke-width="16" stroke-linecap="round" fill="none">
+    <path d="M92 30 L128 76 M164 30 L128 76"/>
+    <path d="M128 80 L128 176"/>
+    <circle cx="128" cy="124" r="26"/>
+    <path d="M104 178 L152 222 M152 178 L104 222"/>
+  </g>
+</svg>
