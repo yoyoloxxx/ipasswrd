@@ -1,0 +1,37 @@
+name: ios-build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/IPasswrd.Mobile/**'
+      - 'src/IPasswrd.Core/**'
+      - '.github/workflows/ios-build.yml'
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install MAUI iOS workload
+        run: dotnet workload install maui-ios
+      - name: Build unsigned (Release, ios-arm64)
+        run: >
+          dotnet publish src/IPasswrd.Mobile/IPasswrd.Mobile.csproj
+          -f net9.0-ios -c Release
+          -p:RuntimeIdentifier=ios-arm64
+          -p:EnableCodeSigning=false
+      - name: Pack IPA
+        run: |
+          APP=$(find src/IPasswrd.Mobile/bin/Release/net9.0-ios -name "*.app" -type d | head -1)
+          echo "app bundle: $APP"
+          mkdir -p Payload out
+          cp -R "$APP" Payload/
+          zip -qry out/IPasswrd-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IPasswrd-unsigned-ipa
+          path: out/IPasswrd-unsigned.ipa

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="IPasswrd.Mobile.Views.ItemDetailPage">
+
+    <ContentPage.ToolbarItems>
+        <ToolbarItem x:Name="FavItem" Text="☆" Clicked="OnToggleFavorite" />
+        <ToolbarItem Text="Изменить" Clicked="OnEdit" />
+    </ContentPage.ToolbarItems>
+
+    <Grid>
+        <ScrollView>
+            <VerticalStackLayout x:Name="Rows" Padding="16,10,16,30" Spacing="10" />
+        </ScrollView>
+
+        <Border x:Name="Toast" IsVisible="False" InputTransparent="True"
+                VerticalOptions="End" HorizontalOptions="Center" Margin="0,0,0,28"
+                StrokeThickness="0" StrokeShape="RoundRectangle 18" Padding="16,9"
+                BackgroundColor="{AppThemeBinding Dark={StaticResource IpSurface2}, Light={StaticResource IpTextL}}">
+            <Label x:Name="ToastLabel" FontSize="14"
+                   TextColor="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpSurfaceL}}" />
+        </Border>
+    </Grid>
+
+</ContentPage>

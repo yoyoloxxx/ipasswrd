@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:views="clr-namespace:IPasswrd.Mobile.Views"
+             x:Class="IPasswrd.Mobile.Views.VaultListPage"
+             Title="Сейф">
+
+    <ContentPage.ToolbarItems>
+        <ToolbarItem Text="＋" Clicked="OnAdd" />
+    </ContentPage.ToolbarItems>
+
+    <Grid RowDefinitions="Auto,Auto,*">
+
+        <SearchBar x:Name="Search" Grid.Row="0" Placeholder="Поиск" TextChanged="OnSearch" Margin="8,0" />
+
+        <ScrollView Grid.Row="1" Orientation="Horizontal" HorizontalScrollBarVisibility="Never" Margin="12,2,12,8">
+            <HorizontalStackLayout x:Name="Chips" Spacing="8" />
+        </ScrollView>
+
+        <CollectionView x:Name="List" Grid.Row="2" IsGrouped="True" SelectionMode="None">
+            <CollectionView.GroupHeaderTemplate>
+                <DataTemplate x:DataType="views:VaultGroup">
+                    <Label Text="{Binding Name}" Style="{StaticResource Section}" Margin="20,14,20,4" />
+                </DataTemplate>
+            </CollectionView.GroupHeaderTemplate>
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="views:VaultRow">
+                    <Grid Padding="16,7">
+                        <Border Style="{StaticResource Card}">
+                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                <Border Grid.Column="0" WidthRequest="38" HeightRequest="38"
+                                        StrokeThickness="0" StrokeShape="RoundRectangle 10"
+                                        BackgroundColor="{AppThemeBinding Dark={StaticResource IpAccentWash}, Light={StaticResource IpAccentWashL}}">
+                                    <Label Text="{Binding Badge}" FontSize="16" FontAttributes="Bold"
+                                           HorizontalOptions="Center" VerticalOptions="Center"
+                                           TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+                                </Border>
+                                <VerticalStackLayout Grid.Column="1" Spacing="1" VerticalOptions="Center">
+                                    <Label Text="{Binding Title}" FontSize="16" LineBreakMode="TailTruncation" />
+                                    <Label Text="{Binding Subtitle}" Style="{StaticResource Muted}" FontSize="13" LineBreakMode="TailTruncation" />
+                                </VerticalStackLayout>
+                                <Label Grid.Column="2" Text="{Binding Star}" FontSize="14" VerticalOptions="Center"
+                                       TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+                            </Grid>
+                        </Border>
+                        <Grid.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnRowTapped" CommandParameter="{Binding .}" />
+                        </Grid.GestureRecognizers>
+                    </Grid>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+            <CollectionView.EmptyView>
+                <VerticalStackLayout Padding="40" Spacing="8" VerticalOptions="Center">
+                    <Label Text="Пока пусто" HorizontalOptions="Center" Style="{StaticResource Muted}" />
+                    <Label Text="Добавьте запись кнопкой «＋» или включите синхронизацию с Windows в настройках."
+                           HorizontalOptions="Center" HorizontalTextAlignment="Center" Style="{StaticResource Muted}" FontSize="13" />
+                </VerticalStackLayout>
+            </CollectionView.EmptyView>
+        </CollectionView>
+
+    </Grid>
+
+</ContentPage>

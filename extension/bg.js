@@ -1,9 +1,18 @@
-// IPasswrd background worker: relays content-script requests to the native host
+// IPasswrd background worker: relays content-script requests to the app
 // and keeps the "credentials just submitted" stash across the post-login navigation.
+//
+// Two transports, tried in order:
+//   1) native messaging (the normal route);
+//   2) loopback HTTP to the app itself — used when an antivirus (e.g. Kaspersky)
+//      blocks the browser from launching the native host executable.
+// Whichever works is remembered for subsequent calls.
 
 const HOST = "com.yoyoloxxx.ipasswrd";
+const HTTP_BRIDGE = "http://127.0.0.1:38799/";
 
-function callNative(msg) {
+let transport = "native"; // "native" | "http" — sticky until it fails
+
+function callViaHost(msg) {
   return new Promise((resolve) => {
     try {
       chrome.runtime.sendNativeMessage(HOST, msg, (resp) => {
@@ -17,6 +26,38 @@ function callNative(msg) {
       resolve({ ok: false, error: "host_unreachable", detail: String(e) });
     }
   });
+}
+
+async function callViaHttp(msg) {
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 4000);
+    const r = await fetch(HTTP_BRIDGE, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },   // simple request — no preflight
+      body: JSON.stringify(msg),
+      signal: ctl.signal,
+    });
+    clearTimeout(t);
+    if (!r.ok) return { ok: false, error: "host_unreachable", detail: "http_" + r.status };
+    return await r.json();
+  } catch (e) {
+    return { ok: false, error: "host_unreachable", detail: "http_fail" };
+  }
+}
+
+async function callNative(msg) {
+  if (transport === "http") {
+    const h = await callViaHttp(msg);
+    if (!h || h.error === "host_unreachable") transport = "native"; // app restarted? retry the normal route
+    else return h;
+  }
+  const n = await callViaHost(msg);
+  if (!n || n.error !== "host_unreachable") return n;
+  const h2 = await callViaHttp(msg);                 // native host blocked → loopback fallback
+  if (h2 && h2.error !== "host_unreachable") { transport = "http"; return h2; }
+  n.detail = (n.detail || "") + " | " + (h2 && h2.detail || "http?");   // both down — show both reasons
+  return n;
 }
 
 const stashKey = (tabId) => "pending_" + tabId;

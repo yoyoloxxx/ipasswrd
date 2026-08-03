@@ -30,6 +30,7 @@ public partial class MainWindow
     {
         _bridgeCts = new CancellationTokenSource();
         _ = Task.Run(() => BridgeAcceptLoop(_bridgeCts.Token));
+        StartHttpBridge();   // loopback-HTTP fallback for when an antivirus blocks the native host (see HttpBridge.cs)
     }
 
     private async Task BridgeAcceptLoop(CancellationToken ct)
@@ -103,6 +104,17 @@ public partial class MainWindow
                 }
                 case "list":
                     return await OnUi(BridgeList);
+                case "passkeyList":
+                {
+                    string rpId = Get("rpId");
+                    return await OnUi(() => BridgePasskeyList(rpId));
+                }
+                case "passkeySave":
+                {
+                    string rpId = Get("rpId"), credId = Get("credId"), userHandle = Get("userHandle"),
+                           userName = Get("userName"), privJwk = Get("privJwk");
+                    return await OnUi(() => BridgePasskeySave(rpId, credId, userHandle, userName, privJwk));
+                }
                 case "focus":
                     return await OnUi(() => { BridgeFocus(); return Resp(new { ok = true }); });
                 default:
@@ -121,6 +133,50 @@ public partial class MainWindow
 
     // All accounts whose registrable domain matches the page, exact address first,
     // then lower-level hosts. Passwords only leave the process while unlocked.
+    // Single sign-on hubs log you into a DIFFERENT service, named in a redirect parameter
+    // (e.g. id.vk.ru → e.mail.ru). On these curated, trusted hubs we treat the redirect target as
+    // the real site (safe to auto-fill). Everywhere else a redirect target is offered in the menu
+    // only — an attacker can set redirect_uri, so we never silently auto-fill on their say-so.
+    private static readonly HashSet<string> TrustedAuthHubs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "id.vk.ru", "id.vk.com", "oauth.vk.com", "connect.vk.com",
+        "accounts.google.com", "login.microsoftonline.com", "login.live.com",
+        "appleid.apple.com", "passport.yandex.ru", "oauth.yandex.ru",
+    };
+
+    private static readonly string[] RedirectKeys =
+        { "redirect_uri", "redirect", "redirect_url", "redirecturl", "continue", "return", "return_to",
+          "returnto", "return_url", "returnurl", "next", "url", "service", "callback", "retpath" };
+
+    private static string HostOf(string url)
+    {
+        try { var u = url.Contains("://") ? new Uri(url) : new Uri("https://" + url.Trim()); return u.Host.ToLowerInvariant(); }
+        catch { return ""; }
+    }
+
+    /// <summary>Registrable domains named by a redirect/continue parameter in an auth URL (the real destination).</summary>
+    private static List<string> RedirectTargets(string url)
+    {
+        var outp = new List<string>();
+        try
+        {
+            var uri = url.Contains("://") ? new Uri(url) : new Uri("https://" + url.Trim());
+            if (string.IsNullOrEmpty(uri.Query)) return outp;
+            foreach (var part in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int eq = part.IndexOf('=');
+                if (eq <= 0) continue;
+                string k = Uri.UnescapeDataString(part[..eq]);
+                if (Array.IndexOf(RedirectKeys, k.ToLowerInvariant()) < 0) continue;
+                string v = Uri.UnescapeDataString(part[(eq + 1)..]);
+                string dom = Dedup.RegistrableDomain(v);
+                if (dom.Length > 0 && dom.Contains('.') && !outp.Contains(dom)) outp.Add(dom);
+            }
+        }
+        catch { /* malformed url */ }
+        return outp;
+    }
+
     private string BridgeCredentials(string url)
     {
         if (_vault is null) return Resp(new { ok = true, unlocked = false, items = Array.Empty<object>() });
@@ -128,20 +184,34 @@ public partial class MainWindow
         if (string.IsNullOrEmpty(baseDom)) return Resp(new { ok = true, unlocked = true, items = Array.Empty<object>() });
         string nu = NormUrl(url);
 
+        // "family" = domains that count as this page (auto-fillable); "related" = a redirect target on an
+        // untrusted page (offered in the menu, never auto-filled).
+        var family = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseDom };
+        var related = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool trustedHub = TrustedAuthHubs.Contains(HostOf(url));
+        foreach (var rd in RedirectTargets(url))
+        {
+            if (family.Contains(rd)) continue;
+            if (trustedHub) family.Add(rd); else related.Add(rd);
+        }
+
         var items = _vault.Items()
-            .Where(x => x.Item.Type == "account" &&
-                        Dedup.RegistrableDomain(x.Item.Fields.GetValueOrDefault("url", "")) == baseDom)
-            .OrderBy(x => NormUrl(x.Item.Fields.GetValueOrDefault("url", "")) == nu ? 0 : 1)
-            .ThenBy(x => Dedup.HostDepth(x.Item.Fields.GetValueOrDefault("url", "")))
-            .ThenBy(x => x.Item.Fields.GetValueOrDefault("username", ""), StringComparer.OrdinalIgnoreCase)
-            .Select(x => new
+            .Where(x => x.Item.Type == "account")
+            .Select(x => new { e = x, dom = Dedup.RegistrableDomain(x.Item.Fields.GetValueOrDefault("url", "")) })
+            .Where(a => a.dom.Length > 0 && (family.Contains(a.dom) || related.Contains(a.dom)))
+            .OrderBy(a => a.dom == baseDom ? 0 : family.Contains(a.dom) ? 1 : 2)          // exact site, then trusted redirect, then menu-only
+            .ThenBy(a => NormUrl(a.e.Item.Fields.GetValueOrDefault("url", "")) == nu ? 0 : 1)
+            .ThenBy(a => Dedup.HostDepth(a.e.Item.Fields.GetValueOrDefault("url", "")))
+            .ThenBy(a => a.e.Item.Fields.GetValueOrDefault("username", ""), StringComparer.OrdinalIgnoreCase)
+            .Select(a => new
             {
-                id = x.Id,
-                title = HeaderName(x.Item),
-                username = x.Item.Fields.GetValueOrDefault("username", ""),
-                password = x.Item.Fields.GetValueOrDefault("password", ""),
-                url = x.Item.Fields.GetValueOrDefault("url", ""),
-                totp = TotpNow(x.Item.Fields.GetValueOrDefault("totp", "")),
+                id = a.e.Id,
+                title = HeaderName(a.e.Item),
+                username = a.e.Item.Fields.GetValueOrDefault("username", ""),
+                password = a.e.Item.Fields.GetValueOrDefault("password", ""),
+                url = a.e.Item.Fields.GetValueOrDefault("url", ""),
+                totp = TotpNow(a.e.Item.Fields.GetValueOrDefault("totp", "")),
+                related = !family.Contains(a.dom),                                        // menu-only: excluded from silent autofill
             })
             .ToList();
         return Resp(new { ok = true, unlocked = true, items });
@@ -263,6 +333,59 @@ public partial class MainWindow
             RenderSidebar();
         }
         return Resp(new { ok = true, action, id });
+    }
+
+    // ---- passkeys (WebAuthn) ----
+    // The extension's page shim does all the crypto in WebCrypto; the vault is only the
+    // encrypted, synced store for the private key (JWK) + credential metadata. type "passkey".
+
+    private string BridgePasskeyList(string rpId)
+    {
+        if (_vault is null) return Resp(new { ok = true, unlocked = false, items = Array.Empty<object>() });
+        if (string.IsNullOrWhiteSpace(rpId)) return Resp(new { ok = true, unlocked = true, items = Array.Empty<object>() });
+
+        var items = _vault.Items()
+            .Where(x => x.Item.Type == "passkey"
+                        && string.Equals(x.Item.Fields.GetValueOrDefault("rpId", ""), rpId, StringComparison.OrdinalIgnoreCase)
+                        && !string.IsNullOrEmpty(x.Item.Fields.GetValueOrDefault("credId", ""))
+                        && !string.IsNullOrEmpty(x.Item.Fields.GetValueOrDefault("privJwk", "")))
+            .Select(x => new
+            {
+                id = x.Id,
+                credId = x.Item.Fields.GetValueOrDefault("credId", ""),
+                userHandle = x.Item.Fields.GetValueOrDefault("userHandle", ""),
+                userName = x.Item.Fields.GetValueOrDefault("username", ""),
+                privJwk = x.Item.Fields.GetValueOrDefault("privJwk", ""),
+            })
+            .ToList();
+        return Resp(new { ok = true, unlocked = true, items });
+    }
+
+    private string BridgePasskeySave(string rpId, string credId, string userHandle, string userName, string privJwk)
+    {
+        if (_vault is null) return Resp(new { ok = false, error = "locked" });
+        if (string.IsNullOrWhiteSpace(rpId) || string.IsNullOrWhiteSpace(credId) || string.IsNullOrWhiteSpace(privJwk))
+            return Resp(new { ok = false, error = "bad_request" });
+
+        var item = new VaultItem
+        {
+            Type = "passkey",
+            Title = rpId,                                 // name after the site only; the login lives in "username" (shown as the subtitle)
+        };
+        item.Fields["rpId"] = rpId;
+        item.Fields["url"] = rpId;                       // detail view shows this as "Сайт"
+        if (!string.IsNullOrWhiteSpace(userName)) item.Fields["username"] = userName;
+        item.Fields["device"] = "Ключ доступа";
+        item.Fields["credId"] = credId;
+        item.Fields["userHandle"] = userHandle ?? "";
+        item.Fields["alg"] = "-7";                       // ES256
+        item.Fields["privJwk"] = privJwk;
+        item.Fields["created"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
+
+        string id = _vault.Add(item);
+        Save();
+        if (VaultScreen.IsVisible) { LoadEntries(selectFirst: false); RenderSidebar(); }
+        return Resp(new { ok = true, id });
     }
 
     private void BridgeFocus()

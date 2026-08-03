@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
+
+    <!-- Неявные стили: тёмная/светлая тема следуют за системой, палитра — латунь/чёрный/белый. -->
+
+    <Style TargetType="ContentPage" ApplyToDerivedTypes="True">
+        <Setter Property="BackgroundColor" Value="{AppThemeBinding Dark={StaticResource IpBg}, Light={StaticResource IpBgL}}" />
+        <Setter Property="Shell.BackgroundColor" Value="{AppThemeBinding Dark={StaticResource IpBgDeep}, Light={StaticResource IpBgDeepL}}" />
+        <Setter Property="Shell.ForegroundColor" Value="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+        <Setter Property="Shell.TitleColor" Value="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpTextL}}" />
+    </Style>
+
+    <Style TargetType="Label">
+        <Setter Property="TextColor" Value="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpTextL}}" />
+        <Setter Property="FontSize" Value="16" />
+    </Style>
+
+    <Style TargetType="Label" x:Key="Muted">
+        <Setter Property="TextColor" Value="{AppThemeBinding Dark={StaticResource IpText2}, Light={StaticResource IpText2L}}" />
+        <Setter Property="FontSize" Value="14" />
+    </Style>
+
+    <Style TargetType="Label" x:Key="Section">
+        <Setter Property="TextColor" Value="{AppThemeBinding Dark={StaticResource IpText3}, Light={StaticResource IpText3L}}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Margin" Value="4,18,4,6" />
+    </Style>
+
+    <Style TargetType="Entry">
+        <Setter Property="TextColor" Value="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpTextL}}" />
+        <Setter Property="PlaceholderColor" Value="{AppThemeBinding Dark={StaticResource IpText3}, Light={StaticResource IpText3L}}" />
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="FontSize" Value="16" />
+    </Style>
+
+    <Style TargetType="Editor">
+        <Setter Property="TextColor" Value="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpTextL}}" />
+        <Setter Property="PlaceholderColor" Value="{AppThemeBinding Dark={StaticResource IpText3}, Light={StaticResource IpText3L}}" />
+        <Setter Property="BackgroundColor" Value="Transparent" />
+    </Style>
+
+    <Style TargetType="Button">
+        <Setter Property="TextColor" Value="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpTextL}}" />
+        <Setter Property="BackgroundColor" Value="{AppThemeBinding Dark={StaticResource IpSurface2}, Light={StaticResource IpSurface2L}}" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="FontSize" Value="16" />
+        <Setter Property="Padding" Value="16,10" />
+    </Style>
+
+    <Style TargetType="Button" x:Key="Primary">
+        <Setter Property="TextColor" Value="{AppThemeBinding Dark={StaticResource IpOnAccent}, Light={StaticResource IpOnAccentL}}" />
+        <Setter Property="BackgroundColor" Value="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+        <Setter Property="FontAttributes" Value="Bold" />
+    </Style>
+
+    <Style TargetType="Button" x:Key="Danger">
+        <Setter Property="TextColor" Value="{AppThemeBinding Dark={StaticResource IpBad}, Light={StaticResource IpBadL}}" />
+        <Setter Property="BackgroundColor" Value="{AppThemeBinding Dark={StaticResource IpBadWash}, Light={StaticResource IpBadWashL}}" />
+    </Style>
+
+    <Style TargetType="Border" x:Key="Card">
+        <Setter Property="BackgroundColor" Value="{AppThemeBinding Dark={StaticResource IpSurface}, Light={StaticResource IpSurfaceL}}" />
+        <Setter Property="Stroke" Value="{AppThemeBinding Dark={StaticResource IpHair}, Light={StaticResource IpHairL}}" />
+        <Setter Property="StrokeThickness" Value="1" />
+        <Setter Property="StrokeShape" Value="RoundRectangle 14" />
+        <Setter Property="Padding" Value="14,10" />
+    </Style>
+
+    <Style TargetType="SearchBar">
+        <Setter Property="TextColor" Value="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpTextL}}" />
+        <Setter Property="PlaceholderColor" Value="{AppThemeBinding Dark={StaticResource IpText3}, Light={StaticResource IpText3L}}" />
+        <Setter Property="CancelButtonColor" Value="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+    </Style>
+
+    <Style TargetType="Switch">
+        <Setter Property="OnColor" Value="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+    </Style>
+
+    <Style TargetType="Slider">
+        <Setter Property="MinimumTrackColor" Value="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+        <Setter Property="ThumbColor" Value="{AppThemeBinding Dark={StaticResource IpAccentHi}, Light={StaticResource IpAccentHiL}}" />
+    </Style>
+
+    <Style TargetType="ProgressBar">
+        <Setter Property="ProgressColor" Value="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+    </Style>
+
+    <Style TargetType="ActivityIndicator">
+        <Setter Property="Color" Value="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+    </Style>
+
+    <Style TargetType="Picker">
+        <Setter Property="TextColor" Value="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpTextL}}" />
+        <Setter Property="BackgroundColor" Value="Transparent" />
+    </Style>
+
+</ResourceDictionary>

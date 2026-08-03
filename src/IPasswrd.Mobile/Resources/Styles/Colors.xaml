@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
+
+    <!-- Палитра IPasswrd (латунь / чёрный / белый) — те же токены, что в Windows-приложении (App.axaml). -->
+
+    <!-- ============ Тёмная ============ -->
+    <Color x:Key="IpBgDeep">#05070B</Color>
+    <Color x:Key="IpBg">#090C10</Color>
+    <Color x:Key="IpBgList">#0E1115</Color>
+    <Color x:Key="IpSurface">#14171D</Color>
+    <Color x:Key="IpSurface2">#1B2025</Color>
+    <Color x:Key="IpText">#E4E6E9</Color>
+    <Color x:Key="IpText2">#9EA2A6</Color>
+    <Color x:Key="IpText3">#686C72</Color>
+    <Color x:Key="IpAccent">#E1B85E</Color>
+    <Color x:Key="IpAccentHi">#F2C86C</Color>
+    <Color x:Key="IpOnAccent">#231600</Color>
+    <Color x:Key="IpOk">#6CC185</Color>
+    <Color x:Key="IpWarn">#EA8E49</Color>
+    <Color x:Key="IpBad">#E95048</Color>
+    <Color x:Key="IpHair">#12FFFFFF</Color>
+    <Color x:Key="IpHairStrong">#21FFFFFF</Color>
+    <Color x:Key="IpAccentWash">#1AE1B85E</Color>
+    <Color x:Key="IpAccentWash2">#2BE1B85E</Color>
+    <Color x:Key="IpBadWash">#1FE95048</Color>
+
+    <!-- ============ Светлая ============ -->
+    <Color x:Key="IpBgDeepL">#EAE8E1</Color>
+    <Color x:Key="IpBgL">#F5F3EF</Color>
+    <Color x:Key="IpBgListL">#FAF9F6</Color>
+    <Color x:Key="IpSurfaceL">#FDFDFB</Color>
+    <Color x:Key="IpSurface2L">#F2F0EC</Color>
+    <Color x:Key="IpTextL">#1E2228</Color>
+    <Color x:Key="IpText2L">#51555C</Color>
+    <Color x:Key="IpText3L">#808389</Color>
+    <Color x:Key="IpAccentL">#9F6C00</Color>
+    <Color x:Key="IpAccentHiL">#8E5A00</Color>
+    <Color x:Key="IpOnAccentL">#FDFAF4</Color>
+    <Color x:Key="IpOkL">#26894C</Color>
+    <Color x:Key="IpWarnL">#B75F0B</Color>
+    <Color x:Key="IpBadL">#C22826</Color>
+    <Color x:Key="IpHairL">#17000000</Color>
+    <Color x:Key="IpHairStrongL">#29000000</Color>
+    <Color x:Key="IpAccentWashL">#1A9F6C00</Color>
+    <Color x:Key="IpAccentWash2L">#2E9F6C00</Color>
+    <Color x:Key="IpBadWashL">#1FC22826</Color>
+
+</ResourceDictionary>

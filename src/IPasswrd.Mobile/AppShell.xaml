@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+       xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+       xmlns:views="clr-namespace:IPasswrd.Mobile.Views"
+       x:Class="IPasswrd.Mobile.AppShell"
+       Shell.TabBarBackgroundColor="{AppThemeBinding Dark={StaticResource IpBgDeep}, Light={StaticResource IpBgDeepL}}"
+       Shell.TabBarForegroundColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}"
+       Shell.TabBarTitleColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}"
+       Shell.TabBarUnselectedColor="{AppThemeBinding Dark={StaticResource IpText3}, Light={StaticResource IpText3L}}">
+
+    <TabBar>
+        <ShellContent Title="Сейф" Icon="tab_vault.png" ContentTemplate="{DataTemplate views:VaultListPage}" />
+        <ShellContent Title="Коды" Icon="tab_codes.png" ContentTemplate="{DataTemplate views:AuthenticatorPage}" />
+        <ShellContent Title="Генератор" Icon="tab_generator.png" ContentTemplate="{DataTemplate views:GeneratorPage}" />
+        <ShellContent Title="Настройки" Icon="tab_settings.png" ContentTemplate="{DataTemplate views:SettingsPage}" />
+    </TabBar>
+
+</Shell>

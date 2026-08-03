@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Keychain на устройстве работает и без entitlements; этот файл нужен,
+	     только если запускать в симуляторе (тогда добавьте в csproj:
+	     <CodesignEntitlements>Platforms/iOS/Entitlements.plist</CodesignEntitlements>) -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.yoyoloxxx.ipasswrd</string>
+	</array>
+</dict>
+</plist>

@@ -31,6 +31,20 @@
     catch (e) { res({ ok: false, error: String(e) }); }
   });
 
+  // ---------- WebAuthn relay (MAIN-world inject.js ⇄ vault) ----------
+  // inject.js does all the crypto; we only shuttle passkey list/save between it and the app.
+  window.addEventListener("message", async (e) => {
+    const d = e.data;
+    if (e.source !== window || !d || d.dir !== "ipw->cs") return;
+    let res;
+    try {
+      if (d.cmd === "passkeyList") res = await send({ cmd: "passkeyList", rpId: (d.data && d.data.rpId) || "" });
+      else if (d.cmd === "passkeySave") res = await send(Object.assign({ cmd: "passkeySave" }, d.data || {}));
+      else res = { ok: false, error: "unknown_cmd" };
+    } catch (err) { res = { ok: false, error: String(err) }; }
+    window.postMessage({ dir: "ipw->page", id: d.id, res }, location.origin);
+  });
+
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   // ---------- field discovery / classification ----------
@@ -253,6 +267,7 @@
 
   async function query() {
     const r = await send({ cmd: "credentials", url: location.href });
+    if (!r || !r.ok) { try { console.log("[IPWNM]", location.hostname, `err=${r && r.error} ${r && r.detail || ""}`); } catch (e) {} }   // failures only, never credentials
     if (r && r.ok) { unlocked = !!r.unlocked; items = r.items || []; queried = true; }
     return r;
   }
@@ -421,17 +436,42 @@
     }, 0);
   }
 
-  // ---------- autofill on load (silent, single match) ----------
+  // The username already committed on the page. Two-step logins (Google, etc.) show the chosen
+  // account on the password step; we read it so the RIGHT password fills when a site has several logins.
+  function knownUser() {
+    const users = new Set(items.map((it) => (it.username || "").trim().toLowerCase()).filter(Boolean));
+    if (!users.size) return "";
+    for (const i of document.querySelectorAll("input")) {          // the picked email usually sits in a hidden identifier field
+      const v = (i.value || "").trim().toLowerCase();
+      if (v && users.has(v)) return v;
+    }
+    const txt = ((document.body && document.body.innerText) || "").toLowerCase();   // fallback: the selected-account chip text
+    for (const u of users) if (u.length >= 5 && txt.includes(u)) return u;
+    return "";
+  }
+
+  // ---------- autofill on load (silent) ----------
   async function autofill() {
     const pairs = findPairs();
     if (!pairs.length) return;
     if (!queried) await query();
     if (!unlocked || !items.length || filledOnce) return;
-    if (items.length === 1) {
-      const p = pairs[0];
-      const empty = (!p.user || !p.user.value) && !p.pw.value;
-      if (empty) { fill(p, items[0]); filledOnce = true; }
+
+    const fillable = items.filter((it) => !it.related);           // never silently fill a redirect-only (menu-only) match
+    let candidate = null;
+    if (fillable.length === 1) candidate = fillable[0];
+    else if (fillable.length > 1) {
+      const ku = knownUser();                                      // several logins for this site → pick the one already chosen on the page
+      if (ku) {
+        const m = fillable.filter((it) => (it.username || "").trim().toLowerCase() === ku);
+        if (m.length === 1) candidate = m[0];
+      }
     }
+    if (!candidate) return;
+
+    const p = pairs[0];
+    const empty = (!p.user || !p.user.value) && !p.pw.value;
+    if (empty) { fill(p, candidate); filledOnce = true; }
   }
 
   // Card forms: the badge lives ONLY in the card-number field — one click fills the whole
