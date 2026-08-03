@@ -16,8 +16,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
-      - name: Install MAUI iOS workload (baseline manifests = iOS SDK for Xcode 16.x)
-        run: dotnet workload install maui-ios --skip-manifest-update
+      - name: Install MAUI iOS workload (iOS SDK 18.5.9219 = Xcode 16.4 on this image)
+        run: |
+          printf '{ "microsoft.net.sdk.ios": "18.5.9219/9.0.100" }' > wl-rollback.json
+          dotnet workload install maui-ios --from-rollback-file wl-rollback.json
       - name: Diag
         run: |
           xcodebuild -version
