@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:views="clr-namespace:IPasswrd.Mobile.Views"
+             x:Class="IPasswrd.Mobile.Views.AuthenticatorPage"
+             Title="Коды проверки">
+
+    <ContentPage.ToolbarItems>
+        <ToolbarItem Text="＋" Clicked="OnAdd" />
+    </ContentPage.ToolbarItems>
+
+    <Grid>
+        <CollectionView x:Name="List" SelectionMode="None">
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="views:AuthRow">
+                    <SwipeView>
+                        <SwipeView.RightItems>
+                            <SwipeItems>
+                                <SwipeItem Text="Удалить" BackgroundColor="{StaticResource IpBad}" Invoked="OnDeleteRow" CommandParameter="{Binding .}" />
+                            </SwipeItems>
+                        </SwipeView.RightItems>
+                        <Grid Padding="16,7">
+                            <Border Style="{StaticResource Card}">
+                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="10">
+                                    <Label Text="{Binding Name}" FontSize="15" LineBreakMode="TailTruncation" />
+                                    <Label Grid.Row="1" Text="{Binding Code}" FontSize="30" FontFamily="Menlo" FontAttributes="Bold"
+                                           TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+                                    <Label Grid.Column="1" Grid.RowSpan="2" Text="{Binding Seconds}" VerticalOptions="End"
+                                           Style="{StaticResource Muted}" FontSize="13" />
+                                    <ProgressBar Grid.Row="2" Grid.ColumnSpan="2" Progress="{Binding Progress}" Margin="0,6,0,0" />
+                                </Grid>
+                            </Border>
+                            <Grid.GestureRecognizers>
+                                <TapGestureRecognizer Tapped="OnRowTapped" CommandParameter="{Binding .}" />
+                            </Grid.GestureRecognizers>
+                        </Grid>
+                    </SwipeView>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+            <CollectionView.EmptyView>
+                <VerticalStackLayout Padding="40" Spacing="8" VerticalOptions="Center">
+                    <Label Text="Кодов пока нет" HorizontalOptions="Center" Style="{StaticResource Muted}" />
+                    <Label Text="Нажмите «＋» и отсканируйте QR-код с сайта — код проверки будет считаться прямо на iPhone и синхронизируется с Windows."
+                           HorizontalOptions="Center" HorizontalTextAlignment="Center" Style="{StaticResource Muted}" FontSize="13" />
+                </VerticalStackLayout>
+            </CollectionView.EmptyView>
+        </CollectionView>
+
+        <Border x:Name="Toast" IsVisible="False" InputTransparent="True"
+                VerticalOptions="End" HorizontalOptions="Center" Margin="0,0,0,28"
+                StrokeThickness="0" StrokeShape="RoundRectangle 18" Padding="16,9"
+                BackgroundColor="{AppThemeBinding Dark={StaticResource IpSurface2}, Light={StaticResource IpTextL}}">
+            <Label x:Name="ToastLabel" FontSize="14"
+                   TextColor="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpSurfaceL}}" />
+        </Border>
+    </Grid>
+
+</ContentPage>

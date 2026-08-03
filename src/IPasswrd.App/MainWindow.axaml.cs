@@ -87,6 +87,8 @@ public partial class MainWindow : Window
         ["Пока пусто"] = "Empty for now", ["Нажмите + вверху списка, чтобы добавить запись."] = "Press + at the top of the list to add an item.",
         ["Ключи доступа (passkey) появятся здесь после импорта. Вручную их добавлять не нужно."]
             = "Passkeys will appear here after import. No need to add them manually.",
+        ["Вход по ключу доступа (passkey) настроен для этого аккаунта."] = "Passkey sign-in is set up for this account.",
+        ["Создан "] = "Created ",
         // unlock
         ["Введите мастер-пароль"] = "Enter master password", ["Придумайте мастер-пароль"] = "Create a master password",
         ["Мастер-пароль"] = "Master password", ["Повторите пароль"] = "Repeat password",
@@ -140,6 +142,37 @@ public partial class MainWindow : Window
         ["Новые пароли не совпадают."] = "New passwords don’t match.", ["Текущий пароль неверный."] = "Current password is incorrect.",
         ["Мастер-пароль изменён. Он потребуется при следующем входе."] = "Master password changed. You’ll need it next time you sign in.",
         ["Тема оформления"] = "Theme", ["Тёмное или светлое оформление"] = "Dark or light appearance", ["Тёмная"] = "Dark", ["Светлая"] = "Light",
+        // clipboard auto-clear
+        ["Очистка буфера обмена"] = "Clear clipboard", ["Стирать скопированный пароль через заданное время"] = "Erase a copied password after a set time",
+        ["15 секунд"] = "15 seconds", ["30 секунд"] = "30 seconds", ["1 минута"] = "1 minute", ["2 минуты"] = "2 minutes",
+        ["Код проверки (2FA)"] = "One-time code (2FA)", ["Необязательно — ключ Base32 или ссылка otpauth://"] = "Optional — Base32 key or an otpauth:// link",
+        ["Открыть ключ доступа"] = "Open passkey",
+        // browser extension install
+        ["Расширение для браузера"] = "Browser extension", ["Автозаполнение в Chrome, Edge и других"] = "Autofill in Chrome, Edge and others",
+        ["Установить"] = "Install", ["Скрыть"] = "Hide",
+        ["Открыть папку расширения"] = "Open the extension folder", ["Открыть страницу расширений"] = "Open the extensions page",
+        ["1. Откройте страницу расширений браузера (кнопка ниже)."] = "1. Open the browser's extensions page (button below).",
+        ["2. Включите «Режим разработчика» в правом верхнем углу."] = "2. Turn on “Developer mode” in the top-right corner.",
+        ["3. Нажмите «Загрузить распакованное» и выберите папку расширения (кнопка ниже — путь уже скопирован)."]
+            = "3. Click “Load unpacked” and pick the extension folder (button below — the path is already copied).",
+        ["4. Готово: значок IPasswrd появится на панели браузера."] = "4. Done: the IPasswrd icon appears on the browser toolbar.",
+        ["Связь с браузером настроена. Осталось загрузить папку расширения по шагам выше."]
+            = "The browser link is set up. Now load the extension folder using the steps above.",
+        ["Не найден файл IPasswrd.Host.exe рядом с приложением. Переустановите IPasswrd целиком."]
+            = "IPasswrd.Host.exe was not found next to the app. Reinstall IPasswrd in full.",
+        ["Не найдена папка расширения рядом с приложением."] = "The extension folder was not found next to the app.",
+        ["Не удалось зарегистрировать связь с браузером: "] = "Couldn’t register the browser link: ",
+        // HIBP breach check
+        ["Проверка по базе утечек"] = "Breach database check",
+        ["Have I Been Pwned — крупнейшая база украденных паролей. Проверка k-анонимна: наружу уходят только первые 5 символов SHA-1, сам пароль не передаётся."]
+            = "Have I Been Pwned is the largest database of stolen passwords. The check is k-anonymous: only the first 5 characters of the SHA-1 leave your machine, never the password itself.",
+        ["Проверить пароли"] = "Check passwords", ["Проверяем…"] = "Checking…",
+        ["Проверяем пароли в базе утечек…"] = "Checking passwords against the breach database…",
+        ["Не удалось связаться с базой утечек. Проверьте интернет и попробуйте снова."]
+            = "Couldn’t reach the breach database. Check your connection and try again.",
+        ["Ни один пароль не найден в известных утечках."] = "No password was found in known breaches.",
+        ["Эти пароли найдены в утечках — их стоит сменить:"] = "These passwords appear in breaches — you should change them:",
+        ["в {0} утечках"] = "in {0} breaches",
         ["Язык"] = "Language", ["Язык интерфейса"] = "Interface language",
         ["Синхронизация"] = "Sync", ["Облачная синхронизация — в планах"] = "Cloud sync — planned",
         ["IPasswrd · локальный зашифрованный сейф (AES-256-GCM, Argon2id)"] = "IPasswrd · local encrypted storage (AES-256-GCM, Argon2id)",
@@ -174,6 +207,16 @@ public partial class MainWindow : Window
         ["Ошибка: "] = "Error: ",
         // iCloud sign-in
         ["Войти через iCloud"] = "Sign in with iCloud", ["Google-синхронизация — скоро"] = "Google sync — coming soon",
+        // Google Drive sync
+        ["Подключить Google"] = "Connect Google", ["Как получить ключи?"] = "How to get the keys?",
+        ["Открываю браузер для входа в Google…"] = "Opening the browser to sign in to Google…",
+        ["Заполните Client ID и Client secret."] = "Fill in the Client ID and Client secret.",
+        ["Сначала вставьте Client ID и Client secret от Google."] = "First paste your Google Client ID and Client secret.",
+        ["Не удалось войти в Google: "] = "Couldn’t sign in to Google: ", ["Ошибка Google Drive: "] = "Google Drive error: ",
+        ["В Google уже лежит другой сейф. Сначала решите, какой оставить."]
+            = "A different vault is already in Google Drive. Decide which one to keep first.",
+        ["Вставьте Client ID и Client secret из вашего проекта Google Cloud (тип «Desktop app»). Пароль от Google приложение не увидит — вход идёт в браузере."]
+            = "Paste the Client ID and Client secret from your Google Cloud project (type “Desktop app”). The app never sees your Google password — sign-in happens in the browser.",
         ["Выход"] = "Exit",
         ["Запускать с Windows"] = "Start with Windows", ["Открывать в трее при входе в систему"] = "Open in the tray at sign-in",
         ["Синхронизация сейфа через ваш Apple ID"] = "Sync the storage through your Apple ID",
@@ -379,6 +422,7 @@ public partial class MainWindow : Window
         public Dictionary<string, string>? SiteNames { get; set; }
         public HashSet<string>? KeepAsIs { get; set; }
         public string? SyncProvider { get; set; }
+        public int ClipboardClearSeconds { get; set; } = 30;
     }
 
     private void LoadSettings()
@@ -388,7 +432,7 @@ public partial class MainWindow : Window
             string p = SettingsPath();
             if (!System.IO.File.Exists(p)) return;
             var s = JsonSerializer.Deserialize<AppSettings>(System.IO.File.ReadAllText(p));
-            if (s is not null) { _autolockMinutes = s.AutolockMinutes; _light = s.Light; _lang = string.IsNullOrEmpty(s.Lang) ? "ru" : s.Lang; _syncPath = s.SyncPath; _siteNames = s.SiteNames is null ? new(StringComparer.Ordinal) : new(s.SiteNames, StringComparer.Ordinal); _keepAsIs = s.KeepAsIs is null ? new(StringComparer.Ordinal) : new(s.KeepAsIs, StringComparer.Ordinal); _syncProvider = s.SyncProvider ?? ""; }
+            if (s is not null) { _autolockMinutes = s.AutolockMinutes; _light = s.Light; _lang = string.IsNullOrEmpty(s.Lang) ? "ru" : s.Lang; _syncPath = s.SyncPath; _siteNames = s.SiteNames is null ? new(StringComparer.Ordinal) : new(s.SiteNames, StringComparer.Ordinal); _keepAsIs = s.KeepAsIs is null ? new(StringComparer.Ordinal) : new(s.KeepAsIs, StringComparer.Ordinal); _syncProvider = s.SyncProvider ?? ""; _clipboardClearSeconds = s.ClipboardClearSeconds; }
         }
         catch { /* ignore */ }
     }
@@ -399,7 +443,7 @@ public partial class MainWindow : Window
         {
             string p = SettingsPath();
             System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(p)!);
-            System.IO.File.WriteAllText(p, JsonSerializer.Serialize(new AppSettings { AutolockMinutes = _autolockMinutes, Light = _light, Lang = _lang, SyncPath = _syncPath, SiteNames = _siteNames.Count > 0 ? _siteNames : null, KeepAsIs = _keepAsIs.Count > 0 ? _keepAsIs : null, SyncProvider = string.IsNullOrEmpty(_syncProvider) ? null : _syncProvider }));
+            System.IO.File.WriteAllText(p, JsonSerializer.Serialize(new AppSettings { AutolockMinutes = _autolockMinutes, Light = _light, Lang = _lang, SyncPath = _syncPath, SiteNames = _siteNames.Count > 0 ? _siteNames : null, KeepAsIs = _keepAsIs.Count > 0 ? _keepAsIs : null, SyncProvider = string.IsNullOrEmpty(_syncProvider) ? null : _syncProvider, ClipboardClearSeconds = _clipboardClearSeconds }));
         }
         catch { /* best effort */ }
         SavePrefsToVault();   // mirror the syncable prefs (site names + keep-marks) into the vault
@@ -494,6 +538,7 @@ public partial class MainWindow : Window
         System.IO.File.WriteAllBytes(p, data);
         try { _vaultStamp = System.IO.File.GetLastWriteTimeUtc(p); } catch { _vaultStamp = default; }
         _vaultHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data));
+        GooglePushKick();   // if Google sync is on, mirror this write up to Drive (best-effort, async)
     }
 
     // ================= brute-force lockout =================
@@ -776,6 +821,7 @@ public partial class MainWindow : Window
     {
         _detailTimer?.Stop();
         _vault = null;
+        WipePendingClipboard();
         WipeQuickUnlock();
         SetupUnlock();
     }
@@ -807,6 +853,8 @@ public partial class MainWindow : Window
         _detailTimer.Tick -= OnDetailTick;
         _detailTimer.Tick += OnDetailTick;
         _detailTimer.Start();
+
+        if (_syncProvider == "google") GoogleResumeAfterUnlock();   // start from the freshest Drive copy
     }
 
     private void RenderSidebar()
@@ -814,10 +862,13 @@ public partial class MainWindow : Window
         if (_vault is null) return;
         SectionHost.Children.Clear();
         var all = _vault.Items().ToList();
+        var attachedPk = AttachedPasskeyIds();   // hidden from «Все записи» (represented by their account) → excluded from that count only
 
         foreach (var s in _sections)
         {
-            int count = s.Type == "all" ? all.Count(x => x.Item.Type != "totp" && x.Item.Type != "meta") : all.Count(x => x.Item.Type == s.Type);
+            int count = s.Type == "all"
+                ? all.Count(x => x.Item.Type != "totp" && x.Item.Type != "meta" && !(x.Item.Type == "passkey" && attachedPk.Contains(x.Id)))
+                : all.Count(x => x.Item.Type == s.Type);   // the «Ключи доступа» pill shows every passkey
             bool active = _toolMode is null && _section == s.Type;
             string type = s.Type, label = s.Label;
             SectionHost.Children.Add(SideButton(label, s.Icon, count, active, () =>
@@ -857,9 +908,21 @@ public partial class MainWindow : Window
 
     private void UpdateSyncChip()
     {
-        bool on = !string.IsNullOrEmpty(_syncPath);
-        SyncTitle.Text = on ? "iCloud" : Tr("Локальный сейф");
-        SyncSub.Text = on ? (ICloudEmail() ?? Tr("синхронизация включена")) : Tr("без синхронизации");
+        if (_syncProvider == "google")
+        {
+            SyncTitle.Text = "Google Drive";
+            SyncSub.Text = _gdrive?.Email ?? Tr("синхронизация включена");
+        }
+        else if (_syncProvider == "icloud" || !string.IsNullOrEmpty(_syncPath))
+        {
+            SyncTitle.Text = "iCloud";
+            SyncSub.Text = ICloudEmail() ?? Tr("синхронизация включена");
+        }
+        else
+        {
+            SyncTitle.Text = Tr("Локальный сейф");
+            SyncSub.Text = Tr("без синхронизации");
+        }
     }
 
     private string? _icloudEmailCache;
@@ -941,7 +1004,13 @@ public partial class MainWindow : Window
         string q = (SearchBox.Text ?? "").Trim().ToLowerInvariant();
         IEnumerable<VaultEntry> items = _vault.Items()
             .Where(x => x.Item.Type != "totp" && x.Item.Type != "meta");   // 2FA codes live in the Authenticator; meta is the synced-prefs record
-        if (_section != "all") items = items.Where(x => x.Item.Type == _section);
+        if (_section != "all")
+            items = items.Where(x => x.Item.Type == _section);   // a type section (incl. «Ключи доступа») lists every record of that type
+        else
+        {
+            var attachedPk = AttachedPasskeyIds();   // in «Все записи» an attached passkey is represented by its account tile, so skip it here
+            items = items.Where(x => !(x.Item.Type == "passkey" && attachedPk.Contains(x.Id)));
+        }
 
         // Group accounts that live at the SAME address into one tile; everything else is its own tile.
         var groups = new Dictionary<string, List<VaultEntry>>(StringComparer.Ordinal);
@@ -967,7 +1036,7 @@ public partial class MainWindow : Window
             }
             rows.Add(MakeGroupRow(g, label));
         }
-        rows = rows.OrderBy(r => r.Title, StringComparer.OrdinalIgnoreCase).ToList();
+        rows = rows.OrderByDescending(r => r.Fav).ThenBy(r => r.Title, StringComparer.OrdinalIgnoreCase).ToList();   // favorites first, then A→Z
 
         EntryList.ItemsSource = rows;
         ClearLiveTotps();
@@ -1003,9 +1072,11 @@ public partial class MainWindow : Window
     private string GroupLabel(List<VaultEntry> g)
     {
         var rep = g[0].Item;
-        if (rep.Type == "account")
+        if (rep.Type is "account" or "passkey")   // name after the site only; the login shows as the subtitle
         {
-            string t = GroupTitle(rep.Fields.GetValueOrDefault("url", ""));
+            string url = rep.Fields.GetValueOrDefault("url", "");
+            if (string.IsNullOrWhiteSpace(url)) url = rep.Fields.GetValueOrDefault("rpId", "");
+            string t = GroupTitle(url);
             if (!string.IsNullOrEmpty(t)) return t;
         }
         return string.IsNullOrWhiteSpace(rep.Title) ? TypeLabel(rep.Type) : rep.Title;
@@ -1156,6 +1227,11 @@ public partial class MainWindow : Window
 
         var meta = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 14, 0, 0) };
         meta.Children.Add(SourceBadge());
+        if (item.Type == "account")   // show a passkey chip next to the source badge if this site has one
+        {
+            var pk = MatchingPasskey(item);
+            if (pk is not null) meta.Children.Add(PasskeyChip(pk.Value.item));
+        }
         wrap.Children.Add(meta);
 
         switch (item.Type)
@@ -1264,12 +1340,137 @@ public partial class MainWindow : Window
         return grid;
     }
 
+    // ---------- account ⇄ 2FA / passkey linking (by site brand or login) ----------
+
+    /// <summary>Normalize a URL or issuer name to a comparable brand token, e.g. "https://google.com/" and
+    /// "Google" both → "google".</summary>
+    private static string BrandToken(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "";
+        s = s.Trim().ToLowerInvariant();
+        int p = s.IndexOf("://"); if (p >= 0) s = s[(p + 3)..];
+        if (s.StartsWith("www.")) s = s[4..];
+        int slash = s.IndexOf('/'); if (slash >= 0) s = s[..slash];
+        if (s.Contains('.'))
+        {
+            string rd = Dedup.RegistrableDomain("https://" + s);
+            if (!string.IsNullOrEmpty(rd)) s = rd;
+            var parts = s.Split('.');
+            return parts.Length >= 2 ? parts[^2] : s;
+        }
+        return new string(s.Where(char.IsLetterOrDigit).ToArray());
+    }
+
+    /// <summary>A standalone Authenticator code (type "totp") that unambiguously belongs to this account —
+    /// matched by site brand or by the same login. Returns the secret, or null if none / ambiguous.</summary>
+    /// <summary>Accounts sharing the same registrable domain (used to gate login-less matches).</summary>
+    private int SiteAccountCount(string site)
+    {
+        if (_vault is null || string.IsNullOrEmpty(site)) return 0;
+        return _vault.Items().Count(x => x.Item.Type == "account"
+            && Dedup.RegistrableDomain(x.Item.Fields.GetValueOrDefault("url", "")) == site);
+    }
+
+    private string? FindLinkedTotp(VaultItem account)
+    {
+        if (_vault is null) return null;
+        string brand = BrandToken(account.Fields.GetValueOrDefault("url", ""));
+        if (brand.Length == 0) return null;                // no site brand → can't tell which code belongs here
+        string site = Dedup.RegistrableDomain(account.Fields.GetValueOrDefault("url", ""));
+        string user = account.Fields.GetValueOrDefault("username", "").Trim().ToLowerInvariant();
+        string? strong = null; int strongCount = 0;        // same site AND same login = belongs to this account
+        string? weak = null; int weakCount = 0;            // same site, code carries no login
+        foreach (var e in _vault.Items())
+        {
+            if (e.Item.Type != "totp") continue;
+            string sec = e.Item.Fields.GetValueOrDefault("totp", "");
+            if (string.IsNullOrWhiteSpace(sec)) continue;
+            string issuer = "", acct = "";
+            try { var cfg = Totp.Parse(sec); issuer = cfg.Issuer ?? ""; acct = cfg.Account ?? ""; } catch { /* bare secret */ }
+            string tbrand = BrandToken(issuer);
+            if (tbrand.Length == 0) tbrand = BrandToken(e.Item.Title);
+            if (tbrand.Length == 0 || tbrand != brand) continue;   // the code must be for THIS site — a shared login (same email) is not enough
+            string tuser = e.Item.Fields.GetValueOrDefault("username", "").Trim().ToLowerInvariant();
+            if (tuser.Length == 0) tuser = acct.Trim().ToLowerInvariant();
+            if (user.Length > 0 && tuser.Length > 0 && tuser == user) { strong = sec; strongCount++; }
+            else if (tuser.Length == 0) { weak = sec; weakCount++; }
+            // same site but a different login → another account here → skip
+        }
+        if (strongCount == 1) return strong;                                        // same-site exact login match wins
+        if (strongCount == 0 && weakCount == 1 && SiteAccountCount(site) <= 1) return weak;  // login-less code: only if the site has one account
+        return null;
+    }
+
+    /// <summary>The passkey that belongs to THIS account — matched by login on the same site.
+    /// A login-less passkey is attached only when the site has a single account (otherwise ambiguous).</summary>
+    private (string id, VaultItem item)? MatchingPasskey(VaultItem account)
+    {
+        if (_vault is null) return null;
+        string site = Dedup.RegistrableDomain(account.Fields.GetValueOrDefault("url", ""));
+        if (string.IsNullOrEmpty(site)) return null;
+        string user = account.Fields.GetValueOrDefault("username", "").Trim().ToLowerInvariant();
+        (string id, VaultItem item)? strong = null; int strongCount = 0;
+        (string id, VaultItem item)? weak = null; int weakCount = 0;
+        foreach (var e in _vault.Items())
+        {
+            if (e.Item.Type != "passkey") continue;
+            string rp = e.Item.Fields.GetValueOrDefault("rpId", "");
+            if (string.IsNullOrEmpty(rp)) rp = e.Item.Fields.GetValueOrDefault("url", "");
+            if (string.IsNullOrEmpty(rp)) continue;
+            bool siteMatch = string.Equals(rp, site, StringComparison.OrdinalIgnoreCase)
+                || Dedup.RegistrableDomain(rp.Contains("://") ? rp : "https://" + rp) == site;
+            if (!siteMatch) continue;
+            string puser = e.Item.Fields.GetValueOrDefault("username", "").Trim().ToLowerInvariant();
+            if (user.Length > 0 && puser.Length > 0 && puser == user) { strong = (e.Id, e.Item); strongCount++; }
+            else if (puser.Length == 0) { weak = (e.Id, e.Item); weakCount++; }
+            // puser != user (both present) → a different account's passkey → skip
+        }
+        if (strongCount == 1) return strong;
+        if (strongCount == 0 && weakCount == 1 && SiteAccountCount(site) <= 1) return weak;
+        return null;
+    }
+
+    /// <summary>Ids of passkeys that already belong to an account (surfaced as a chip on that account's card).
+    /// These are hidden from the lists and have no standalone card — the account represents them.</summary>
+    private HashSet<string> AttachedPasskeyIds()
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        if (_vault is null) return set;
+        foreach (var e in _vault.Items())
+        {
+            if (e.Item.Type != "account") continue;
+            var pk = MatchingPasskey(e.Item);
+            if (pk is not null) set.Add(pk.Value.id);
+        }
+        return set;
+    }
+
+    /// <summary>Small brass "Ключ доступа" badge shown on an account that owns a passkey. It's an indicator,
+    /// not a link — the passkey lives inside this card, so there's no separate record to open.</summary>
+    private Control PasskeyChip(VaultItem passkey)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        sp.Children.Add((Control)MakeIcon(IconData("passkey"), 12, Accent, 1.6));
+        sp.Children.Add(new TextBlock { Text = "Ключ доступа", Foreground = Accent, FontSize = 11, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        var chip = new Border
+        {
+            Child = sp, Background = AccentWash, BorderBrush = HairStrong, BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(99), Padding = new Thickness(10, 3), HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        string created = passkey.Fields.GetValueOrDefault("created", "");
+        string tip = Tr("Вход по ключу доступа (passkey) настроен для этого аккаунта.");
+        if (DateTimeOffset.TryParse(created, out var dt)) tip += " " + Tr("Создан ") + dt.LocalDateTime.ToString("d MMM yyyy");
+        ToolTip.SetTip(chip, tip);
+        return chip;
+    }
+
     private void BuildAccountDetail(StackPanel wrap, VaultItem item, string id)
     {
         string user = item.Fields.GetValueOrDefault("username", "");
         string pass = item.Fields.GetValueOrDefault("password", "");
         string url  = item.Fields.GetValueOrDefault("url", "");
         string totp = item.Fields.GetValueOrDefault("totp", "");
+        if (string.IsNullOrWhiteSpace(totp)) totp = FindLinkedTotp(item) ?? "";   // auto-show a standalone 2FA code that matches this account
 
         var st = Auditor.Rate(pass);
         if (!string.IsNullOrEmpty(pass))
@@ -1376,7 +1577,6 @@ public partial class MainWindow : Window
     {
         string user = item.Fields.GetValueOrDefault("username", "");
         string url = item.Fields.GetValueOrDefault("url", "");
-        string device = item.Fields.GetValueOrDefault("device", "");
 
         var hero = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         hero.Children.Add((Control)MakeIcon(IconData("passkey"), 18, Accent, 1.6));
@@ -1387,13 +1587,11 @@ public partial class MainWindow : Window
             CornerRadius = new CornerRadius(10), Padding = new Thickness(13, 11),
         }, 16));
 
-        var rows = new List<Control>();
+        var rows = new List<Control>();   // a passkey card shows only the account and the site — nothing to copy/reveal like a password
         if (!string.IsNullOrEmpty(user))
             rows.Add(FRow("Имя пользователя", new TextBlock { Text = user, Foreground = Text, FontSize = 13.5, TextTrimming = TextTrimming.CharacterEllipsis }, Actions(CopyButton(user))));
         if (!string.IsNullOrWhiteSpace(url))
-            rows.Add(FRow("Сайт", new TextBlock { Text = url, Foreground = Accent, FontSize = 13.5, TextTrimming = TextTrimming.CharacterEllipsis }, Actions(CopyButton(url))));
-        if (!string.IsNullOrEmpty(device))
-            rows.Add(FRow("Устройство", new TextBlock { Text = device, Foreground = Text, FontSize = 13.5 }, Actions(CopyButton(device))));
+            rows.Add(FRow("Веб-сайт", new TextBlock { Text = url, Foreground = Accent, FontSize = 13.5, TextTrimming = TextTrimming.CharacterEllipsis }, Actions(CopyButton(url))));
         if (rows.Count == 0)
             rows.Add(FRow("Имя пользователя", new TextBlock { Text = "—", Foreground = Text3, FontSize = 13.5 }));
 
@@ -1517,6 +1715,7 @@ public partial class MainWindow : Window
         {
             _detailTimer?.Stop();
             _vault = null;
+            WipePendingClipboard();
             WipeQuickUnlock();
             SetupUnlock();
             return;
@@ -1561,6 +1760,9 @@ public partial class MainWindow : Window
             catch (VaultIntegrityException) { /* a foreign vault landed at our path — keep local, do not merge */ }
             catch { /* best effort */ }
         }
+
+        // Google Drive sync (API, not a folder): pull + merge on a slower cadence
+        GooglePullMaybe();
 
         // slide the quick-unlock expiry while the session is alive (once a minute)
         if (_vault is not null && (DateTimeOffset.UtcNow - _quickRefreshedAt).TotalSeconds >= 60)
@@ -1738,7 +1940,9 @@ public partial class MainWindow : Window
         var b = IconButton("copy", Text2, "Копировать");
         b.Click += async (_, _) =>
         {
-            try { if (Clipboard is { } cb) await cb.SetTextAsync(get() ?? ""); } catch { /* ignore */ }
+            string val = get() ?? "";
+            try { if (Clipboard is { } cb) await cb.SetTextAsync(val); } catch { /* ignore */ }
+            ScheduleClipboardClear(val);
             b.Content = MakeIcon(IconData("check"), 15, Ok, 1.7);
             try { await Task.Delay(1100); } catch { /* ignore */ }
             b.Content = MakeIcon(IconData("copy"), 15, Text2, 1.5);
@@ -1797,7 +2001,9 @@ public partial class MainWindow : Window
         copy.Classes.Add("primary");
         copy.Click += async (_, _) =>
         {
-            try { if (Clipboard is { } cb) await cb.SetTextAsync(_genOut!.Text ?? ""); } catch { /* ignore */ }
+            string val = _genOut!.Text ?? "";
+            try { if (Clipboard is { } cb) await cb.SetTextAsync(val); } catch { /* ignore */ }
+            ScheduleClipboardClear(val);
             copy.Content = "Скопировано";
             try { await Task.Delay(1100); } catch { /* ignore */ }
             copy.Content = "Копировать";
@@ -1926,6 +2132,8 @@ public partial class MainWindow : Window
         }
         if (report.Weak.Count == 0 && report.Reused.Count == 0 && total > 0)
             ToolHost.Children.Add(new TextBlock { Text = "Проблем не найдено — все пароли надёжные и уникальные.", Foreground = Ok, FontSize = 13, Margin = new Thickness(2, 20, 0, 0) });
+
+        ToolHost.Children.Add(BuildBreachSection());   // online, opt-in HIBP check
     }
 
     private Control SecChip(string text, IBrush color, IBrush wash)
@@ -2175,7 +2383,11 @@ public partial class MainWindow : Window
 
         g.Children.Add(SetRowControl("Автоблокировка", "Заблокировать сейф после простоя", AutolockControl()));
         g.Children.Add(Hairline());
+        g.Children.Add(SetRowControl("Очистка буфера обмена", "Стирать скопированный пароль через заданное время", ClipboardClearControl()));
+        g.Children.Add(Hairline());
         g.Children.Add(ChangePasswordRow());
+        g.Children.Add(Hairline());
+        g.Children.Add(InstallExtensionRow());
         g.Children.Add(Hairline());
         g.Children.Add(SetRowControl("Тема оформления", "Тёмное или светлое оформление", ThemeControl()));
         g.Children.Add(Hairline());
@@ -2450,31 +2662,57 @@ public partial class MainWindow : Window
     private Control SyncRow()
     {
         var sp = new StackPanel();
-        bool on = !string.IsNullOrEmpty(_syncPath);
+        bool on = !string.IsNullOrEmpty(_syncProvider) || !string.IsNullOrEmpty(_syncPath);
 
         var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         left.Children.Add(new TextBlock { Text = Tr("Синхронизация"), Foreground = Text, FontSize = 13.5, FontWeight = FontWeight.SemiBold });
         if (on)
         {
-            string prov = _syncProvider == "google" ? "Google" : "iCloud";
-            left.Children.Add(new TextBlock { Text = prov + " · " + (ICloudEmail() ?? Tr("подключено")), Foreground = Text3, FontSize = 11.5 });
+            string prov = _syncProvider == "google" ? "Google Drive" : "iCloud";
+            string who = _syncProvider == "google" ? (_gdrive?.Email ?? Tr("подключено")) : (ICloudEmail() ?? Tr("подключено"));
+            left.Children.Add(new TextBlock { Text = prov + " · " + who, Foreground = Text3, FontSize = 11.5 });
         }
         Grid.SetColumn(left, 0);
 
         var status = new TextBlock { IsVisible = false, TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Bad, Margin = new Thickness(17, 0, 17, 12) };
+        var googlePanel = new StackPanel();   // holds the inline Client ID/secret + connect form when expanded
 
         Control right;
         if (on)
         {
             var off = new Button { Content = Tr("Отключить"), Padding = new Thickness(13, 6) };
-            off.Click += (_, _) => { DisableFolderSync(); _syncProvider = ""; SaveSettings(); UpdateSyncChip(); ShowTool("settings"); };
+            bool google = _syncProvider == "google";
+            off.Click += (_, _) =>
+            {
+                if (google) DisableGoogleSync();
+                else { DisableFolderSync(); _syncProvider = ""; SaveSettings(); }
+                UpdateSyncChip(); ShowTool("settings");
+            };
             right = off;
         }
         else
         {
-            // Google — brand button (stub for now)
+            // Google — brand button opens the inline connect form (Client ID/secret → browser sign-in)
             var google = BrandButton(GoogleLogo(16), "Google", Brushes.White, Brush.Parse("#3C4043"), Brush.Parse("#DADCE0"));
-            google.Click += (_, _) => { status.Foreground = Text3; status.Text = Tr("Google-синхронизация — скоро"); status.IsVisible = true; };
+            google.Click += async (_, _) =>
+            {
+                if (EnsureGdrive().IsConfigured)
+                {
+                    // Shipped build carries its own OAuth client → straight to Google sign-in, no key entry.
+                    status.Foreground = Text3; status.Text = Tr("Открываю браузер для входа в Google…"); status.IsVisible = true;
+                    string? err = await EnableGoogleAsync();
+                    if (err is null) { UpdateSyncChip(); ShowTool("settings"); }
+                    else { status.Foreground = Bad; status.Text = err; status.IsVisible = true; }
+                }
+                else
+                {
+                    // Source/dev build with no embedded client → show the Client ID / secret form.
+                    googlePanel.Children.Clear();
+                    if (googlePanel.Tag as string == "open") { googlePanel.Tag = null; return; }
+                    googlePanel.Children.Add(BuildGoogleConnectPanel());
+                    googlePanel.Tag = "open";
+                }
+            };
 
             // iCloud — Apple-style dark button with the cloud logo
             var cloud = (Control)MakeIcon("M7 18a4.5 4.5 0 0 1-.4-9A6 6 0 0 1 18.3 10 4 4 0 0 1 17.5 18H7z", 16, Brush.Parse("#4AA3F0"), 1.6, fill: Brush.Parse("#4AA3F0"));
@@ -2499,6 +2737,7 @@ public partial class MainWindow : Window
         row.Children.Add(left);
         row.Children.Add(right);
         sp.Children.Add(row);
+        sp.Children.Add(googlePanel);
         sp.Children.Add(status);
         return sp;
     }
@@ -2672,6 +2911,8 @@ public partial class MainWindow : Window
                 AddField("url", "Сайт", existing?.Fields.GetValueOrDefault("url"));
                 AddField("username", "Имя пользователя", existing?.Fields.GetValueOrDefault("username"));
                 AddPasswordField(existing?.Fields.GetValueOrDefault("password"));
+                AddField("totp", "Код проверки (2FA)", existing?.Fields.GetValueOrDefault("totp"),
+                    watermark: "Необязательно — ключ Base32 или ссылка otpauth://");
                 break;
         }
 
@@ -2861,9 +3102,11 @@ public partial class MainWindow : Window
             default:
                 SetIf(item, "url", Get("url")); SetIf(item, "username", Get("username"));
                 SetIf(item, "password", Get("password"));
-                // TOTP is managed in the authenticator, not this form — keep any existing secret
-                if (_editExisting is not null && _editExisting.Fields.TryGetValue("totp", out var keepTotp) && !string.IsNullOrEmpty(keepTotp))
-                    item.Fields["totp"] = keepTotp;
+                // 2FA code attached to the account: empty = remove; valid = store; invalid = keep the old one.
+                string totpIn = Get("totp");
+                if (totpIn.Length == 0) { /* cleared → no totp */ }
+                else if (Totp.IsValidSecret(totpIn)) item.Fields["totp"] = totpIn;
+                else if (_editExisting?.Fields.GetValueOrDefault("totp") is { Length: > 0 } oldTotp) item.Fields["totp"] = oldTotp;
                 break;
         }
         string notes = Get("notes");

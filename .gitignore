@@ -9,3 +9,6 @@ tools/ImportCheck/bin/
 tools/ImportCheck/obj/
 install-maui.cmd
 publish-host.cmd
+_to_delete/
+*.lnk
+*.tgz
