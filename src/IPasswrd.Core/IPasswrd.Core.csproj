@@ -4,6 +4,8 @@
     <!-- net9.0 добавлен для мобильного приложения (net9.0-ios, пока Hot Restart не дружит с net10);
          Windows-приложение и тесты по-прежнему берут net10.0. -->
     <TargetFrameworks>net10.0;net9.0</TargetFrameworks>
+    <!-- CI iOS-сборка идёт на SDK 9, который не умеет net10: -p:IpwNet9Only=true -->
+    <TargetFrameworks Condition="'$(IpwNet9Only)'=='true'">net9.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
