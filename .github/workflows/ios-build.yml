@@ -34,6 +34,7 @@ jobs:
           -f net9.0-ios -c Release
           -p:RuntimeIdentifier=ios-arm64
           -p:EnableCodeSigning=false
+          -p:TargetFrameworks=net9.0
       - name: Pack IPA
         run: |
           APP=$(find bin/Release/net9.0-ios -name "*.app" -type d | head -1)
