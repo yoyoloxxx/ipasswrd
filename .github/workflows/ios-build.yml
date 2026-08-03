@@ -24,20 +24,21 @@ jobs:
           echo "Selected: $X (donor for stripped parts: $FULL)"
           for P in MacOSX iPhoneOS iPhoneSimulator; do
             SDKS="$X/Contents/Developer/Platforms/$P.platform/Developer/SDKs"
-            if [ ! -e "$SDKS/$P.sdk" ]; then
+            echo "--- $P before:"; ls -la "$SDKS" 2>/dev/null || true
+            if [ ! -f "$SDKS/$P.sdk/SDKSettings.plist" ]; then
               REAL="$(readlink -f "$FULL/Contents/Developer/Platforms/$P.platform/Developer/SDKs/$P.sdk" || true)"
-              if [ -n "$REAL" ] && [ -d "$REAL" ]; then
-                echo "Linking $P.sdk -> $REAL (real dir from donor)"
+              if [ -n "$REAL" ] && [ -f "$REAL/SDKSettings.plist" ]; then
+                echo "Replacing hollow $P.sdk with donor: $REAL"
+                sudo rm -rf "$SDKS/$P.sdk"
                 sudo mkdir -p "$SDKS"
                 sudo ln -sfn "$REAL" "$SDKS/$P.sdk"
               else
-                echo "Donor has no $P.sdk either; grafting whole platform"
-                sudo rm -rf "$X/Contents/Developer/Platforms/$P.platform"
-                sudo ln -sfn "$FULL/Contents/Developer/Platforms/$P.platform" "$X/Contents/Developer/Platforms/$P.platform"
+                echo "WARN: donor has no valid $P.sdk (REAL=$REAL)"
               fi
             fi
           done
-          echo "Verify:"; ls -laL "$X/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" | head -3
+          xcodebuild -version
+          xcodebuild -showsdks || true
           sudo xcode-select -s "$X/Contents/Developer"
           xcodebuild -version
       - name: Install MAUI iOS workload
