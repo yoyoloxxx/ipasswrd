@@ -16,12 +16,21 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
-      - name: Select Xcode 26.5 (required by iOS SDK 26.5)
+      - name: Select Xcode 26.5 and graft stripped platforms
         run: |
-          echo "Available Xcodes:"; ls -d /Applications/Xcode*.app
           X="$(ls -d /Applications/Xcode_26.5*.app 2>/dev/null | sort -V | tail -1)"
           if [ -z "$X" ]; then X="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"; fi
-          echo "Selected: $X"
+          FULL="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          echo "Selected: $X (donor for stripped parts: $FULL)"
+          for P in MacOSX iPhoneOS iPhoneSimulator; do
+            TARGET="$X/Contents/Developer/Platforms/$P.platform"
+            if [ ! -e "$TARGET/Developer/SDKs" ] || [ -z "$(ls -A "$TARGET/Developer/SDKs" 2>/dev/null)" ]; then
+              echo "Grafting $P.platform from donor"
+              sudo rm -rf "$TARGET"
+              sudo ln -sfn "$FULL/Contents/Developer/Platforms/$P.platform" "$TARGET"
+            fi
+          done
+          ls -la "$X/Contents/Developer/Platforms/"
           sudo xcode-select -s "$X/Contents/Developer"
           xcodebuild -version
       - name: Install MAUI iOS workload
