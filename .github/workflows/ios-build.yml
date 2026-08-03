@@ -25,18 +25,19 @@ jobs:
           for P in MacOSX iPhoneOS iPhoneSimulator; do
             SDKS="$X/Contents/Developer/Platforms/$P.platform/Developer/SDKs"
             if [ ! -e "$SDKS/$P.sdk" ]; then
-              V="$(ls -d "$SDKS"/$P*.sdk 2>/dev/null | sort -V | tail -1)"
-              if [ -n "$V" ]; then
-                echo "Symlink $P.sdk -> $V"
-                sudo ln -sfn "$V" "$SDKS/$P.sdk"
+              REAL="$(readlink -f "$FULL/Contents/Developer/Platforms/$P.platform/Developer/SDKs/$P.sdk" || true)"
+              if [ -n "$REAL" ] && [ -d "$REAL" ]; then
+                echo "Linking $P.sdk -> $REAL (real dir from donor)"
+                sudo mkdir -p "$SDKS"
+                sudo ln -sfn "$REAL" "$SDKS/$P.sdk"
               else
-                echo "Grafting whole $P.platform from donor"
+                echo "Donor has no $P.sdk either; grafting whole platform"
                 sudo rm -rf "$X/Contents/Developer/Platforms/$P.platform"
                 sudo ln -sfn "$FULL/Contents/Developer/Platforms/$P.platform" "$X/Contents/Developer/Platforms/$P.platform"
               fi
             fi
           done
-          echo "MacOSX SDKs:"; ls -la "$X/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/"
+          echo "Verify:"; ls -laL "$X/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" | head -3
           sudo xcode-select -s "$X/Contents/Developer"
           xcodebuild -version
       - name: Install MAUI iOS workload
