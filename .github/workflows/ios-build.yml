@@ -23,14 +23,20 @@ jobs:
           FULL="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
           echo "Selected: $X (donor for stripped parts: $FULL)"
           for P in MacOSX iPhoneOS iPhoneSimulator; do
-            TARGET="$X/Contents/Developer/Platforms/$P.platform"
-            if [ ! -e "$TARGET/Developer/SDKs" ] || [ -z "$(ls -A "$TARGET/Developer/SDKs" 2>/dev/null)" ]; then
-              echo "Grafting $P.platform from donor"
-              sudo rm -rf "$TARGET"
-              sudo ln -sfn "$FULL/Contents/Developer/Platforms/$P.platform" "$TARGET"
+            SDKS="$X/Contents/Developer/Platforms/$P.platform/Developer/SDKs"
+            if [ ! -e "$SDKS/$P.sdk" ]; then
+              V="$(ls -d "$SDKS"/$P*.sdk 2>/dev/null | sort -V | tail -1)"
+              if [ -n "$V" ]; then
+                echo "Symlink $P.sdk -> $V"
+                sudo ln -sfn "$V" "$SDKS/$P.sdk"
+              else
+                echo "Grafting whole $P.platform from donor"
+                sudo rm -rf "$X/Contents/Developer/Platforms/$P.platform"
+                sudo ln -sfn "$FULL/Contents/Developer/Platforms/$P.platform" "$X/Contents/Developer/Platforms/$P.platform"
+              fi
             fi
           done
-          ls -la "$X/Contents/Developer/Platforms/"
+          echo "MacOSX SDKs:"; ls -la "$X/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/"
           sudo xcode-select -s "$X/Contents/Developer"
           xcodebuild -version
       - name: Install MAUI iOS workload
