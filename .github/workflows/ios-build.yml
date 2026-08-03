@@ -8,6 +8,10 @@ on:
       - 'src/IPasswrd.Core/**'
       - '.github/workflows/ios-build.yml'
 
+defaults:
+  run:
+    working-directory: src/IPasswrd.Mobile
+
 jobs:
   build:
     runs-on: macos-15
@@ -16,23 +20,23 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
-      - name: Install MAUI iOS workload (iOS SDK 18.5.9219 = Xcode 16.4 on this image)
+      - name: Diag (SDK must be 9.x thanks to global.json)
+        run: |
+          dotnet --version
+          xcodebuild -version
+      - name: Install MAUI iOS workload (iOS SDK 18.5.9219 = Xcode 16.4)
         run: |
           printf '{ "microsoft.net.sdk.ios": "18.5.9219/9.0.100" }' > wl-rollback.json
           dotnet workload install maui-ios --from-rollback-file wl-rollback.json
-      - name: Diag
-        run: |
-          xcodebuild -version
-          dotnet workload list
       - name: Build unsigned (Release, ios-arm64)
         run: >
-          dotnet publish src/IPasswrd.Mobile/IPasswrd.Mobile.csproj
+          dotnet publish IPasswrd.Mobile.csproj
           -f net9.0-ios -c Release
           -p:RuntimeIdentifier=ios-arm64
           -p:EnableCodeSigning=false
       - name: Pack IPA
         run: |
-          APP=$(find src/IPasswrd.Mobile/bin/Release/net9.0-ios -name "*.app" -type d | head -1)
+          APP=$(find bin/Release/net9.0-ios -name "*.app" -type d | head -1)
           echo "app bundle: $APP"
           mkdir -p Payload out
           cp -R "$APP" Payload/
@@ -40,4 +44,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: IPasswrd-unsigned-ipa
-          path: out/IPasswrd-unsigned.ipa
+          path: src/IPasswrd.Mobile/out/IPasswrd-unsigned.ipa
