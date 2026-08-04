@@ -163,6 +163,21 @@ public sealed class AppState
     /// </summary>
     private async Task<byte[]?> PullLatestAsync()
     {
+        // Google Drive имеет приоритет, если вход выполнен (тот же файл, что на ПК).
+        if (GoogleDrive.IsConnected)
+        {
+            try
+            {
+                byte[]? g = await GoogleDrive.PullAsync();
+                if (g is { Length: > 0 })
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(LocalVaultPath)!);
+                    File.WriteAllBytes(LocalVaultPath, g);
+                    return g;
+                }
+            }
+            catch { /* оффлайн/сбой → откат к локальному */ }
+        }
         if (Svc.External.IsConnected)
         {
             byte[]? ext = await Svc.External.ReadAsync();
@@ -277,28 +292,51 @@ public sealed class AppState
 
     private int _syncBusy;
 
-    /// <summary>Слить изменения с файлом в iCloud Drive (LWW по записям) и дописать обратно.</summary>
+    /// <summary>Активный бэкенд синхронизации: Google Drive (приоритет) или файл в iCloud.</summary>
+    private bool GoogleActive => GoogleDrive.IsConnected;
+    public bool AnySyncConnected => GoogleDrive.IsConnected || Svc.External.IsConnected;
+
+    private async Task<byte[]?> RemoteReadAsync() =>
+        GoogleActive ? await GoogleDrive.PullAsync() : await Svc.External.ReadAsync();
+
+    private async Task<bool> RemoteWriteAsync(byte[] data)
+    {
+        if (GoogleActive) { try { await GoogleDrive.PushAsync(data); return true; } catch { return false; } }
+        return await Svc.External.WriteAsync(data);
+    }
+
+    /// <summary>Слить изменения с внешним сейфом (Google Drive или iCloud) поэлементно и дописать обратно.</summary>
     public async Task SyncAsync()
     {
         Vault? v = _vault;
-        if (v is null || !Svc.External.IsConnected) return;
+        if (v is null || !AnySyncConnected) return;
         if (Interlocked.Exchange(ref _syncBusy, 1) == 1) return;
+        bool google = GoogleActive;
+        string where = google ? "Google" : "iCloud";
         try
         {
-            byte[]? ext = await Svc.External.ReadAsync();
+            byte[]? ext;
+            try { ext = await RemoteReadAsync(); }
+            catch (Exception)
+            {
+                LastSyncStatus = $"Нет связи с {where}.";
+                SyncProblem?.Invoke(LastSyncStatus);
+                return;
+            }
+
             if (ext is { Length: > 0 })
             {
                 int changed;
                 try { changed = v.MergeFrom(ext); }
                 catch (VaultIntegrityException)
                 {
-                    LastSyncStatus = "В iCloud лежит другой сейф. Сначала решите, какой оставить.";
+                    LastSyncStatus = $"В {where} лежит другой сейф. Сначала решите, какой оставить.";
                     SyncProblem?.Invoke(LastSyncStatus);
                     return;
                 }
                 catch (Exception)
                 {
-                    LastSyncStatus = "Файл в iCloud не читается.";
+                    LastSyncStatus = $"Файл в {where} не читается.";
                     SyncProblem?.Invoke(LastSyncStatus);
                     return;
                 }
@@ -313,10 +351,8 @@ public sealed class AppState
             byte[] mine = v.Serialize();
             if (ext is null || !mine.AsSpan().SequenceEqual(ext))
             {
-                bool ok = await Svc.External.WriteAsync(mine);
-                LastSyncStatus = ok
-                    ? $"Синхронизировано {DateTime.Now:HH:mm}"
-                    : "Не удалось записать файл в iCloud.";
+                bool ok = await RemoteWriteAsync(mine);
+                LastSyncStatus = ok ? $"Синхронизировано {DateTime.Now:HH:mm}" : $"Не удалось записать в {where}.";
                 if (!ok) SyncProblem?.Invoke(LastSyncStatus);
             }
             else
@@ -326,6 +362,32 @@ public sealed class AppState
         }
         finally { Interlocked.Exchange(ref _syncBusy, 0); }
     }
+
+    /// <summary>Войти в Google и связать сейф с Drive. Возвращает email; бросает при ошибке.
+    /// VaultIntegrityException — на Drive лежит другой сейф.</summary>
+    public async Task<string?> ConnectGoogleAsync()
+    {
+        string? email = await GoogleDrive.SignInAsync();     // системное окно согласия
+        Svc.External.Disconnect();                            // Google становится единственным каналом
+
+        Vault? v = _vault;
+        if (v is not null)
+        {
+            byte[]? remote = await GoogleDrive.PullAsync();
+            if (remote is { Length: > 0 })
+            {
+                v.MergeFrom(remote);                          // может бросить VaultIntegrityException
+                File.WriteAllBytes(LocalVaultPath, v.Serialize());
+                ShareForAutoFill();
+                MainThread.BeginInvokeOnMainThread(() => VaultChanged?.Invoke());
+            }
+            await GoogleDrive.PushAsync(v.Serialize());
+            LastSyncStatus = $"Синхронизировано {DateTime.Now:HH:mm}";
+        }
+        return email;
+    }
+
+    public void DisconnectGoogle() => GoogleDrive.SignOut();
 
     // ================= смена мастер-пароля =================
 

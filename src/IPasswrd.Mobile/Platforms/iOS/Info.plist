@@ -37,6 +37,17 @@
 	<string>Face ID открывает сейф без ввода мастер-пароля.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.yoyoloxxx.ipasswrd.google</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.520945928883-chesjggkssgjurt88p5pv0pbvqta0rf1</string>
+			</array>
+		</dict>
+	</array>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
