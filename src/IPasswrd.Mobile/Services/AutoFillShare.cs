@@ -62,27 +62,62 @@ public static class AutoFillShare
         catch { /* автозаполнение — необязательный путь */ }
     }
 
-    /// <summary>Обновить подсказки над клавиатурой: домен + логин для каждого аккаунта.</summary>
+    /// <summary>Обновить подсказки над клавиатурой: логины (домен + имя) и,
+    /// на iOS 18+, одноразовые коды проверки для полей кода.</summary>
     public static void UpdateIdentities(Vault v)
     {
         try
         {
-            var ids = new List<ASPasswordCredentialIdentity>();
-            foreach (VaultEntry e in v.Items())
+            var entries = v.Items().ToList();
+            var pwd = new List<ASPasswordCredentialIdentity>();
+            var all = new List<IASCredentialIdentity>();
+            bool otcSupported = OperatingSystem.IsIOSVersionAtLeast(18);
+
+            foreach (VaultEntry e in entries)
             {
                 if (e.Item.Type != "account") continue;
                 string user = e.Item.Fields.GetValueOrDefault("username", "");
                 string dom = Dedup.RegistrableDomain(e.Item.Fields.GetValueOrDefault("url", ""));
                 if (user.Length == 0 || dom.Length == 0) continue;
-                ids.Add(new ASPasswordCredentialIdentity(
-                    new ASCredentialServiceIdentifier(dom, ASCredentialServiceIdentifierType.Domain),
-                    user, e.Id));
+
+                var svc = new ASCredentialServiceIdentifier(dom, ASCredentialServiceIdentifierType.Domain);
+                var pid = new ASPasswordCredentialIdentity(svc, user, e.Id);
+                pwd.Add(pid);
+                all.Add(pid);
+
+                // Код проверки прямо в записи аккаунта → подсказка кода для этого домена.
+                if (otcSupported && e.Item.Fields.GetValueOrDefault("totp", "").Trim().Length > 0)
+                    all.Add(new ASOneTimeCodeCredentialIdentity(svc, user, e.Id));
+            }
+
+            if (otcSupported)
+            {
+                // Отдельные записи из «Кодов»: домены берём у подходящих аккаунтов (google ↔ google.com).
+                var accounts = entries.Where(x => x.Item.Type == "account").ToList();
+                foreach (VaultEntry t in entries)
+                {
+                    if (t.Item.Type != "totp") continue;
+                    if (t.Item.Fields.GetValueOrDefault("totp", "").Trim().Length == 0) continue;
+                    var doms = accounts
+                        .Where(a => TotpMeta.MatchesSite(t.Item, SiteGroups.KeyFor(a.Item)))
+                        .Select(a => Dedup.RegistrableDomain(a.Item.Fields.GetValueOrDefault("url", "")))
+                        .Where(d => d.Length > 0)
+                        .Distinct(StringComparer.Ordinal);
+                    string label = t.Item.Title.Length > 0 ? t.Item.Title : "код";
+                    foreach (string dom in doms)
+                        all.Add(new ASOneTimeCodeCredentialIdentity(
+                            new ASCredentialServiceIdentifier(dom, ASCredentialServiceIdentifierType.Domain),
+                            label, t.Id));
+                }
             }
 
             ASCredentialIdentityStore.SharedStore.GetCredentialIdentityStoreState(state =>
             {
                 if (state is null || !state.Enabled) return;
-                ASCredentialIdentityStore.SharedStore.ReplaceCredentialIdentities(ids.ToArray(), (ok, err) => { });
+                if (OperatingSystem.IsIOSVersionAtLeast(17))
+                    ASCredentialIdentityStore.SharedStore.ReplaceCredentialIdentityEntries(all.ToArray(), (ok, err) => { });
+                else
+                    ASCredentialIdentityStore.SharedStore.ReplaceCredentialIdentities(pwd.ToArray(), (ok, err) => { });
             });
         }
         catch { /* стор может быть недоступен, это не критично */ }
