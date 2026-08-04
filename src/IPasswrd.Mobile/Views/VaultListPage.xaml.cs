@@ -34,6 +34,10 @@ public partial class VaultListPage : ContentPage
         InitializeComponent();
         BuildChips();
         Svc.State.VaultChanged += OnVaultChanged;
+
+        // Клавиатура поиска закрывается по «Найти» и при прокрутке списка.
+        Search.SearchButtonPressed += (_, _) => Search.Unfocus();
+        List.Scrolled += (_, _) => { if (Search.IsFocused) Search.Unfocus(); };
     }
 
     private void OnVaultChanged() => MainThread.BeginInvokeOnMainThread(Reload);
