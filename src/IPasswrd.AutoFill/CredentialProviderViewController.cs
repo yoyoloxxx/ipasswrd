@@ -24,6 +24,7 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
 
     private ASCredentialServiceIdentifier[] _services = Array.Empty<ASCredentialServiceIdentifier>();
     private string? _targetRecordId;
+    private bool _otcMode;   // режим «одноразовые коды» (iOS 18+): подставляем код проверки, не пароль
     private Vault? _vault;
     private readonly List<Row> _rows = new();
     private UITableView? _table;
@@ -39,6 +40,14 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
         OpenVaultThenShow();
     }
 
+    /// <summary>Список одноразовых кодов (iOS 18+): поле кода на сайте → наши коды проверки.</summary>
+    public override void PrepareOneTimeCodeCredentialList(ASCredentialServiceIdentifier[] serviceIdentifiers)
+    {
+        _otcMode = true;
+        _services = serviceIdentifiers ?? Array.Empty<ASCredentialServiceIdentifier>();
+        OpenVaultThenShow();
+    }
+
     public override void PrepareInterfaceToProvideCredential(ASPasswordCredentialIdentity credentialIdentity)
     {
         _targetRecordId = credentialIdentity.RecordIdentifier;
@@ -48,9 +57,27 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
         OpenVaultThenShow();
     }
 
+    /// <summary>Новый вход (iOS 17+): и пароли, и одноразовые коды.</summary>
+    public override void PrepareInterfaceToProvideCredential(IASCredentialRequest credentialRequest)
+    {
+        _otcMode = credentialRequest.Type == ASCredentialRequestType.OneTimeCode;
+        _targetRecordId = credentialRequest.CredentialIdentity?.RecordIdentifier;
+        ASCredentialServiceIdentifier? svc = credentialRequest.CredentialIdentity?.ServiceIdentifier;
+        _services = svc is null ? Array.Empty<ASCredentialServiceIdentifier>() : new[] { svc };
+        OpenVaultThenShow();
+    }
+
     /// <summary>Тихий путь для подсказки над клавиатурой: без UI. Получается, только если
     /// сессионный ключ ещё в Keychain; иначе iOS сам откроет наш интерфейс.</summary>
-    public override void ProvideCredentialWithoutUserInteraction(ASPasswordCredentialIdentity credentialIdentity)
+    public override void ProvideCredentialWithoutUserInteraction(ASPasswordCredentialIdentity credentialIdentity) =>
+        SilentProvide(credentialIdentity.RecordIdentifier, otc: false);
+
+    /// <summary>Тихий путь нового образца (iOS 17+): пароль или одноразовый код.</summary>
+    public override void ProvideCredentialWithoutUserInteraction(IASCredentialRequest credentialRequest) =>
+        SilentProvide(credentialRequest.CredentialIdentity?.RecordIdentifier,
+                      credentialRequest.Type == ASCredentialRequestType.OneTimeCode);
+
+    private void SilentProvide(string? id, bool otc)
     {
         try
         {
@@ -59,13 +86,20 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
             if (blob is null || dek is null) { CancelWith(ASExtensionErrorCode.UserInteractionRequired); return; }
 
             Vault v = Vault.UnlockWithSessionKey(blob, dek);
-            string? id = credentialIdentity.RecordIdentifier;
             VaultItem? it = null;
             if (!string.IsNullOrEmpty(id))
             {
                 try { it = v.Get(id!); } catch { it = null; }
             }
             if (it is null) { CancelWith(ASExtensionErrorCode.CredentialIdentityNotFound); return; }
+
+            if (otc)
+            {
+                string? code = GenerateCode(it.Fields.GetValueOrDefault("totp", ""));
+                if (code is null) { CancelWith(ASExtensionErrorCode.CredentialIdentityNotFound); return; }
+                CompleteOtc(code);
+                return;
+            }
 
             CopyTotpIfAny(it);
             ExtensionContext!.CompleteRequest(
@@ -76,6 +110,25 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
         {
             CancelWith(ASExtensionErrorCode.UserInteractionRequired);
         }
+    }
+
+    private void CompleteOtc(string code)
+    {
+        if (OperatingSystem.IsIOSVersionAtLeast(18))
+            ExtensionContext!.CompleteOneTimeCodeRequest(new ASOneTimeCodeCredential(code), null);
+        else
+            CancelWith(ASExtensionErrorCode.Failed);
+    }
+
+    private static string? GenerateCode(string secretOrUri)
+    {
+        if (string.IsNullOrWhiteSpace(secretOrUri)) return null;
+        try
+        {
+            TotpConfig cfg = Totp.Parse(secretOrUri);
+            return Totp.Generate(cfg.Secret, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), cfg.Digits, cfg.Period, cfg.Algorithm);
+        }
+        catch { return null; }
     }
 
     /// <summary>Экран после включения IPasswrd в Настройках.</summary>
@@ -205,6 +258,30 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
         {
             foreach (VaultEntry e in _vault.Items())
             {
+                if (_otcMode)
+                {
+                    // Режим одноразовых кодов: любая запись с кодом проверки.
+                    string totp = e.Item.Fields.GetValueOrDefault("totp", "");
+                    if (totp.Length == 0 || e.Item.Type == "meta") continue;
+                    string user2 = e.Item.Fields.GetValueOrDefault("username", "");
+                    string url2 = e.Item.Fields.GetValueOrDefault("url", "");
+                    string dom2 = Dedup.RegistrableDomain(url2);
+                    string site2 = dom2.Length > 0 ? dom2 : e.Item.Title;
+                    bool match2 = dom2.Length > 0
+                        ? domains.Contains(dom2)
+                        : domains.Any(d => LooseMatch(e.Item.Title, d));
+                    _rows.Add(new Row
+                    {
+                        Id = e.Id,
+                        User = user2.Length > 0 ? user2 : (e.Item.Title.Length > 0 ? e.Item.Title : "(код)"),
+                        Password = "",
+                        Site = site2,
+                        Totp = totp,
+                        Match = match2,
+                    });
+                    continue;
+                }
+
                 if (!FillTypes.Contains(e.Item.Type)) continue;
                 string user = e.Item.Fields.GetValueOrDefault("username", "");
                 string pass = e.Item.Fields.GetValueOrDefault("password", "");
@@ -250,11 +327,31 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
 
     private void Complete(Row r)
     {
+        if (_otcMode)
+        {
+            string? code = GenerateCode(r.Totp);
+            if (code is null) { CancelWith(ASExtensionErrorCode.Failed); return; }
+            CompleteOtc(code);
+            return;
+        }
+
         if (_vault is not null)
         {
             try { CopyTotpIfAny(_vault.Get(r.Id)); } catch { }
         }
         ExtensionContext!.CompleteRequest(new ASPasswordCredential(r.User == "(без логина)" ? "" : r.User, r.Password), null);
+    }
+
+    /// <summary>«google» ↔ «google.com»: равенство базы всегда, подстрока — от 5 символов.</summary>
+    private static bool LooseMatch(string title, string domain)
+    {
+        static string Norm(string s) => new((s ?? "").ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+        string t = Norm(title);
+        int dot = domain.IndexOf('.');
+        string b = Norm(dot > 0 ? domain[..dot] : domain);
+        if (t.Length == 0 || b.Length == 0) return false;
+        if (t == b) return true;
+        return t.Length >= 5 && b.Length >= 5 && (t.Contains(b) || b.Contains(t));
     }
 
     private static void CopyTotpIfAny(VaultItem it)
@@ -379,7 +476,9 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
             cell.TextLabel!.Text = r.User;
             if (cell.DetailTextLabel is not null)
             {
-                cell.DetailTextLabel.Text = r.Site + (r.Totp.Length > 0 ? "  ·  код скопируется" : "");
+                cell.DetailTextLabel.Text = _c._otcMode
+                    ? r.Site + "  ·  подставить код"
+                    : r.Site + (r.Totp.Length > 0 ? "  ·  код скопируется" : "");
                 cell.DetailTextLabel.TextColor = UIColor.SecondaryLabel;
             }
             return cell;
