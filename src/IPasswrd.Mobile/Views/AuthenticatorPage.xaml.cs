@@ -9,6 +9,8 @@ public sealed class AuthRow : INotifyPropertyChanged
 {
     public string Id { get; init; } = "";
     public string Name { get; init; } = "";
+    public string Sub { get; init; } = "";
+    public bool HasSub => Sub.Length > 0;
     public string Raw { get; init; } = "";
     public bool Standalone { get; init; }
     public TotpConfig? Cfg { get; init; }
@@ -62,16 +64,16 @@ public partial class AuthenticatorPage : ContentPage
         Vault? v = Svc.State.Vault;
         if (v is null) return;
 
-        _rows.Clear();
-        IEnumerable<VaultEntry> withTotp;
-        try
-        {
-            withTotp = v.Items()
-                .Where(x => x.Item.Fields.TryGetValue("totp", out var t) && !string.IsNullOrWhiteSpace(t))
-                .OrderBy(x => x.Item.Title, StringComparer.CurrentCultureIgnoreCase);
-        }
+        List<VaultEntry> all;
+        try { all = v.Items().ToList(); }
         catch (Exception) { return; }
 
+        var withTotp = all
+            .Where(x => x.Item.Fields.TryGetValue("totp", out var t) && !string.IsNullOrWhiteSpace(t))
+            .OrderBy(x => x.Item.Title, StringComparer.CurrentCultureIgnoreCase);
+        List<VaultEntry> accounts = all.Where(x => x.Item.Type == "account").ToList();
+
+        _rows.Clear();
         foreach (VaultEntry e in withTotp)
         {
             string raw = e.Item.Fields["totp"];
@@ -82,10 +84,32 @@ public partial class AuthenticatorPage : ContentPage
             if (cfg is not null && string.IsNullOrWhiteSpace(name))
                 name = cfg.Issuer.Length > 0 ? cfg.Issuer : cfg.Label;
 
+            // Чей это код: аккаунт из otpauth://, логин записи-аккаунта,
+            // либо логин единственного подходящего аккаунта этого сайта.
+            string sub = "";
+            if (e.Item.Type == "account")
+                sub = e.Item.Fields.GetValueOrDefault("username", "");
+            else
+            {
+                sub = (cfg?.Account ?? "").Trim();
+                if (sub.Length == 0)
+                {
+                    var logins = accounts
+                        .Where(a => TotpMeta.MatchesSite(e.Item, SiteGroups.KeyFor(a.Item)))
+                        .Select(a => a.Item.Fields.GetValueOrDefault("username", "").Trim())
+                        .Where(u => u.Length > 0)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    if (logins.Count == 1) sub = logins[0];
+                }
+            }
+            if (sub.Equals(name, StringComparison.OrdinalIgnoreCase)) sub = "";
+
             _rows.Add(new AuthRow
             {
                 Id = e.Id,
                 Name = name.Length > 0 ? name : "(без названия)",
+                Sub = sub,
                 Raw = raw,
                 Standalone = e.Item.Type == "totp",
                 Cfg = cfg,
@@ -185,9 +209,15 @@ public partial class AuthenticatorPage : ContentPage
         await ShowToastAsync($"{r.Name}: код скопирован");
     }
 
-    private async void OnDeleteRow(object? sender, EventArgs e)
+    private async void OnDeleteTapped(object? sender, TappedEventArgs e)
     {
-        if (sender is not SwipeItem si || si.CommandParameter is not AuthRow r) return;
+        if (e.Parameter is not AuthRow r) return;
+
+        // Закрываем открытый свайп, чтобы диалог не висел над красной кнопкой.
+        Element? el = sender as Element;
+        while (el is not null && el is not SwipeView) el = el.Parent;
+        (el as SwipeView)?.Close();
+
         Vault? v = Svc.State.Vault;
         if (v is null) return;
 
@@ -198,14 +228,16 @@ public partial class AuthenticatorPage : ContentPage
             return;
         }
 
+        string who = r.HasSub ? $"{r.Name} ({r.Sub})" : r.Name;
         bool ok = await DisplayAlert("Удалить код?",
-            $"{r.Name}\n\nУбедитесь, что двухэтапная проверка на сайте отключена или перенесена, иначе можно потерять доступ.",
+            $"{who}\n\nУбедитесь, что двухэтапная проверка на сайте отключена или перенесена, иначе можно потерять доступ.",
             "Удалить", "Отмена");
         if (!ok) return;
 
         try { v.Delete(r.Id); } catch (Exception) { }
         await Svc.State.SaveAsync();
         Reload();
+        await ShowToastAsync("Код удалён");
     }
 
     // ================= toast =================

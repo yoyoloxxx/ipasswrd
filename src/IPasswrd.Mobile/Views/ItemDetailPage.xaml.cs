@@ -10,15 +10,12 @@ public partial class ItemDetailPage : ContentPage
     private string _id;
     private VaultItem? _item;
     private IDispatcherTimer? _timer;
-    private Label? _totpCode;
-    private Label? _totpSeconds;
-    private ProgressBar? _totpBar;
-    private TotpConfig? _totp;
+    private readonly List<Action> _totpTicks = new();
 
     public ItemDetailPage(string id) : this(new List<string> { id }, 0) { }
 
     /// <summary>Карточка сайта: ids — все записи этого сайта по порядку, startIndex — с какой начать.
-    /// Когда записей несколько, сверху появляются стрелки ◀ ▶ для переключения.</summary>
+    /// Когда записей несколько, работают стрелки ◀ ▶ и свайпы влево/вправо.</summary>
     public ItemDetailPage(IEnumerable<string> ids, int startIndex)
     {
         InitializeComponent();
@@ -26,6 +23,20 @@ public partial class ItemDetailPage : ContentPage
         if (_ids.Count == 0) _ids.Add("");
         _index = Math.Clamp(startIndex, 0, _ids.Count - 1);
         _id = _ids[_index];
+
+        // Свайп влево/вправо переключает аккаунты (в дополнение к стрелкам).
+        AttachSwitchSwipes(Root);
+        AttachSwitchSwipes(Rows);
+    }
+
+    private void AttachSwitchSwipes(View target)
+    {
+        var left = new SwipeGestureRecognizer { Direction = SwipeDirection.Left };
+        left.Swiped += (_, _) => Switch(_index + 1);
+        var right = new SwipeGestureRecognizer { Direction = SwipeDirection.Right };
+        right.Swiped += (_, _) => Switch(_index - 1);
+        target.GestureRecognizers.Add(left);
+        target.GestureRecognizers.Add(right);
     }
 
     protected override void OnAppearing()
@@ -64,7 +75,7 @@ public partial class ItemDetailPage : ContentPage
         if (_ids.Count > 1) SwitchLabel.Text = $"{_index + 1} из {_ids.Count}";
 
         Rows.Children.Clear();
-        _timer?.Stop(); _timer = null; _totp = null;
+        _timer?.Stop(); _timer = null; _totpTicks.Clear();
 
         switch (_item.Type)
         {
@@ -72,7 +83,15 @@ public partial class ItemDetailPage : ContentPage
                 AddCopyRow("Сайт", _item.Fields.GetValueOrDefault("url", ""));
                 AddCopyRow("Логин", _item.Fields.GetValueOrDefault("username", ""));
                 AddCopyRow("Пароль", _item.Fields.GetValueOrDefault("password", ""), secret: true);
-                AddTotpBlock(_item.Fields.GetValueOrDefault("totp", ""));
+                string ownTotp = _item.Fields.GetValueOrDefault("totp", "").Trim();
+                AddTotpBlock(ownTotp);
+                // Отдельные записи из «Кодов», подходящие этому сайту (google.com ↔ «google»).
+                foreach (VaultEntry t in MatchedTotps(v, _item, ownTotp))
+                {
+                    string raw = t.Item.Fields.GetValueOrDefault("totp", "");
+                    var (_, acc) = TotpMeta.IssuerAccount(raw);
+                    AddTotpBlock(raw, acc.Length > 0 ? acc : t.Item.Title);
+                }
                 AddExtraFields("url", "username", "password", "totp");
                 break;
             case "card":
@@ -110,6 +129,25 @@ public partial class ItemDetailPage : ContentPage
         var del = new Button { Text = "Удалить", Style = (Style)Application.Current!.Resources["Danger"], Margin = new Thickness(0, 24, 0, 0) };
         del.Clicked += OnDelete;
         Rows.Children.Add(del);
+    }
+
+    /// <summary>Отдельные totp-записи, подходящие сайту аккаунта (кроме дубля собственного секрета).</summary>
+    private static List<VaultEntry> MatchedTotps(Vault v, VaultItem account, string ownTotp)
+    {
+        var res = new List<VaultEntry>();
+        string key = SiteGroups.KeyFor(account);
+        try
+        {
+            foreach (VaultEntry t in v.Items())
+            {
+                if (t.Item.Type != "totp") continue;
+                string raw = t.Item.Fields.GetValueOrDefault("totp", "").Trim();
+                if (raw.Length == 0 || raw == ownTotp) continue;
+                if (TotpMeta.MatchesSite(t.Item, key)) res.Add(t);
+            }
+        }
+        catch (Exception) { }
+        return res.OrderBy(t => t.Item.Title, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
     // ================= переключение аккаунтов =================
@@ -190,59 +228,72 @@ public partial class ItemDetailPage : ContentPage
 
     // ================= код проверки (TOTP) =================
 
-    private void AddTotpBlock(string secretOrUri)
+    /// <summary>Блок с живым кодом. Может быть несколько (свой секрет аккаунта + подходящие записи из «Кодов»).</summary>
+    private void AddTotpBlock(string secretOrUri, string? label = null)
     {
         if (string.IsNullOrWhiteSpace(secretOrUri)) return;
-        try { _totp = Totp.Parse(secretOrUri); }
+        TotpConfig cfg;
+        try { cfg = Totp.Parse(secretOrUri); }
         catch (Exception) { return; }
 
-        _totpCode = new Label { FontSize = 30, FontFamily = "Menlo", FontAttributes = FontAttributes.Bold };
-        _totpSeconds = new Label { Style = MutedStyle(), FontSize = 13, HorizontalOptions = LayoutOptions.End };
-        _totpBar = new ProgressBar();
+        string extra = (label ?? "").Trim();
+        if (extra.Length == 0) extra = (cfg.Account ?? "").Trim();
+        string caption = extra.Length > 0 ? $"Код проверки · {extra}" : "Код проверки";
+
+        var codeLabel = new Label { FontSize = 30, FontFamily = "Menlo", FontAttributes = FontAttributes.Bold };
+        var secondsLabel = new Label { Style = MutedStyle(), FontSize = 13, HorizontalOptions = LayoutOptions.End };
+        var bar = new ProgressBar();
 
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
         head.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
-        head.Add(new Label { Text = "Код проверки", Style = MutedStyle(), FontSize = 12 }, 0, 0);
-        head.Add(_totpSeconds, 1, 0);
+        head.Add(new Label { Text = caption, Style = MutedStyle(), FontSize = 12, LineBreakMode = LineBreakMode.TailTruncation }, 0, 0);
+        head.Add(secondsLabel, 1, 0);
 
         var stack = new VerticalStackLayout { Spacing = 6 };
         stack.Children.Add(head);
-        stack.Children.Add(_totpCode);
-        stack.Children.Add(_totpBar);
+        stack.Children.Add(codeLabel);
+        stack.Children.Add(bar);
 
         var border = new Border { Style = CardStyle(), Content = stack };
         var tap = new TapGestureRecognizer();
         tap.Tapped += async (_, _) =>
         {
-            if (_totp is not null)
-                await CopyAsync(Totp.GenerateFrom(secretOrUri, DateTimeOffset.UtcNow.ToUnixTimeSeconds()), "Код проверки");
+            try
+            {
+                string code = Totp.Generate(cfg.Secret, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), cfg.Digits, cfg.Period, cfg.Algorithm);
+                await CopyAsync(code, "Код проверки");
+            }
+            catch (Exception) { }
         };
         border.GestureRecognizers.Add(tap);
         Rows.Children.Add(border);
 
-        TickTotp();
-        _timer = Dispatcher.CreateTimer();
-        _timer.Interval = TimeSpan.FromSeconds(1);
-        _timer.Tick += (_, _) => TickTotp();
-        _timer.Start();
+        void Tick()
+        {
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            try
+            {
+                codeLabel.Text = Fmt.SplitCode(Totp.Generate(cfg.Secret, now, cfg.Digits, cfg.Period, cfg.Algorithm));
+                int left = Totp.SecondsRemaining(now, cfg.Period);
+                secondsLabel.Text = left + " с";
+                bar.Progress = (double)left / Math.Max(1, cfg.Period);
+            }
+            catch (Exception) { codeLabel.Text = "——— ———"; }
+        }
+
+        _totpTicks.Add(Tick);
+        Tick();
+        EnsureTimer();
     }
 
-    private void TickTotp()
+    private void EnsureTimer()
     {
-        if (_totp is null || _totpCode is null) return;
-        try
-        {
-            string code = _totp.Now();
-            int left = _totp.SecondsRemaining();
-            _totpCode.Text = Fmt.SplitCode(code);
-            if (_totpSeconds is not null) _totpSeconds.Text = left + " с";
-            if (_totpBar is not null) _totpBar.Progress = (double)left / Math.Max(1, _totp.Period);
-        }
-        catch (Exception)
-        {
-            _totpCode.Text = "——— ———";
-        }
+        if (_timer is not null) return;
+        _timer = Dispatcher.CreateTimer();
+        _timer.Interval = TimeSpan.FromSeconds(1);
+        _timer.Tick += (_, _) => { foreach (Action t in _totpTicks) t(); };
+        _timer.Start();
     }
 
     // ================= действия =================
