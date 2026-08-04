@@ -13,11 +13,19 @@
 
         <SearchBar x:Name="Search" Grid.Row="0" Placeholder="Поиск" TextChanged="OnSearch" Margin="8,0" />
 
-        <Button x:Name="SectionBtn" Grid.Row="1" Clicked="OnSectionMenu"
-                FontSize="14" Padding="14,6" CornerRadius="14"
-                HorizontalOptions="Start" Margin="12,2,12,8"
-                BackgroundColor="{AppThemeBinding Dark={StaticResource IpSurface2}, Light={StaticResource IpSurface2L}}"
-                TextColor="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpTextL}}" />
+        <Border Grid.Row="1" StrokeThickness="0" StrokeShape="RoundRectangle 14"
+                Margin="12,2,12,8" Padding="14,9"
+                BackgroundColor="{AppThemeBinding Dark={StaticResource IpSurface2}, Light={StaticResource IpSurface2L}}">
+            <Grid ColumnDefinitions="*,Auto">
+                <Label x:Name="SectionLabel" FontSize="14" VerticalOptions="Center"
+                       TextColor="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpTextL}}" />
+                <Label Grid.Column="1" Text="⌄" FontSize="14" VerticalOptions="Center"
+                       TextColor="{AppThemeBinding Dark={StaticResource IpText2}, Light={StaticResource IpText2L}}" />
+            </Grid>
+            <Border.GestureRecognizers>
+                <TapGestureRecognizer Tapped="OnSectionMenu" />
+            </Border.GestureRecognizers>
+        </Border>
 
         <CollectionView x:Name="List" Grid.Row="2" SelectionMode="None">
             <CollectionView.ItemTemplate>
