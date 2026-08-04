@@ -39,12 +39,13 @@
                 <VerticalStackLayout Spacing="8">
                     <Label x:Name="SyncTitle" Text="Локальный сейф" FontSize="16" />
                     <Label x:Name="SyncSub" Text="без синхронизации" Style="{StaticResource Muted}" FontSize="13" />
-                    <Button x:Name="SyncConnectButton" Text="Выбрать файл сейфа в iCloud…" Clicked="OnConnectSync" />
+                    <Button x:Name="SyncGoogleButton" Text="Войти через Google" Clicked="OnConnectGoogle" />
+                    <Button x:Name="SyncConnectButton" Text="Выбрать файл сейфа в iCloud…" BackgroundColor="Transparent" Clicked="OnConnectSync" />
                     <Button x:Name="SyncNowButton" Text="Синхронизировать сейчас" IsVisible="False" Clicked="OnSyncNow" />
-                    <Button x:Name="SyncDisconnectButton" Text="Отключить" IsVisible="False" Clicked="OnDisconnectSync" />
+                    <Button x:Name="SyncDisconnectButton" Text="Отключить" BackgroundColor="Transparent" IsVisible="False" Clicked="OnDisconnectSync" />
                 </VerticalStackLayout>
             </Border>
-            <Label Text="Выберите файл vault.ipvault в iCloud Drive → IPasswrd — тот же, что использует приложение на Windows. Изменения объединяются поэлементно."
+            <Label Text="Вход через Google — тот же Google Drive, что на Windows (папка IPasswrd, файл vault.ipvault). Либо выберите файл в iCloud Drive. Изменения объединяются поэлементно."
                    Style="{StaticResource Muted}" FontSize="12" Margin="4,0" />
 
             <Label Text="СЕЙФ" Style="{StaticResource Section}" />

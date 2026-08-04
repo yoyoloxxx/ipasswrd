@@ -40,11 +40,16 @@ public partial class SettingsPage : ContentPage
         int ci = Array.FindIndex(SecureClipboard.Options, o => o.Secs == clip);
         ClipboardPicker.SelectedIndex = ci >= 0 ? ci : 2;
 
-        bool connected = Svc.External.IsConnected;
-        SyncTitle.Text = connected ? "iCloud Drive" : "Локальный сейф";
-        SyncSub.Text = connected
-            ? (Svc.State.LastSyncStatus ?? Svc.External.DisplayName ?? "синхронизация включена")
-            : "без синхронизации";
+        bool google = IPasswrd.Mobile.Services.GoogleDrive.IsConnected;
+        bool icloud = Svc.External.IsConnected;
+        bool connected = google || icloud;
+        SyncTitle.Text = google ? "Google Drive" : icloud ? "iCloud Drive" : "Локальный сейф";
+        SyncSub.Text = google
+            ? (Svc.State.LastSyncStatus ?? IPasswrd.Mobile.Services.GoogleDrive.Email ?? "вход выполнен")
+            : icloud
+                ? (Svc.State.LastSyncStatus ?? Svc.External.DisplayName ?? "синхронизация включена")
+                : "без синхронизации";
+        SyncGoogleButton.IsVisible = !connected && IPasswrd.Mobile.Services.GoogleDrive.IsConfigured;
         SyncConnectButton.IsVisible = !connected;
         SyncNowButton.IsVisible = connected;
         SyncDisconnectButton.IsVisible = connected;
@@ -150,6 +155,35 @@ public partial class SettingsPage : ContentPage
         Refresh();
     }
 
+    private async void OnConnectGoogle(object? sender, EventArgs e)
+    {
+        SyncGoogleButton.IsEnabled = false;
+        try
+        {
+            string? email = await Svc.State.ConnectGoogleAsync();
+            await DisplayAlert("Google подключён",
+                (email is { Length: > 0 } ? email + "\n\n" : "") +
+                "Сейф связан с Google Drive — тот же, что на Windows. Изменения синхронизируются автоматически.", "Готово");
+        }
+        catch (IPasswrd.Core.VaultIntegrityException)
+        {
+            Svc.State.DisconnectGoogle();
+            await DisplayAlert("Это другой сейф",
+                "В Google Drive уже лежит другой сейф. Сначала решите, какой оставить: экспортируйте нужный и подключите его на обоих устройствах.", "Ок");
+        }
+        catch (Exception ex)
+        {
+            Svc.State.DisconnectGoogle();
+            string msg = ex.Message.Contains("client_not_configured")
+                ? "Google-вход ещё не настроен в этой сборке."
+                : ex.Message.Contains("no_code") || ex.Message.Contains("consent")
+                    ? "Вход отменён."
+                    : "Не удалось войти в Google. Проверьте соединение и попробуйте снова.";
+            await DisplayAlert("Google", msg, "Ок");
+        }
+        finally { SyncGoogleButton.IsEnabled = true; Refresh(); }
+    }
+
     private async void OnSyncNow(object? sender, EventArgs e)
     {
         SyncNowButton.IsEnabled = false;
@@ -160,7 +194,8 @@ public partial class SettingsPage : ContentPage
 
     private void OnDisconnectSync(object? sender, EventArgs e)
     {
-        Svc.External.Disconnect();
+        if (IPasswrd.Mobile.Services.GoogleDrive.IsConnected) Svc.State.DisconnectGoogle();
+        else Svc.External.Disconnect();
         Refresh();
     }
 
