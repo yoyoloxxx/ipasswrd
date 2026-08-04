@@ -23,21 +23,34 @@ public partial class ItemDetailPage : ContentPage
         if (_ids.Count == 0) _ids.Add("");
         _index = Math.Clamp(startIndex, 0, _ids.Count - 1);
         _id = _ids[_index];
-
-        // Свайп влево/вправо переключает аккаунты (в дополнение к стрелкам).
-        AttachSwitchSwipes(Root);
-        AttachSwitchSwipes(Rows);
     }
 
-    private void AttachSwitchSwipes(View target)
+#if IOS
+    // Свайп влево/вправо переключает аккаунты. MAUI-жест не срабатывает поверх ScrollView,
+    // поэтому вешаем нативный распознаватель на корневой view страницы —
+    // с одновременным распознаванием, чтобы не мешать вертикальной прокрутке.
+    private bool _nativeSwipes;
+
+    protected override void OnHandlerChanged()
     {
-        var left = new SwipeGestureRecognizer { Direction = SwipeDirection.Left };
-        left.Swiped += (_, _) => Switch(_index + 1);
-        var right = new SwipeGestureRecognizer { Direction = SwipeDirection.Right };
-        right.Swiped += (_, _) => Switch(_index - 1);
-        target.GestureRecognizers.Add(left);
-        target.GestureRecognizers.Add(right);
+        base.OnHandlerChanged();
+        if (_nativeSwipes || Handler?.PlatformView is not UIKit.UIView v) return;
+        _nativeSwipes = true;
+
+        var left = new UIKit.UISwipeGestureRecognizer(() => Switch(_index + 1))
+        {
+            Direction = UIKit.UISwipeGestureRecognizerDirection.Left,
+            ShouldRecognizeSimultaneously = (_, _) => true,
+        };
+        var right = new UIKit.UISwipeGestureRecognizer(() => Switch(_index - 1))
+        {
+            Direction = UIKit.UISwipeGestureRecognizerDirection.Right,
+            ShouldRecognizeSimultaneously = (_, _) => true,
+        };
+        v.AddGestureRecognizer(left);
+        v.AddGestureRecognizer(right);
     }
+#endif
 
     protected override void OnAppearing()
     {
