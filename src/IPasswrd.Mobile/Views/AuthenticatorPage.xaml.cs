@@ -101,6 +101,9 @@ public partial class AuthenticatorPage : ContentPage
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToList();
                     if (logins.Count == 1) sub = logins[0];
+                    // У сайта несколько аккаунтов, а в секрете кода не записано, чей он:
+                    // подскажем, как это исправить (Сейф → аккаунт → «Привязать к этому аккаунту»).
+                    else if (logins.Count > 1) sub = "не привязан к аккаунту";
                 }
             }
             if (sub.Equals(name, StringComparison.OrdinalIgnoreCase)) sub = "";
@@ -209,14 +212,9 @@ public partial class AuthenticatorPage : ContentPage
         await ShowToastAsync($"{r.Name}: код скопирован");
     }
 
-    private async void OnDeleteTapped(object? sender, TappedEventArgs e)
+    private async void OnDeleteClicked(object? sender, EventArgs e)
     {
-        if (e.Parameter is not AuthRow r) return;
-
-        // Закрываем открытый свайп, чтобы диалог не висел над красной кнопкой.
-        Element? el = sender as Element;
-        while (el is not null && el is not SwipeView) el = el.Parent;
-        (el as SwipeView)?.Close();
+        if ((sender as Button)?.CommandParameter is not AuthRow r) return;
 
         Vault? v = Svc.State.Vault;
         if (v is null) return;
