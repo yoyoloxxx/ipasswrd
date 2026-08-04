@@ -86,11 +86,12 @@ public partial class ItemDetailPage : ContentPage
                 string ownTotp = _item.Fields.GetValueOrDefault("totp", "").Trim();
                 AddTotpBlock(ownTotp);
                 // Отдельные записи из «Кодов», подходящие этому сайту (google.com ↔ «google»).
+                // Они общие для всех аккаунтов сайта, поэтому предлагаем привязать к конкретному.
                 foreach (VaultEntry t in MatchedTotps(v, _item, ownTotp))
                 {
                     string raw = t.Item.Fields.GetValueOrDefault("totp", "");
                     var (_, acc) = TotpMeta.IssuerAccount(raw);
-                    AddTotpBlock(raw, acc.Length > 0 ? acc : t.Item.Title);
+                    AddTotpBlock(raw, acc.Length > 0 ? acc : t.Item.Title, (t.Id, raw, t.Item.Title));
                 }
                 AddExtraFields("url", "username", "password", "totp");
                 break;
@@ -228,8 +229,9 @@ public partial class ItemDetailPage : ContentPage
 
     // ================= код проверки (TOTP) =================
 
-    /// <summary>Блок с живым кодом. Может быть несколько (свой секрет аккаунта + подходящие записи из «Кодов»).</summary>
-    private void AddTotpBlock(string secretOrUri, string? label = null)
+    /// <summary>Блок с живым кодом. Может быть несколько (свой секрет аккаунта + подходящие записи из «Кодов»).
+    /// bind — для общих кодов сайта: кнопка «Привязать к этому аккаунту».</summary>
+    private void AddTotpBlock(string secretOrUri, string? label = null, (string Id, string Raw, string RecTitle)? bind = null)
     {
         if (string.IsNullOrWhiteSpace(secretOrUri)) return;
         TotpConfig cfg;
@@ -254,6 +256,23 @@ public partial class ItemDetailPage : ContentPage
         stack.Children.Add(head);
         stack.Children.Add(codeLabel);
         stack.Children.Add(bar);
+
+        if (bind is { } b)
+        {
+            var link = new Button
+            {
+                Text = "Привязать к этому аккаунту",
+                FontSize = 13,
+                Padding = new Thickness(0, 4),
+                BackgroundColor = Colors.Transparent,
+                HorizontalOptions = LayoutOptions.Start,
+            };
+            if (Application.Current?.Resources.TryGetValue("IpAccent", out var dc) == true && dc is Color darkAccent
+                && Application.Current.Resources.TryGetValue("IpAccentL", out var lc) && lc is Color lightAccent)
+                link.SetAppThemeColor(Button.TextColorProperty, lightAccent, darkAccent);
+            link.Clicked += async (_, _) => await BindTotpAsync(b.Id, b.Raw, b.RecTitle);
+            stack.Children.Add(link);
+        }
 
         var border = new Border { Style = CardStyle(), Content = stack };
         var tap = new TapGestureRecognizer();
@@ -294,6 +313,30 @@ public partial class ItemDetailPage : ContentPage
         _timer.Interval = TimeSpan.FromSeconds(1);
         _timer.Tick += (_, _) => { foreach (Action t in _totpTicks) t(); };
         _timer.Start();
+    }
+
+    /// <summary>Общий код сайта становится личным кодом этого аккаунта:
+    /// секрет переезжает в поле totp записи, отдельная запись из «Кодов» удаляется.</summary>
+    private async Task BindTotpAsync(string totpRecordId, string raw, string recordTitle)
+    {
+        Vault? v = Svc.State.Vault;
+        if (v is null || _item is null) return;
+
+        string login = _item.Fields.GetValueOrDefault("username", "");
+        string who = login.Length > 0 ? login : Title;
+        string msg = $"Код «{recordTitle}» станет кодом аккаунта {who} и перестанет показываться у остальных аккаунтов этого сайта.";
+        if (_item.Fields.GetValueOrDefault("totp", "").Trim().Length > 0)
+            msg += "\n\nТекущий код этого аккаунта будет заменён.";
+
+        bool ok = await DisplayAlert("Привязать код к этому аккаунту?", msg, "Привязать", "Отмена");
+        if (!ok) return;
+
+        _item.Fields["totp"] = raw;
+        try { v.Update(_id, _item); } catch (Exception) { return; }
+        try { v.Delete(totpRecordId); } catch (Exception) { }
+        await Svc.State.SaveAsync();
+        Load();
+        await ShowToastAsync("Код привязан к аккаунту");
     }
 
     // ================= действия =================
