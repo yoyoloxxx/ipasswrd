@@ -160,15 +160,13 @@ public partial class AuthenticatorPage : ContentPage
         }
 
         var cfg = Totp.Parse(raw);
-        string suggested = cfg.Issuer.Length > 0
-            ? (cfg.Account.Length > 0 ? $"{cfg.Issuer} — {cfg.Account}" : cfg.Issuer)
-            : cfg.Label;
+        string suggested = cfg.Issuer.Length > 0 ? cfg.Issuer : cfg.Label;
 
         string? name = await DisplayPromptAsync("Название", "Как подписать этот код?",
             "Сохранить", "Отмена", initialValue: suggested);
         if (name is null) return;
 
-        await SaveNewAsync(name.Trim(), raw.Trim());
+        await SaveNewAsync(name.Trim(), raw.Trim(), cfg.Account.Trim());
     }
 
     private async Task AddManualAsync()
@@ -182,20 +180,34 @@ public partial class AuthenticatorPage : ContentPage
             return;
         }
 
+        // Как на ПК: название и аккаунт с подстановкой из otpauth://, оба поля можно оставить пустыми.
         var cfg = Totp.Parse(secret);
-        string? name = await DisplayPromptAsync("Название", "Как подписать этот код?",
-            "Сохранить", "Отмена", initialValue: cfg.Issuer);
+        string? name = await DisplayPromptAsync("Название", "Например, GitHub",
+            "Дальше", "Отмена", initialValue: cfg.Issuer);
         if (name is null) return;
 
-        await SaveNewAsync(name.Trim(), secret.Trim());
+        string? account = await DisplayPromptAsync("Аккаунт", "Имя или почта (необязательно)",
+            "Сохранить", "Отмена", initialValue: cfg.Account);
+        if (account is null) return;
+
+        await SaveNewAsync(name.Trim(), secret.Trim(), account.Trim());
     }
 
-    private async Task SaveNewAsync(string name, string secret)
+    private async Task SaveNewAsync(string name, string secret, string account = "")
     {
         Vault? v = Svc.State.Vault;
         if (v is null) return;
+
+        // Фолбэки как на ПК: пустое название → issuer, затем аккаунт, затем «Код проверки».
+        var cfg = Totp.Parse(secret);
+        if (string.IsNullOrWhiteSpace(name))
+            name = !string.IsNullOrWhiteSpace(cfg.Issuer) ? cfg.Issuer
+                 : !string.IsNullOrWhiteSpace(cfg.Account) ? cfg.Account : "Код проверки";
+        if (string.IsNullOrWhiteSpace(account)) account = cfg.Account;
+
         var item = new VaultItem { Type = "totp", Title = name };
         item.Fields["totp"] = secret;
+        if (!string.IsNullOrWhiteSpace(account)) item.Fields["username"] = account.Trim();
         v.Add(item);
         await Svc.State.SaveAsync();
         Reload();
