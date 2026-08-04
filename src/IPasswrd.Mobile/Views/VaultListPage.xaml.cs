@@ -1,24 +1,21 @@
 using System.Collections.ObjectModel;
+using System.Text;
 using IPasswrd.Core;
 using IPasswrd.Mobile.Services;
 
 namespace IPasswrd.Mobile.Views;
 
+/// <summary>Строка списка: одна карточка — один сайт (для аккаунтов и ключей доступа)
+/// или одна запись (карты, документы, заметки). Ids — все записи карточки по порядку.</summary>
 public sealed class VaultRow
 {
-    public string Id { get; init; } = "";
+    public List<string> Ids { get; init; } = new();
     public string Title { get; init; } = "";
     public string Subtitle { get; init; } = "";
     public bool HasSubtitle => Subtitle.Length > 0;
     public string Badge { get; init; } = "";
     public string Star { get; init; } = "";
-    public VaultItem Item { get; init; } = new();
-}
-
-public sealed class VaultGroup : List<VaultRow>
-{
-    public string Name { get; }
-    public VaultGroup(string name, IEnumerable<VaultRow> rows) : base(rows) => Name = name;
+    public Thickness Pad { get; set; } = new(16, 5);
 }
 
 public partial class VaultListPage : ContentPage
@@ -106,101 +103,136 @@ public partial class VaultListPage : ContentPage
                 x.Item.Title.ToLowerInvariant().Contains(q)
                 || x.Item.Fields.GetValueOrDefault("username", "").ToLowerInvariant().Contains(q)
                 || x.Item.Fields.GetValueOrDefault("url", "").ToLowerInvariant().Contains(q)
-                || x.Item.Notes.ToLowerInvariant().Contains(q));
+                || x.Item.Notes.ToLowerInvariant().Contains(q)
+                || (x.Item.Type is "account" or "passkey"
+                    && SiteGroups.DisplayName(SiteGroups.KeyFor(x.Item), siteNames).ToLowerInvariant().Contains(q)));
 
-        var rows = visible.Select(MakeRow).ToList();
+        var list = visible.ToList();
 
-        var groups = new List<VaultGroup>();
+        // Избранное — сверху; дальше остальные, отделённые небольшим пробелом (без заголовков).
+        var favRows = BuildCards(list.Where(x => x.Item.Favorite).ToList(), siteNames);
+        var restRows = BuildCards(list.Where(x => !x.Item.Favorite).ToList(), siteNames);
+        if (favRows.Count > 0 && restRows.Count > 0)
+            restRows[0].Pad = new Thickness(16, 21, 16, 5);
 
-        // Избранное — сверху, отдельной группой.
-        var fav = rows.Where(r => r.Item.Favorite)
-            .OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToList();
-        if (fav.Count > 0) groups.Add(new VaultGroup("★ Избранное", fav));
+        var rows = new List<VaultRow>(favRows.Count + restRows.Count);
+        rows.AddRange(favRows);
+        rows.AddRange(restRows);
 
-        var rest = rows.Where(r => !r.Item.Favorite).ToList();
+        List.ItemsSource = new ObservableCollection<VaultRow>(rows);
+    }
 
-        // Аккаунты — группами по сайту (регистрируемый домен, имя из meta если задано), как на ПК.
-        var accounts = rest.Where(r => r.Item.Type == "account")
-            .GroupBy(r => SiteGroups.KeyFor(r.Item))
+    /// <summary>Карточки: аккаунты и ключи доступа схлопываются по сайту (название сайта на карточке),
+    /// остальные типы — по одной записи на карточку.</summary>
+    private static List<VaultRow> BuildCards(List<VaultEntry> entries, Dictionary<string, string> siteNames)
+    {
+        var rows = new List<VaultRow>();
+
+        // Одна карточка на сайт.
+        var siteCards = entries
+            .Where(x => x.Item.Type == "account")
+            .GroupBy(x => SiteGroups.KeyFor(x.Item))
             .OrderBy(g => SiteGroups.DisplayName(g.Key, siteNames), StringComparer.CurrentCultureIgnoreCase);
-        foreach (var g in accounts)
-            groups.Add(new VaultGroup(SiteGroups.DisplayName(g.Key, siteNames),
-                g.OrderBy(r => r.Subtitle, StringComparer.CurrentCultureIgnoreCase)));
+        foreach (var g in siteCards)
+            rows.Add(MakeSiteCard(g.Key, g.ToList(), siteNames, passkeys: false));
 
-        AddTypeGroup(groups, rest, "card", "Карты");
-        AddTypeGroup(groups, rest, "document", "Документы");
-        AddTypeGroup(groups, rest, "note", "Заметки");
-        AddTypeGroup(groups, rest, "passkey", "Ключи доступа");
-        AddTypeGroup(groups, rest, null, "Прочее");
+        AddSingles(rows, entries, "card", "💳",
+            it => $"{Fmt.CardBrand(it.Fields.GetValueOrDefault("number", ""))} {Fmt.MaskCard(it.Fields.GetValueOrDefault("number", ""))}".Trim());
+        AddSingles(rows, entries, "document", "📄", it => it.Fields.GetValueOrDefault("number", ""));
+        AddSingles(rows, entries, "note", "🗒", it => it.Notes.Split('\n').FirstOrDefault() ?? "");
 
-        List.ItemsSource = new ObservableCollection<VaultGroup>(groups);
+        var passkeyCards = entries
+            .Where(x => x.Item.Type == "passkey")
+            .GroupBy(x => SiteGroups.KeyFor(x.Item))
+            .OrderBy(g => SiteGroups.DisplayName(g.Key, siteNames), StringComparer.CurrentCultureIgnoreCase);
+        foreach (var g in passkeyCards)
+            rows.Add(MakeSiteCard(g.Key, g.ToList(), siteNames, passkeys: true));
+
+        AddSingles(rows, entries, null, "•", it => it.Notes.Split('\n').FirstOrDefault() ?? "");
+
+        return rows;
+    }
+
+    private static VaultRow MakeSiteCard(string key, List<VaultEntry> members, Dictionary<string, string> siteNames, bool passkeys)
+    {
+        members = members
+            .OrderBy(x => x.Item.Fields.GetValueOrDefault("username", ""), StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(x => x.Item.Title, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        string name = SiteGroups.DisplayName(key, siteNames);
+        if (name.Length == 0) name = "(без сайта)";
+
+        string subtitle;
+        if (members.Count == 1)
+        {
+            VaultItem it = members[0].Item;
+            subtitle = it.Fields.GetValueOrDefault("username", "");
+            if (subtitle.Length == 0
+                && it.Title.Length > 0
+                && !it.Title.Equals(name, StringComparison.OrdinalIgnoreCase))
+                subtitle = it.Title;
+            if (passkeys)
+                subtitle = subtitle.Length > 0 ? subtitle + " · ключ доступа" : "ключ доступа";
+        }
+        else
+        {
+            subtitle = passkeys
+                ? Plural(members.Count, "ключ доступа", "ключа доступа", "ключей доступа")
+                : Plural(members.Count, "аккаунт", "аккаунта", "аккаунтов");
+        }
+
+        return new VaultRow
+        {
+            Ids = members.Select(m => m.Id).ToList(),
+            Title = name,
+            Subtitle = subtitle,
+            Badge = passkeys ? "🔑" : FirstLetter(name),
+            Star = members.Any(m => m.Item.Favorite) ? "★" : "",
+        };
     }
 
     private static readonly HashSet<string> KnownTypes = new() { "account", "card", "document", "note", "passkey" };
 
-    private static void AddTypeGroup(List<VaultGroup> groups, List<VaultRow> rest, string? type, string title)
+    private static void AddSingles(List<VaultRow> rows, List<VaultEntry> entries, string? type, string badge, Func<VaultItem, string> subtitleOf)
     {
-        var items = rest
-            .Where(r => type is null ? !KnownTypes.Contains(r.Item.Type) : r.Item.Type == type)
-            .OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
-        if (items.Count > 0) groups.Add(new VaultGroup(title, items));
+        var items = entries
+            .Where(x => type is null ? !KnownTypes.Contains(x.Item.Type) : x.Item.Type == type)
+            .OrderBy(x => x.Item.Title, StringComparer.CurrentCultureIgnoreCase);
+        foreach (var e in items)
+        {
+            VaultItem it = e.Item;
+            rows.Add(new VaultRow
+            {
+                Ids = new List<string> { e.Id },
+                Title = it.Title.Length > 0 ? it.Title : "(без названия)",
+                Subtitle = subtitleOf(it),
+                Badge = badge,
+                Star = it.Favorite ? "★" : "",
+            });
+        }
     }
 
-    private static VaultRow MakeRow(VaultEntry e)
+    private static string FirstLetter(string s)
     {
-        VaultItem it = e.Item;
-        string title, subtitle;
+        foreach (Rune r in s.EnumerateRunes())
+            return r.ToString().ToUpperInvariant();
+        return "•";
+    }
 
-        if (it.Type is "account" or "passkey")
-        {
-            // Заголовок группы уже показывает сайт, поэтому в строке главный — логин,
-            // а название записи выносим второй строкой только если оно осмысленное
-            // (не совпадает с доменом и не равно логину). Так «google.com» не дублируется.
-            string user = it.Fields.GetValueOrDefault("username", "");
-            string dom = SiteGroups.KeyFor(it);
-            title = user.Length > 0 ? user : (it.Title.Length > 0 ? it.Title : "(без названия)");
-            bool titleMeaningful = it.Title.Length > 0
-                && !it.Title.Equals(dom, StringComparison.OrdinalIgnoreCase)
-                && !it.Title.Equals(user, StringComparison.OrdinalIgnoreCase);
-            subtitle = titleMeaningful ? it.Title : "";
-        }
-        else
-        {
-            title = it.Title.Length > 0 ? it.Title : "(без названия)";
-            subtitle = it.Type switch
-            {
-                "card" => $"{Fmt.CardBrand(it.Fields.GetValueOrDefault("number", ""))} {Fmt.MaskCard(it.Fields.GetValueOrDefault("number", ""))}".Trim(),
-                "document" => it.Fields.GetValueOrDefault("number", ""),
-                _ => it.Notes.Split('\n').FirstOrDefault() ?? "",
-            };
-        }
-
-        string badge = it.Type switch
-        {
-            "card" => "💳",
-            "document" => "📄",
-            "note" => "🗒",
-            "passkey" => "🔑",
-            _ => (it.Fields.GetValueOrDefault("url", "").Length > 0 ? SiteGroups.KeyFor(it) : it.Title) is { Length: > 0 } s
-                    ? s[..1].ToUpperInvariant() : "•",
-        };
-
-        return new VaultRow
-        {
-            Id = e.Id,
-            Title = title,
-            Subtitle = subtitle,
-            Badge = badge,
-            Star = it.Favorite ? "★" : "",
-            Item = it,
-        };
+    private static string Plural(int n, string one, string few, string many)
+    {
+        int m10 = n % 10, m100 = n % 100;
+        string w = m10 == 1 && m100 != 11 ? one
+            : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few
+            : many;
+        return $"{n} {w}";
     }
 
     private async void OnRowTapped(object? sender, TappedEventArgs e)
     {
-        if (e.Parameter is VaultRow row)
-            await Navigation.PushAsync(new ItemDetailPage(row.Id));
+        if (e.Parameter is VaultRow row && row.Ids.Count > 0)
+            await Navigation.PushAsync(new ItemDetailPage(row.Ids, 0));
     }
 
     private async void OnAdd(object? sender, EventArgs e)
