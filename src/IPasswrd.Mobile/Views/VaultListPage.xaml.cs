@@ -9,6 +9,7 @@ public sealed class VaultRow
     public string Id { get; init; } = "";
     public string Title { get; init; } = "";
     public string Subtitle { get; init; } = "";
+    public bool HasSubtitle => Subtitle.Length > 0;
     public string Badge { get; init; } = "";
     public string Star { get; init; } = "";
     public VaultItem Item { get; init; } = new();
@@ -149,26 +150,46 @@ public partial class VaultListPage : ContentPage
     private static VaultRow MakeRow(VaultEntry e)
     {
         VaultItem it = e.Item;
-        string subtitle = it.Type switch
+        string title, subtitle;
+
+        if (it.Type is "account" or "passkey")
         {
-            "account" => it.Fields.GetValueOrDefault("username", ""),
-            "card" => $"{Fmt.CardBrand(it.Fields.GetValueOrDefault("number", ""))} {Fmt.MaskCard(it.Fields.GetValueOrDefault("number", ""))}".Trim(),
-            "document" => it.Fields.GetValueOrDefault("number", ""),
-            "passkey" => it.Fields.GetValueOrDefault("username", ""),
-            _ => it.Notes.Split('\n').FirstOrDefault() ?? "",
-        };
+            // Заголовок группы уже показывает сайт, поэтому в строке главный — логин,
+            // а название записи выносим второй строкой только если оно осмысленное
+            // (не совпадает с доменом и не равно логину). Так «google.com» не дублируется.
+            string user = it.Fields.GetValueOrDefault("username", "");
+            string dom = SiteGroups.KeyFor(it);
+            title = user.Length > 0 ? user : (it.Title.Length > 0 ? it.Title : "(без названия)");
+            bool titleMeaningful = it.Title.Length > 0
+                && !it.Title.Equals(dom, StringComparison.OrdinalIgnoreCase)
+                && !it.Title.Equals(user, StringComparison.OrdinalIgnoreCase);
+            subtitle = titleMeaningful ? it.Title : "";
+        }
+        else
+        {
+            title = it.Title.Length > 0 ? it.Title : "(без названия)";
+            subtitle = it.Type switch
+            {
+                "card" => $"{Fmt.CardBrand(it.Fields.GetValueOrDefault("number", ""))} {Fmt.MaskCard(it.Fields.GetValueOrDefault("number", ""))}".Trim(),
+                "document" => it.Fields.GetValueOrDefault("number", ""),
+                _ => it.Notes.Split('\n').FirstOrDefault() ?? "",
+            };
+        }
+
         string badge = it.Type switch
         {
             "card" => "💳",
             "document" => "📄",
             "note" => "🗒",
             "passkey" => "🔑",
-            _ => it.Title.Length > 0 ? it.Title[..1].ToUpperInvariant() : "•",
+            _ => (it.Fields.GetValueOrDefault("url", "").Length > 0 ? SiteGroups.KeyFor(it) : it.Title) is { Length: > 0 } s
+                    ? s[..1].ToUpperInvariant() : "•",
         };
+
         return new VaultRow
         {
             Id = e.Id,
-            Title = it.Title.Length > 0 ? it.Title : "(без названия)",
+            Title = title,
             Subtitle = subtitle,
             Badge = badge,
             Star = it.Favorite ? "★" : "",
