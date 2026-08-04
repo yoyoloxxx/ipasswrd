@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'src/IPasswrd.Mobile/**'
+      - 'src/IPasswrd.AutoFill/**'
       - 'src/IPasswrd.Core/**'
       - '.github/workflows/ios-build.yml'
 
@@ -35,6 +36,28 @@ jobs:
           -p:RuntimeIdentifier=ios-arm64
           -p:EnableCodeSigning=false
           -p:IpwNet9Only=true
+      - name: Ad-hoc sign with entitlements (AltStore читает их при переподписи)
+        run: |
+          APP=$(find bin/Release/net9.0-ios -name "*.app" -type d | head -1)
+          echo "app bundle: $APP"
+          sign_nested() {
+            if [ -d "$1/Frameworks" ]; then
+              find "$1/Frameworks" -maxdepth 1 \( -name "*.framework" -o -name "*.dylib" \) -print0 |
+              while IFS= read -r -d '' f; do /usr/bin/codesign --force -s - "$f"; done
+            fi
+          }
+          APPEX="$APP/PlugIns/IPasswrd.AutoFill.appex"
+          if [ -d "$APPEX" ]; then
+            sign_nested "$APPEX"
+            /usr/bin/codesign --force -s - --entitlements ../IPasswrd.AutoFill/Entitlements.plist "$APPEX"
+            echo "appex signed"
+          else
+            echo "::warning::PlugIns/IPasswrd.AutoFill.appex не найден — расширение не попало в бандл"
+            ls -R "$APP" | head -50
+          fi
+          sign_nested "$APP"
+          /usr/bin/codesign --force -s - --entitlements Entitlements.plist "$APP"
+          /usr/bin/codesign -d --entitlements :- "$APP" | head -30
       - name: Pack IPA
         run: |
           APP=$(find bin/Release/net9.0-ios -name "*.app" -type d | head -1)
