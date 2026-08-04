@@ -5,7 +5,9 @@ namespace IPasswrd.Mobile.Views;
 
 public partial class ItemDetailPage : ContentPage
 {
-    private readonly string _id;
+    private readonly List<string> _ids;
+    private int _index;
+    private string _id;
     private VaultItem? _item;
     private IDispatcherTimer? _timer;
     private Label? _totpCode;
@@ -13,10 +15,17 @@ public partial class ItemDetailPage : ContentPage
     private ProgressBar? _totpBar;
     private TotpConfig? _totp;
 
-    public ItemDetailPage(string id)
+    public ItemDetailPage(string id) : this(new List<string> { id }, 0) { }
+
+    /// <summary>Карточка сайта: ids — все записи этого сайта по порядку, startIndex — с какой начать.
+    /// Когда записей несколько, сверху появляются стрелки ◀ ▶ для переключения.</summary>
+    public ItemDetailPage(IEnumerable<string> ids, int startIndex)
     {
         InitializeComponent();
-        _id = id;
+        _ids = ids.ToList();
+        if (_ids.Count == 0) _ids.Add("");
+        _index = Math.Clamp(startIndex, 0, _ids.Count - 1);
+        _id = _ids[_index];
     }
 
     protected override void OnAppearing()
@@ -37,10 +46,23 @@ public partial class ItemDetailPage : ContentPage
         Vault? v = Svc.State.Vault;
         if (v is null) return;
         try { _item = v.Get(_id); }
-        catch (Exception) { Navigation.PopAsync(); return; }
+        catch (Exception)
+        {
+            // Запись могла исчезнуть (удалена на другом устройстве) — покажем следующую или выйдем.
+            _ids.Remove(_id);
+            if (_ids.Count == 0) { Navigation.PopAsync(); return; }
+            _index = Math.Min(_index, _ids.Count - 1);
+            _id = _ids[_index];
+            try { _item = v.Get(_id); }
+            catch (Exception) { Navigation.PopAsync(); return; }
+        }
 
         Title = _item.Title.Length > 0 ? _item.Title : "(без названия)";
         FavItem.Text = _item.Favorite ? "★" : "☆";
+
+        SwitchBar.IsVisible = _ids.Count > 1;
+        if (_ids.Count > 1) SwitchLabel.Text = $"{_index + 1} из {_ids.Count}";
+
         Rows.Children.Clear();
         _timer?.Stop(); _timer = null; _totp = null;
 
@@ -88,6 +110,20 @@ public partial class ItemDetailPage : ContentPage
         var del = new Button { Text = "Удалить", Style = (Style)Application.Current!.Resources["Danger"], Margin = new Thickness(0, 24, 0, 0) };
         del.Clicked += OnDelete;
         Rows.Children.Add(del);
+    }
+
+    // ================= переключение аккаунтов =================
+
+    private void OnPrev(object? sender, EventArgs e) => Switch(_index - 1);
+    private void OnNext(object? sender, EventArgs e) => Switch(_index + 1);
+
+    private void Switch(int i)
+    {
+        if (_ids.Count < 2) return;
+        _index = ((i % _ids.Count) + _ids.Count) % _ids.Count; // по кругу
+        _id = _ids[_index];
+        _ = Scroll.ScrollToAsync(0, 0, false);
+        Load();
     }
 
     private static Style CardStyle() => (Style)Application.Current!.Resources["Card"];
@@ -256,6 +292,12 @@ public partial class ItemDetailPage : ContentPage
         if (!ok) return;
         try { v.Delete(_id); } catch (Exception) { }
         await Svc.State.SaveAsync();
-        await Navigation.PopAsync();
+
+        // Если в карточке сайта остались другие аккаунты — покажем следующий, иначе выходим.
+        _ids.Remove(_id);
+        if (_ids.Count == 0) { await Navigation.PopAsync(); return; }
+        _index = Math.Min(_index, _ids.Count - 1);
+        _id = _ids[_index];
+        Load();
     }
 }

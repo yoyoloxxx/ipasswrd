@@ -17,17 +17,12 @@
             <HorizontalStackLayout x:Name="Chips" Spacing="8" />
         </ScrollView>
 
-        <CollectionView x:Name="List" Grid.Row="2" IsGrouped="True" SelectionMode="None">
-            <CollectionView.GroupHeaderTemplate>
-                <DataTemplate x:DataType="views:VaultGroup">
-                    <Label Text="{Binding Name}" Style="{StaticResource Section}" Margin="20,14,20,4" />
-                </DataTemplate>
-            </CollectionView.GroupHeaderTemplate>
+        <CollectionView x:Name="List" Grid.Row="2" SelectionMode="None">
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="views:VaultRow">
-                    <Grid Padding="16,5">
+                    <Grid Padding="{Binding Pad}">
                         <Border Style="{StaticResource Card}">
-                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                            <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12">
                                 <Border Grid.Column="0" WidthRequest="38" HeightRequest="38"
                                         StrokeThickness="0" StrokeShape="RoundRectangle 10"
                                         BackgroundColor="{AppThemeBinding Dark={StaticResource IpAccentWash}, Light={StaticResource IpAccentWashL}}">
@@ -41,6 +36,8 @@
                                 </VerticalStackLayout>
                                 <Label Grid.Column="2" Text="{Binding Star}" FontSize="14" VerticalOptions="Center"
                                        TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+                                <Label Grid.Column="3" Text="›" FontSize="20" VerticalOptions="Center" Margin="0,0,2,2"
+                                       TextColor="{AppThemeBinding Dark={StaticResource IpText3}, Light={StaticResource IpText3L}}" />
                             </Grid>
                         </Border>
                         <Grid.GestureRecognizers>
