@@ -1084,6 +1084,9 @@ public partial class MainWindow : Window
 
     private EntryRow MakeGroupRow(List<VaultEntry> g, string label)
     {
+        // Избранные логины — первыми внутри группы (стабильно, без смены остального порядка);
+        // представитель группы (подзаголовок, первый в детальном списке) — избранный.
+        g = g.OrderByDescending(e => e.Item.Favorite).ToList();
         var rep = g[0];
         int h = Hue(label);
         bool bad = g.Any(e => FlagsFor(e.Item).bad);
