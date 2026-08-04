@@ -13,9 +13,11 @@
 
         <SearchBar x:Name="Search" Grid.Row="0" Placeholder="Поиск" TextChanged="OnSearch" Margin="8,0" />
 
-        <ScrollView Grid.Row="1" Orientation="Horizontal" HorizontalScrollBarVisibility="Never" Margin="12,2,12,8">
-            <HorizontalStackLayout x:Name="Chips" Spacing="8" />
-        </ScrollView>
+        <Button x:Name="SectionBtn" Grid.Row="1" Clicked="OnSectionMenu"
+                FontSize="14" Padding="14,6" CornerRadius="14"
+                HorizontalOptions="Start" Margin="12,2,12,8"
+                BackgroundColor="{AppThemeBinding Dark={StaticResource IpSurface2}, Light={StaticResource IpSurface2L}}"
+                TextColor="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpTextL}}" />
 
         <CollectionView x:Name="List" Grid.Row="2" SelectionMode="None">
             <CollectionView.ItemTemplate>
