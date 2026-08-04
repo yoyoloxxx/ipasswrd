@@ -107,11 +107,9 @@ public partial class VaultListPage : ContentPage
             if (i > 0)
                 SectionMenuItems.Children.Add(new BoxView { HeightRequest = 0.7, Color = hair, Opacity = 0.35, Margin = new Thickness(14, 0) });
 
-            var row = new Grid
-            {
-                Padding = new Thickness(16, 12),
-                ColumnDefinitions = new ColumnDefinitions("*,Auto"),
-            };
+            var row = new Grid { Padding = new Thickness(16, 12) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Star });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.Children.Add(new Label
             {
                 Text = LabelFor(key, label, counts),
