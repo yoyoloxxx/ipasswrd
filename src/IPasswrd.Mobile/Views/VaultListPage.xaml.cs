@@ -70,21 +70,21 @@ public partial class VaultListPage : ContentPage
         return counts;
     }
 
-    private static string SectionLabel(string key, string label, IReadOnlyDictionary<string, int> counts) =>
+    private static string LabelFor(string key, string label, IReadOnlyDictionary<string, int> counts) =>
         counts.GetValueOrDefault(key) > 0 ? $"{label} ({counts[key]})" : label;
 
     private void UpdateSectionButton()
     {
         var counts = SectionCounts();
         var (_, label) = ChipDefs.First(d => d.Key == _filter);
-        SectionBtn.Text = SectionLabel(_filter, label, counts) + "  ⌄";
+        SectionLabel.Text = LabelFor(_filter, label, counts);
     }
 
     private async void OnSectionMenu(object? sender, EventArgs e)
     {
         var counts = SectionCounts();
         string[] options = ChipDefs
-            .Select(d => (d.Key == _filter ? "✓ " : "") + SectionLabel(d.Key, d.Label, counts))
+            .Select(d => (d.Key == _filter ? "✓ " : "") + LabelFor(d.Key, d.Label, counts))
             .ToArray();
         string? choice = await DisplayActionSheet("Показать", "Отмена", null, options);
         if (choice is null) return;
