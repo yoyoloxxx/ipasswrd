@@ -8,31 +8,32 @@
         <ToolbarItem Text="Изменить" Clicked="OnEdit" />
     </ContentPage.ToolbarItems>
 
-    <Grid x:Name="Root" RowDefinitions="Auto,*">
+    <Grid x:Name="Root" RowDefinitions="*,Auto">
 
-        <!-- Переключение между аккаунтами одного сайта -->
-        <Grid x:Name="SwitchBar" IsVisible="False" ColumnDefinitions="Auto,*,Auto" Padding="12,6,12,0">
-            <Button x:Name="PrevBtn" Text="◀" FontSize="15" Padding="18,4" BackgroundColor="Transparent"
-                    TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}"
-                    Clicked="OnPrev" />
-            <Label x:Name="SwitchLabel" Grid.Column="1" HorizontalOptions="Center" VerticalOptions="Center"
-                   Style="{StaticResource Muted}" FontSize="14" />
-            <Button x:Name="NextBtn" Grid.Column="2" Text="▶" FontSize="15" Padding="18,4" BackgroundColor="Transparent"
-                    TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}"
-                    Clicked="OnNext" />
-        </Grid>
-
-        <ScrollView x:Name="Scroll" Grid.Row="1">
+        <ScrollView x:Name="Scroll" Grid.Row="0">
             <VerticalStackLayout x:Name="Rows" Padding="16,10,16,30" Spacing="10" />
         </ScrollView>
 
-        <Border x:Name="Toast" Grid.Row="1" IsVisible="False" InputTransparent="True"
+        <Border x:Name="Toast" Grid.Row="0" IsVisible="False" InputTransparent="True"
                 VerticalOptions="End" HorizontalOptions="Center" Margin="0,0,0,28"
                 StrokeThickness="0" StrokeShape="RoundRectangle 18" Padding="16,9"
                 BackgroundColor="{AppThemeBinding Dark={StaticResource IpSurface2}, Light={StaticResource IpTextL}}">
             <Label x:Name="ToastLabel" FontSize="14"
                    TextColor="{AppThemeBinding Dark={StaticResource IpText}, Light={StaticResource IpSurfaceL}}" />
         </Border>
+
+        <!-- Переключение между аккаунтами одного сайта — внизу, под рукой -->
+        <Grid x:Name="SwitchBar" Grid.Row="1" IsVisible="False" ColumnDefinitions="Auto,*,Auto" Padding="12,4,12,10"
+              BackgroundColor="{AppThemeBinding Dark={StaticResource IpBgDeep}, Light={StaticResource IpBgDeepL}}">
+            <Button x:Name="PrevBtn" Text="◀" FontSize="17" Padding="24,6" BackgroundColor="Transparent"
+                    TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}"
+                    Clicked="OnPrev" />
+            <Label x:Name="SwitchLabel" Grid.Column="1" HorizontalOptions="Center" VerticalOptions="Center"
+                   Style="{StaticResource Muted}" FontSize="14" />
+            <Button x:Name="NextBtn" Grid.Column="2" Text="▶" FontSize="17" Padding="24,6" BackgroundColor="Transparent"
+                    TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}"
+                    Clicked="OnNext" />
+        </Grid>
 
     </Grid>
 
