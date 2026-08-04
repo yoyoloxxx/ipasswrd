@@ -15,6 +15,7 @@ public sealed class VaultRow
     public bool HasSubtitle => Subtitle.Length > 0;
     public string Badge { get; init; } = "";
     public string Star { get; init; } = "";
+    public bool Fav { get; init; }
     public Thickness Pad { get; set; } = new(16, 5);
 }
 
@@ -113,9 +114,11 @@ public partial class VaultListPage : ContentPage
 
         var list = visible.ToList();
 
-        // Избранное — сверху; дальше остальные, отделённые небольшим пробелом (без заголовков).
-        var favRows = BuildCards(list.Where(x => x.Item.Favorite).ToList(), siteNames);
-        var restRows = BuildCards(list.Where(x => !x.Item.Favorite).ToList(), siteNames);
+        // Избранное — сверху, как на ПК: карточка (группа сайта) поднимается целиком,
+        // если в ней есть хоть одна избранная запись; внутри карточки избранные — первыми.
+        var allRows = BuildCards(list, siteNames);
+        var favRows = allRows.Where(r => r.Fav).ToList();
+        var restRows = allRows.Where(r => !r.Fav).ToList();
         if (favRows.Count > 0 && restRows.Count > 0)
             restRows[0].Pad = new Thickness(16, 21, 16, 5);
 
@@ -160,7 +163,8 @@ public partial class VaultListPage : ContentPage
     private static VaultRow MakeSiteCard(string key, List<VaultEntry> members, Dictionary<string, string> siteNames, bool passkeys)
     {
         members = members
-            .OrderBy(x => x.Item.Fields.GetValueOrDefault("username", ""), StringComparer.CurrentCultureIgnoreCase)
+            .OrderByDescending(x => x.Item.Favorite)
+            .ThenBy(x => x.Item.Fields.GetValueOrDefault("username", ""), StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(x => x.Item.Title, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
 
@@ -193,6 +197,7 @@ public partial class VaultListPage : ContentPage
             Subtitle = subtitle,
             Badge = passkeys ? "🔑" : FirstLetter(name),
             Star = members.Any(m => m.Item.Favorite) ? "★" : "",
+            Fav = members.Any(m => m.Item.Favorite),
         };
     }
 
@@ -213,6 +218,7 @@ public partial class VaultListPage : ContentPage
                 Subtitle = subtitleOf(it),
                 Badge = badge,
                 Star = it.Favorite ? "★" : "",
+                Fav = it.Favorite,
             });
         }
     }
