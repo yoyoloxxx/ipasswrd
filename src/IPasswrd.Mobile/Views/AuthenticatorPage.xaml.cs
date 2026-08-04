@@ -181,7 +181,7 @@ public partial class AuthenticatorPage : ContentPage
     {
         if (e.Parameter is not AuthRow r || r.Cfg is null) return;
         string code = Totp.Generate(r.Cfg.Secret, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), r.Cfg.Digits, r.Cfg.Period, r.Cfg.Algorithm);
-        await Clipboard.Default.SetTextAsync(code);
+        await SecureClipboard.CopyAsync(code);
         await ShowToastAsync($"{r.Name}: код скопирован");
     }
 

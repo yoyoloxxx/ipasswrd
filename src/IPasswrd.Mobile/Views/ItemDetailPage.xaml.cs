@@ -213,7 +213,7 @@ public partial class ItemDetailPage : ContentPage
 
     private async Task CopyAsync(string value, string what)
     {
-        await Clipboard.Default.SetTextAsync(value);
+        await SecureClipboard.CopyAsync(value);
         await ShowToastAsync($"{what}: скопировано");
     }
 

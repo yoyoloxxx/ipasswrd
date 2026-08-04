@@ -11,18 +11,13 @@ public sealed class VaultRow
     public string Subtitle { get; init; } = "";
     public string Badge { get; init; } = "";
     public string Star { get; init; } = "";
-    public bool IsSpacer { get; init; }
     public VaultItem Item { get; init; } = new();
 }
 
-/// <summary>Плоский список: обычная строка или тонкий разделитель (после избранного).</summary>
-public sealed class VaultRowTemplateSelector : DataTemplateSelector
+public sealed class VaultGroup : List<VaultRow>
 {
-    public DataTemplate Row { get; set; } = null!;
-    public DataTemplate Spacer { get; set; } = null!;
-
-    protected override DataTemplate OnSelectTemplate(object item, BindableObject container)
-        => (item as VaultRow)?.IsSpacer == true ? Spacer : Row;
+    public string Name { get; }
+    public VaultGroup(string name, IEnumerable<VaultRow> rows) : base(rows) => Name = name;
 }
 
 public partial class VaultListPage : ContentPage
@@ -95,6 +90,7 @@ public partial class VaultListPage : ContentPage
         if (v is null) return;
 
         string q = (Search.Text ?? "").Trim().ToLowerInvariant();
+        Dictionary<string, string> siteNames = Svc.State.SiteNames();
 
         List<VaultEntry> all;
         try { all = v.Items().ToList(); }
@@ -113,18 +109,41 @@ public partial class VaultListPage : ContentPage
 
         var rows = visible.Select(MakeRow).ToList();
 
-        // Плоский список: избранное сверху, затем небольшой отступ, затем всё остальное — по алфавиту. Без групп-заголовков.
+        var groups = new List<VaultGroup>();
+
+        // Избранное — сверху, отдельной группой.
         var fav = rows.Where(r => r.Item.Favorite)
-            .OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase);
-        var rest = rows.Where(r => !r.Item.Favorite)
-            .OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase);
+            .OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToList();
+        if (fav.Count > 0) groups.Add(new VaultGroup("★ Избранное", fav));
 
-        var flat = new List<VaultRow>();
-        flat.AddRange(fav);
-        if (flat.Count > 0 && rest.Any()) flat.Add(new VaultRow { IsSpacer = true });
-        flat.AddRange(rest);
+        var rest = rows.Where(r => !r.Item.Favorite).ToList();
 
-        List.ItemsSource = new ObservableCollection<VaultRow>(flat);
+        // Аккаунты — группами по сайту (регистрируемый домен, имя из meta если задано), как на ПК.
+        var accounts = rest.Where(r => r.Item.Type == "account")
+            .GroupBy(r => SiteGroups.KeyFor(r.Item))
+            .OrderBy(g => SiteGroups.DisplayName(g.Key, siteNames), StringComparer.CurrentCultureIgnoreCase);
+        foreach (var g in accounts)
+            groups.Add(new VaultGroup(SiteGroups.DisplayName(g.Key, siteNames),
+                g.OrderBy(r => r.Subtitle, StringComparer.CurrentCultureIgnoreCase)));
+
+        AddTypeGroup(groups, rest, "card", "Карты");
+        AddTypeGroup(groups, rest, "document", "Документы");
+        AddTypeGroup(groups, rest, "note", "Заметки");
+        AddTypeGroup(groups, rest, "passkey", "Ключи доступа");
+        AddTypeGroup(groups, rest, null, "Прочее");
+
+        List.ItemsSource = new ObservableCollection<VaultGroup>(groups);
+    }
+
+    private static readonly HashSet<string> KnownTypes = new() { "account", "card", "document", "note", "passkey" };
+
+    private static void AddTypeGroup(List<VaultGroup> groups, List<VaultRow> rest, string? type, string title)
+    {
+        var items = rest
+            .Where(r => type is null ? !KnownTypes.Contains(r.Item.Type) : r.Item.Type == type)
+            .OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        if (items.Count > 0) groups.Add(new VaultGroup(title, items));
     }
 
     private static VaultRow MakeRow(VaultEntry e)
@@ -159,7 +178,7 @@ public partial class VaultListPage : ContentPage
 
     private async void OnRowTapped(object? sender, TappedEventArgs e)
     {
-        if (e.Parameter is VaultRow row && !row.IsSpacer)
+        if (e.Parameter is VaultRow row)
             await Navigation.PushAsync(new ItemDetailPage(row.Id));
     }
 

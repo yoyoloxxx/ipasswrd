@@ -49,6 +49,13 @@ public sealed class AppState
         }
     }
 
+    /// <summary>Секунд до авто-очистки буфера (0 = выкл; по умолчанию 30, как на ПК).</summary>
+    public int ClipboardClearSeconds
+    {
+        get => Preferences.Get("clipboardClearSeconds", 30);
+        set { Preferences.Set("clipboardClearSeconds", value); SecureClipboard.ClearSeconds = value; }
+    }
+
     public string? LastSyncStatus { get; private set; }
 
     // ================= локаут (как на Windows: счётчик на устройстве) =================
@@ -127,6 +134,7 @@ public sealed class AppState
 
     private void AfterUnlock()
     {
+        SecureClipboard.ClearSeconds = ClipboardClearSeconds;   // применить настройку авто-очистки буфера
         if (BiometricUnlockEnabled) SaveQuickUnlock();
         LockedChanged?.Invoke();
         _ = SyncAsync();   // фоновая сверка с файлом в iCloud
@@ -222,6 +230,7 @@ public sealed class AppState
     /// <summary>Убрать сейф из памяти (Face ID продолжает работать — ключ остаётся в Keychain).</summary>
     public void Lock()
     {
+        SecureClipboard.Wipe();   // стереть скопированный секрет при блокировке
         _vault = null;
         LockedChanged?.Invoke();
     }
@@ -316,6 +325,36 @@ public sealed class AppState
         }
         await SaveAsync();
         return null;
+    }
+
+    // ================= импорт из файла =================
+
+    /// <summary>Разобрать экспорт (CSV/Kaspersky), схлопнуть дубли и добавить только новые записи.
+    /// Возвращает (добавлено, всего в файле). Дубли определяются как на ПК (Core.Dedup).</summary>
+    public async Task<(int added, int parsed)> ImportAsync(string content)
+    {
+        if (_vault is null) return (0, 0);
+
+        List<VaultItem> parsed = await Task.Run(() => IPasswrd.Core.Import.Importer.Parse(content));
+        if (parsed.Count == 0) return (0, 0);
+
+        // ключи уже существующих записей — чтобы не заводить дубли того, что уже есть
+        var existing = new HashSet<string>(StringComparer.Ordinal);
+        foreach (VaultEntry e in _vault.Items())
+            existing.Add(Dedup.Key(e.Item));
+
+        int added = 0;
+        foreach (VaultItem it in Dedup.Collapse(parsed))
+        {
+            if (existing.Add(Dedup.Key(it)))   // Add == true → раньше не встречалось
+            {
+                _vault.Add(it);
+                added++;
+            }
+        }
+
+        if (added > 0) await SaveAsync();
+        return (added, parsed.Count);
     }
 
     // ================= настройки, синхронизируемые через сейф (meta-запись) =================

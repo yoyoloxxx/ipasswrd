@@ -1,4 +1,5 @@
 using IPasswrd.Core;
+using IPasswrd.Mobile.Services;
 
 namespace IPasswrd.Mobile.Views;
 
@@ -54,7 +55,7 @@ public partial class GeneratorPage : ContentPage
     private async void OnCopy(object? sender, EventArgs e)
     {
         if (_current.Length == 0) return;
-        await Clipboard.Default.SetTextAsync(_current);
+        await SecureClipboard.CopyAsync(_current);
         await ShowToastAsync("Пароль скопирован");
     }
 
