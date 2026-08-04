@@ -255,6 +255,7 @@
 
   // ---------- state ----------
   let items = [];
+  let codes = [];   // standalone authenticator codes matched to this site (live, from the app)
   let unlocked = false;
   let queried = false;
   let filledOnce = false;
@@ -268,7 +269,7 @@
   async function query() {
     const r = await send({ cmd: "credentials", url: location.href });
     if (!r || !r.ok) { try { console.log("[IPWNM]", location.hostname, `err=${r && r.error} ${r && r.detail || ""}`); } catch (e) {} }   // failures only, never credentials
-    if (r && r.ok) { unlocked = !!r.unlocked; items = r.items || []; queried = true; }
+    if (r && r.ok) { unlocked = !!r.unlocked; items = r.items || []; codes = r.codes || []; queried = true; }
     return r;
   }
   async function ensureList() {
@@ -420,9 +421,10 @@
       else add(`<div class="t">Нет документов в сейфе</div>`, null);
       openApp();
     } else if (group === "otp") {
-      const withCode = items.filter((it) => it.totp);
+      const withCode = items.filter((it) => it.totp).map((it) => ({ code: it.totp, name: it.username || it.title || "" }))
+        .concat((codes || []).map((c) => ({ code: c.code, name: c.title || "" })));
       if (withCode.length) for (const it of withCode)
-        add(`<div class="u">${esc(it.totp)}</div><div class="t">${esc(it.title || it.username || "")}</div>`, () => fillOtp(field, it.totp));
+        add(`<div class="u">${esc(it.code)}</div><div class="t">${esc(it.name)}</div>`, () => fillOtp(field, it.code));
       else add(`<div class="t">Нет кодов проверки для этого сайта</div>`, null);
       openApp();
     }

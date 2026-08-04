@@ -2110,11 +2110,16 @@ public partial class MainWindow : Window
 
         var sum = new StackPanel { Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
         sum.Children.Add(new TextBlock { Text = total == 0 ? "Пока нет аккаунтов" : score >= 80 ? "Хорошая защита" : "Есть над чем поработать", FontSize = 15, FontWeight = FontWeight.Bold, Foreground = Text });
-        sum.Children.Add(new TextBlock { Text = $"{Tr("Проверено аккаунтов")}: {total}. {Tr("Надёжных")}: {report.Ok}.", Foreground = Text2, FontSize = 12.5, TextWrapping = TextWrapping.Wrap });
+        // Все цифры сходятся: надёжные + средние + проблемные = проверенные.
         int reusedDistinct = report.Reused.Select(r => r.Id).Distinct().Count();
+        var problemIds = new HashSet<string>(report.Weak.Select(w => w.Id));
+        foreach (var r in report.Reused) problemIds.Add(r.Id);
+        int medium = Math.Max(0, total - report.Ok - problemIds.Count);
+        sum.Children.Add(new TextBlock { Text = $"Оценка {score} из 100 — доля надёжных паролей без повторов. Проверено аккаунтов: {total}: надёжных {report.Ok}, средних {medium}, проблемных {problemIds.Count} (слабых {report.Weak.Count}, с одинаковым паролем {reusedDistinct}).", Foreground = Text2, FontSize = 12.5, TextWrapping = TextWrapping.Wrap });
         var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 2, 0, 0) };
-        chips.Children.Add(SecChip($"{report.Weak.Count} {Tr("ненадёжных")}", Bad, BadWash));
-        chips.Children.Add(SecChip($"{reusedDistinct} {Tr("повторяются")}", Warn, WarnWash));
+        if (report.Weak.Count > 0) chips.Children.Add(SecChip($"слабых: {report.Weak.Count}", Bad, BadWash));
+        if (reusedDistinct > 0) chips.Children.Add(SecChip($"повторяются: {reusedDistinct}", Warn, WarnWash));
+        if (medium > 0) chips.Children.Add(SecChip($"средних: {medium}", Warn, WarnWash));
         sum.Children.Add(chips);
         Grid.SetColumn(sum, 1);
 
@@ -2269,6 +2274,28 @@ public partial class MainWindow : Window
             var del = IconButton("trash", Bad, "Удалить код");
             del.Click += (_, _) => { try { _vault!.Delete(e.Id); Save(); } catch { /* best effort */ } RenderSidebar(); ShowTool("authenticator"); };
             right.Children.Add(del);
+        }
+        else
+        {
+            // Код прикреплён к записи аккаунта: карандаш открывает запись,
+            // корзинка убирает код из неё (сама запись остаётся).
+            var edit = IconButton("edit", Text2, "Изменить запись");
+            edit.Click += (_, _) => { try { OpenEditor(_vault!.Get(e.Id), e.Id); } catch { /* запись могла исчезнуть */ } };
+            right.Children.Add(edit);
+            var unlink = IconButton("trash", Bad, "Убрать код из записи");
+            unlink.Click += (_, _) =>
+            {
+                try
+                {
+                    var it = _vault!.Get(e.Id);
+                    it.Fields.Remove("totp");
+                    _vault.Update(e.Id, it);
+                    Save();
+                }
+                catch { /* best effort */ }
+                RenderSidebar(); ShowTool("authenticator");
+            };
+            right.Children.Add(unlink);
         }
         Grid.SetColumn(right, 2);
 

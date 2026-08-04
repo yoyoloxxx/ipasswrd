@@ -214,7 +214,39 @@ public partial class MainWindow
                 related = !family.Contains(a.dom),                                        // menu-only: excluded from silent autofill
             })
             .ToList();
-        return Resp(new { ok = true, unlocked = true, items });
+        var codes = _vault.Items()
+            .Where(x => x.Item.Type == "totp")
+            .Where(x => x.Item.Fields.GetValueOrDefault("totp", "").Trim().Length > 0)
+            .Where(x => TotpMatchesSite(x.Item, baseDom))
+            .Select(x => new { title = x.Item.Title, code = TotpNow(x.Item.Fields.GetValueOrDefault("totp", "")) })
+            .Where(c => !string.IsNullOrEmpty(c.code))
+            .ToList();
+        return Resp(new { ok = true, unlocked = true, items, codes });
+    }
+
+    // Standalone authenticator records matched to a site: "google" <-> google.com.
+    // Equality of the site base always counts; substring only when both sides are 5+ chars
+    // (so "mail" never matches "gmail").
+    private static bool TotpMatchesSite(VaultItem rec, string baseDom)
+    {
+        static string Norm(string s) => new string((s ?? "").ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+        bool ip = baseDom.Length > 0 && baseDom.All(ch => char.IsDigit(ch) || ch == '.' || ch == ':');
+        int dot = baseDom.IndexOf('.');
+        string b = Norm(ip ? baseDom : (dot > 0 ? baseDom.Substring(0, dot) : baseDom));
+        if (b.Length == 0) return false;
+
+        string issuer = "", account = "";
+        try { var cfg = Totp.Parse(rec.Fields.GetValueOrDefault("totp", "")); issuer = cfg.Issuer ?? ""; account = cfg.Account ?? ""; }
+        catch { }
+
+        foreach (string cand in new[] { rec.Title, issuer, account })
+        {
+            string c = Norm(cand);
+            if (c.Length == 0) continue;
+            if (c == b) return true;
+            if (c.Length >= 5 && b.Length >= 5 && (c.Contains(b) || b.Contains(c))) return true;
+        }
+        return false;
     }
 
     private static string TotpNow(string secret)
