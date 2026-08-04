@@ -80,20 +80,67 @@ public partial class VaultListPage : ContentPage
         SectionLabel.Text = LabelFor(_filter, label, counts);
     }
 
-    private async void OnSectionMenu(object? sender, EventArgs e)
+    private void OnSectionMenu(object? sender, EventArgs e)
+    {
+        if (SectionMenuOverlay.IsVisible) { SectionMenuOverlay.IsVisible = false; return; }
+        BuildSectionMenu();
+        SectionMenuOverlay.IsVisible = true;
+    }
+
+    private void OnSectionMenuDismiss(object? sender, TappedEventArgs e) =>
+        SectionMenuOverlay.IsVisible = false;
+
+    private void BuildSectionMenu()
     {
         var counts = SectionCounts();
-        string[] options = ChipDefs
-            .Select(d => (d.Key == _filter ? "✓ " : "") + LabelFor(d.Key, d.Label, counts))
-            .ToArray();
-        string? choice = await DisplayActionSheet("Показать", "Отмена", null, options);
-        if (choice is null) return;
-        int idx = Array.IndexOf(options, choice);
-        if (idx < 0 || ChipDefs[idx].Key == _filter) return;
-        _filter = ChipDefs[idx].Key;
-        UpdateSectionButton();
-        Reload();
+        SectionMenuItems.Children.Clear();
+        bool dark = Application.Current?.RequestedTheme != AppTheme.Light;
+        Color text = GetColor(dark ? "IpText" : "IpTextL");
+        Color accent = GetColor(dark ? "IpAccent" : "IpAccentL");
+        Color hair = GetColor(dark ? "IpText3" : "IpText3L");
+
+        for (int i = 0; i < ChipDefs.Length; i++)
+        {
+            var (key, label) = ChipDefs[i];
+            bool on = key == _filter;
+
+            if (i > 0)
+                SectionMenuItems.Children.Add(new BoxView { HeightRequest = 0.7, Color = hair, Opacity = 0.35, Margin = new Thickness(14, 0) });
+
+            var row = new Grid
+            {
+                Padding = new Thickness(16, 12),
+                ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            };
+            row.Children.Add(new Label
+            {
+                Text = LabelFor(key, label, counts),
+                FontSize = 15,
+                TextColor = on ? accent : text,
+                FontAttributes = on ? FontAttributes.Bold : FontAttributes.None,
+                VerticalOptions = LayoutOptions.Center,
+            });
+            var check = new Label { Text = on ? "✓" : "", FontSize = 15, TextColor = accent, VerticalOptions = LayoutOptions.Center };
+            Grid.SetColumn((BindableObject)check, 1);
+            row.Children.Add(check);
+
+            string k = key;   // замыкание
+            var tap = new TapGestureRecognizer();
+            tap.Tapped += (_, _) =>
+            {
+                SectionMenuOverlay.IsVisible = false;
+                if (_filter == k) return;
+                _filter = k;
+                UpdateSectionButton();
+                Reload();
+            };
+            row.GestureRecognizers.Add(tap);
+            SectionMenuItems.Children.Add(row);
+        }
     }
+
+    private static Color GetColor(string key) =>
+        Application.Current?.Resources.TryGetValue(key, out var v) == true && v is Color c ? c : Colors.Gray;
 
     private void OnSearch(object? sender, TextChangedEventArgs e) => Reload();
 
