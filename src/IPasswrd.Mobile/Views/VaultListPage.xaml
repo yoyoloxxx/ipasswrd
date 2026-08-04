@@ -65,6 +65,19 @@
             </CollectionView.EmptyView>
         </CollectionView>
 
+        <!-- Выпадающее меню разделов: панель под кнопкой, поверх списка (тап мимо — закрыть). -->
+        <Grid x:Name="SectionMenuOverlay" Grid.Row="1" Grid.RowSpan="2" IsVisible="False"
+              BackgroundColor="#55000000">
+            <Grid.GestureRecognizers>
+                <TapGestureRecognizer Tapped="OnSectionMenuDismiss" />
+            </Grid.GestureRecognizers>
+            <Border StrokeThickness="0" StrokeShape="RoundRectangle 16"
+                    Margin="12,46,12,0" VerticalOptions="Start"
+                    BackgroundColor="{AppThemeBinding Dark={StaticResource IpSurface2}, Light={StaticResource IpSurface2L}}">
+                <VerticalStackLayout x:Name="SectionMenuItems" Padding="0,4" />
+            </Border>
+        </Grid>
+
     </Grid>
 
 </ContentPage>
