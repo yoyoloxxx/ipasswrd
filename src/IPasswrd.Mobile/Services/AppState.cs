@@ -136,8 +136,23 @@ public sealed class AppState
     {
         SecureClipboard.ClearSeconds = ClipboardClearSeconds;   // применить настройку авто-очистки буфера
         if (BiometricUnlockEnabled) SaveQuickUnlock();
+        ShareForAutoFill();
         LockedChanged?.Invoke();
         _ = SyncAsync();   // фоновая сверка с файлом в iCloud
+    }
+
+    /// <summary>Передать зашифрованную копию сейфа расширению автозаполнения
+    /// и обновить подсказки логинов над клавиатурой.</summary>
+    private void ShareForAutoFill()
+    {
+        try
+        {
+            Vault? v = _vault;
+            if (v is null) return;
+            AutoFillShare.MirrorVault(v.Serialize());
+            AutoFillShare.UpdateIdentities(v);
+        }
+        catch { /* необязательный путь */ }
     }
 
     /// <summary>
@@ -256,6 +271,7 @@ public sealed class AppState
         File.WriteAllBytes(LocalVaultPath, data);
         VaultChanged?.Invoke();
         if (BiometricUnlockEnabled) SaveQuickUnlock();
+        ShareForAutoFill();
         await SyncAsync();
     }
 
@@ -289,6 +305,7 @@ public sealed class AppState
                 if (changed > 0 && ReferenceEquals(_vault, v))
                 {
                     File.WriteAllBytes(LocalVaultPath, v.Serialize());
+                    ShareForAutoFill();
                     MainThread.BeginInvokeOnMainThread(() => VaultChanged?.Invoke());
                 }
             }

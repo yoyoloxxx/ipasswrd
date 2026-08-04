@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Расширение автозаполнения iOS (Credential Provider). Встраивается в
+         IPasswrd.Mobile через ProjectReference: сборка кладёт .appex в PlugIns. -->
+    <TargetFramework>net9.0-ios</TargetFramework>
+    <OutputType>Library</OutputType>
+    <IsAppExtension>true</IsAppExtension>
+    <RootNamespace>IPasswrd.AutoFill</RootNamespace>
+    <AssemblyName>IPasswrd.AutoFill</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+
+    <!-- id расширения обязан быть <id приложения>.суффикс -->
+    <ApplicationId>com.yoyoloxxx.ipasswrd.AutoFill</ApplicationId>
+    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+
+    <!-- как в основном приложении: сейф читается рефлексией System.Text.Json -->
+    <TrimMode>partial</TrimMode>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <TrimmerRootAssembly Include="IPasswrd.Core" />
+    <ProjectReference Include="..\IPasswrd.Core\IPasswrd.Core.csproj" />
+  </ItemGroup>
+
+</Project>

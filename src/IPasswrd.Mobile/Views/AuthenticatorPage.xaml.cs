@@ -212,6 +212,59 @@ public partial class AuthenticatorPage : ContentPage
         await ShowToastAsync($"{r.Name}: код скопирован");
     }
 
+    private async void OnEditClicked(object? sender, EventArgs e)
+    {
+        if ((sender as Button)?.CommandParameter is not AuthRow r) return;
+        Vault? v = Svc.State.Vault;
+        if (v is null) return;
+
+        if (!r.Standalone)
+        {
+            await DisplayAlert("Это код аккаунта",
+                "Название и секрет этого кода меняются в самой записи (Сейф → запись → Изменить).", "Ок");
+            return;
+        }
+
+        string? choice = await DisplayActionSheet(r.Name, "Отмена", null, "Переименовать", "Заменить секрет");
+        if (choice == "Переименовать")
+        {
+            string? name = await DisplayPromptAsync("Название", "Как подписать этот код?",
+                "Сохранить", "Отмена", initialValue: r.Name);
+            if (name is null || name.Trim().Length == 0 || name.Trim() == r.Name) return;
+            try
+            {
+                VaultItem it = v.Get(r.Id);
+                it.Title = name.Trim();
+                v.Update(r.Id, it);
+            }
+            catch (Exception) { return; }
+            await Svc.State.SaveAsync();
+            Reload();
+            await ShowToastAsync("Переименовано");
+        }
+        else if (choice == "Заменить секрет")
+        {
+            string? secret = await DisplayPromptAsync("Новый секрет", "Base32 или ссылка otpauth:// с сайта",
+                "Сохранить", "Отмена");
+            if (string.IsNullOrWhiteSpace(secret)) return;
+            if (!Totp.IsValidSecret(secret))
+            {
+                await DisplayAlert("Не получилось", "Секрет не распознан. Нужен Base32 (A–Z, 2–7) или ссылка otpauth://.", "Ок");
+                return;
+            }
+            try
+            {
+                VaultItem it = v.Get(r.Id);
+                it.Fields["totp"] = secret.Trim();
+                v.Update(r.Id, it);
+            }
+            catch (Exception) { return; }
+            await Svc.State.SaveAsync();
+            Reload();
+            await ShowToastAsync("Секрет обновлён");
+        }
+    }
+
     private async void OnDeleteClicked(object? sender, EventArgs e)
     {
         if ((sender as Button)?.CommandParameter is not AuthRow r) return;

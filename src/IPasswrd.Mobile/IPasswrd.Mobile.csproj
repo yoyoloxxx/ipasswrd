@@ -49,6 +49,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\IPasswrd.Core\IPasswrd.Core.csproj" />
+    <!-- Системное автозаполнение iOS: .appex собирается и кладётся в PlugIns автоматически -->
+    <ProjectReference Include="..\IPasswrd.AutoFill\IPasswrd.AutoFill.csproj" />
   </ItemGroup>
 
 </Project>
