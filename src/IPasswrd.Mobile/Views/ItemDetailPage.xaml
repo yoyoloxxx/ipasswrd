@@ -8,7 +8,7 @@
         <ToolbarItem Text="Изменить" Clicked="OnEdit" />
     </ContentPage.ToolbarItems>
 
-    <Grid RowDefinitions="Auto,*">
+    <Grid x:Name="Root" RowDefinitions="Auto,*">
 
         <!-- Переключение между аккаунтами одного сайта -->
         <Grid x:Name="SwitchBar" IsVisible="False" ColumnDefinitions="Auto,*,Auto" Padding="12,6,12,0">

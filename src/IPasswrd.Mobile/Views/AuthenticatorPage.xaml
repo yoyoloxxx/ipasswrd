@@ -15,19 +15,32 @@
                 <DataTemplate x:DataType="views:AuthRow">
                     <SwipeView>
                         <SwipeView.RightItems>
-                            <SwipeItems>
-                                <SwipeItem Text="Удалить" BackgroundColor="{StaticResource IpBad}" Invoked="OnDeleteRow" CommandParameter="{Binding .}" />
+                            <SwipeItems Mode="Reveal">
+                                <SwipeItemView>
+                                    <Border StrokeThickness="0" StrokeShape="RoundRectangle 16" WidthRequest="96" Margin="0,7,16,7"
+                                            BackgroundColor="{StaticResource IpBad}">
+                                        <VerticalStackLayout Spacing="2" HorizontalOptions="Center" VerticalOptions="Center">
+                                            <Label Text="🗑" FontSize="18" HorizontalOptions="Center" />
+                                            <Label Text="Удалить" TextColor="White" FontSize="13" HorizontalOptions="Center" />
+                                        </VerticalStackLayout>
+                                        <Border.GestureRecognizers>
+                                            <TapGestureRecognizer Tapped="OnDeleteTapped" CommandParameter="{Binding .}" />
+                                        </Border.GestureRecognizers>
+                                    </Border>
+                                </SwipeItemView>
                             </SwipeItems>
                         </SwipeView.RightItems>
                         <Grid Padding="16,7">
                             <Border Style="{StaticResource Card}">
-                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="10">
+                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="10">
                                     <Label Text="{Binding Name}" FontSize="15" LineBreakMode="TailTruncation" />
-                                    <Label Grid.Row="1" Text="{Binding Code}" FontSize="30" FontFamily="Menlo" FontAttributes="Bold"
+                                    <Label Grid.Row="1" Text="{Binding Sub}" IsVisible="{Binding HasSub}"
+                                           Style="{StaticResource Muted}" FontSize="12" LineBreakMode="TailTruncation" />
+                                    <Label Grid.Row="2" Text="{Binding Code}" FontSize="30" FontFamily="Menlo" FontAttributes="Bold"
                                            TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
-                                    <Label Grid.Column="1" Grid.RowSpan="2" Text="{Binding Seconds}" VerticalOptions="End"
+                                    <Label Grid.Column="1" Grid.RowSpan="3" Text="{Binding Seconds}" VerticalOptions="End"
                                            Style="{StaticResource Muted}" FontSize="13" />
-                                    <ProgressBar Grid.Row="2" Grid.ColumnSpan="2" Progress="{Binding Progress}" Margin="0,6,0,0" />
+                                    <ProgressBar Grid.Row="3" Grid.ColumnSpan="2" Progress="{Binding Progress}" Margin="0,6,0,0" />
                                 </Grid>
                             </Border>
                             <Grid.GestureRecognizers>
