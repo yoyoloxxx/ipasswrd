@@ -28,12 +28,11 @@ public partial class VaultListPage : ContentPage
     };
 
     private string _filter = "all";
-    private readonly List<Button> _chipButtons = new();
 
     public VaultListPage()
     {
         InitializeComponent();
-        BuildChips();
+        UpdateSectionButton();
         Svc.State.VaultChanged += OnVaultChanged;
 
         // Клавиатура поиска закрывается по «Найти» и при прокрутке списка.
@@ -49,41 +48,52 @@ public partial class VaultListPage : ContentPage
         Reload();
     }
 
-    private void BuildChips()
+    // ===== выбор раздела: одна кнопка с текущим разделом (как в Kaspersky), по тапу — меню =====
+
+    /// <summary>Количество записей в каждом разделе (без totp и meta).</summary>
+    private Dictionary<string, int> SectionCounts()
     {
-        foreach (var (key, label) in ChipDefs)
+        var counts = ChipDefs.ToDictionary(d => d.Key, _ => 0);
+        Vault? v = Svc.State.Vault;
+        if (v is null) return counts;
+        try
         {
-            var b = new Button
+            foreach (VaultEntry e in v.Items())
             {
-                Text = label,
-                FontSize = 14,
-                Padding = new Thickness(14, 6),
-                CornerRadius = 14,
-            };
-            b.Clicked += (_, _) => { _filter = key; StyleChips(); Reload(); };
-            _chipButtons.Add(b);
-            Chips.Children.Add(b);
+                string t = e.Item.Type;
+                if (t is "totp" or "meta") continue;
+                counts["all"]++;
+                if (counts.ContainsKey(t)) counts[t]++;
+            }
         }
-        StyleChips();
+        catch (Exception) { }
+        return counts;
     }
 
-    private void StyleChips()
+    private static string SectionLabel(string key, string label, IReadOnlyDictionary<string, int> counts) =>
+        counts.GetValueOrDefault(key) > 0 ? $"{label} ({counts[key]})" : label;
+
+    private void UpdateSectionButton()
     {
-        bool dark = Application.Current?.RequestedTheme != AppTheme.Light;
-        for (int i = 0; i < _chipButtons.Count; i++)
-        {
-            bool on = ChipDefs[i].Key == _filter;
-            _chipButtons[i].BackgroundColor = on
-                ? GetColor(dark ? "IpAccent" : "IpAccentL")
-                : GetColor(dark ? "IpSurface2" : "IpSurface2L");
-            _chipButtons[i].TextColor = on
-                ? GetColor(dark ? "IpOnAccent" : "IpOnAccentL")
-                : GetColor(dark ? "IpText2" : "IpText2L");
-        }
+        var counts = SectionCounts();
+        var (_, label) = ChipDefs.First(d => d.Key == _filter);
+        SectionBtn.Text = SectionLabel(_filter, label, counts) + "  ⌄";
     }
 
-    private static Color GetColor(string key) =>
-        Application.Current?.Resources.TryGetValue(key, out var v) == true && v is Color c ? c : Colors.Gray;
+    private async void OnSectionMenu(object? sender, EventArgs e)
+    {
+        var counts = SectionCounts();
+        string[] options = ChipDefs
+            .Select(d => (d.Key == _filter ? "✓ " : "") + SectionLabel(d.Key, d.Label, counts))
+            .ToArray();
+        string? choice = await DisplayActionSheet("Показать", "Отмена", null, options);
+        if (choice is null) return;
+        int idx = Array.IndexOf(options, choice);
+        if (idx < 0 || ChipDefs[idx].Key == _filter) return;
+        _filter = ChipDefs[idx].Key;
+        UpdateSectionButton();
+        Reload();
+    }
 
     private void OnSearch(object? sender, TextChangedEventArgs e) => Reload();
 
@@ -91,6 +101,8 @@ public partial class VaultListPage : ContentPage
     {
         Vault? v = Svc.State.Vault;
         if (v is null) return;
+
+        UpdateSectionButton();   // счётчики на кнопке раздела обновляются вместе со списком
 
         string q = (Search.Text ?? "").Trim().ToLowerInvariant();
         Dictionary<string, string> siteNames = Svc.State.SiteNames();
