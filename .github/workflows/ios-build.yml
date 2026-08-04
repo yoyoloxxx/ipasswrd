@@ -36,10 +36,30 @@ jobs:
           -p:RuntimeIdentifier=ios-arm64
           -p:EnableCodeSigning=false
           -p:IpwNet9Only=true
-      - name: Ad-hoc sign with entitlements (AltStore читает их при переподписи)
+      - name: Embed AutoFill appex (MAUI не встраивает ProjectReference-расширение сам)
         run: |
           APP=$(find bin/Release/net9.0-ios -name "*.app" -type d | head -1)
           echo "app bundle: $APP"
+          if [ ! -d "$APP/PlugIns/IPasswrd.AutoFill.appex" ]; then
+            SRC=$(find ../IPasswrd.AutoFill/bin -name "IPasswrd.AutoFill.appex" -type d | head -1)
+            if [ -z "$SRC" ]; then
+              echo "appex не найден в bin — собираю расширение отдельно"
+              dotnet publish ../IPasswrd.AutoFill/IPasswrd.AutoFill.csproj -f net9.0-ios -c Release -p:RuntimeIdentifier=ios-arm64 -p:EnableCodeSigning=false -p:IpwNet9Only=true
+              SRC=$(find ../IPasswrd.AutoFill/bin -name "IPasswrd.AutoFill.appex" -type d | head -1)
+            fi
+            if [ -n "$SRC" ]; then
+              mkdir -p "$APP/PlugIns"
+              cp -R "$SRC" "$APP/PlugIns/"
+              echo "appex скопирован из $SRC"
+            else
+              echo "::error::IPasswrd.AutoFill.appex так и не собрался"
+              exit 1
+            fi
+          fi
+          ls "$APP/PlugIns/IPasswrd.AutoFill.appex" | head -20
+      - name: Ad-hoc sign with entitlements (AltStore читает их при переподписи)
+        run: |
+          APP=$(find bin/Release/net9.0-ios -name "*.app" -type d | head -1)
           sign_nested() {
             if [ -d "$1/Frameworks" ]; then
               find "$1/Frameworks" -maxdepth 1 \( -name "*.framework" -o -name "*.dylib" \) -print0 |
@@ -47,14 +67,9 @@ jobs:
             fi
           }
           APPEX="$APP/PlugIns/IPasswrd.AutoFill.appex"
-          if [ -d "$APPEX" ]; then
-            sign_nested "$APPEX"
-            /usr/bin/codesign --force -s - --entitlements ../IPasswrd.AutoFill/Entitlements.plist "$APPEX"
-            echo "appex signed"
-          else
-            echo "::warning::PlugIns/IPasswrd.AutoFill.appex не найден — расширение не попало в бандл"
-            ls -R "$APP" | head -50
-          fi
+          sign_nested "$APPEX"
+          /usr/bin/codesign --force -s - --entitlements ../IPasswrd.AutoFill/Entitlements.plist "$APPEX"
+          echo "appex signed"
           sign_nested "$APP"
           /usr/bin/codesign --force -s - --entitlements Entitlements.plist "$APP"
           /usr/bin/codesign -d --entitlements :- "$APP" | head -30
