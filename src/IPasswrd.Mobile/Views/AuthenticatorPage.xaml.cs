@@ -91,7 +91,10 @@ public partial class AuthenticatorPage : ContentPage
                 sub = e.Item.Fields.GetValueOrDefault("username", "");
             else
             {
-                sub = (cfg?.Account ?? "").Trim();
+                // Сначала аккаунт, сохранённый в самой записи кода (ручной ввод/редактирование),
+                // затем аккаунт из otpauth://, затем — вывод по единственному логину сайта.
+                sub = e.Item.Fields.GetValueOrDefault("username", "").Trim();
+                if (sub.Length == 0) sub = (cfg?.Account ?? "").Trim();
                 if (sub.Length == 0)
                 {
                     var logins = accounts
@@ -237,7 +240,7 @@ public partial class AuthenticatorPage : ContentPage
             return;
         }
 
-        string? choice = await DisplayActionSheet(r.Name, "Отмена", null, "Переименовать", "Заменить секрет");
+        string? choice = await DisplayActionSheet(r.Name, "Отмена", null, "Переименовать", "Изменить аккаунт", "Заменить секрет");
         if (choice == "Переименовать")
         {
             string? name = await DisplayPromptAsync("Название", "Как подписать этот код?",
@@ -253,6 +256,32 @@ public partial class AuthenticatorPage : ContentPage
             await Svc.State.SaveAsync();
             Reload();
             await ShowToastAsync("Переименовано");
+        }
+        else if (choice == "Изменить аккаунт")
+        {
+            string current = "";
+            try
+            {
+                VaultItem cur = v.Get(r.Id);
+                current = cur.Fields.GetValueOrDefault("username", "").Trim();
+                if (current.Length == 0) current = (r.Cfg?.Account ?? "").Trim();
+            }
+            catch (Exception) { }
+
+            string? account = await DisplayPromptAsync("Аккаунт", "Имя или почта (пусто — убрать)",
+                "Сохранить", "Отмена", initialValue: current);
+            if (account is null) return;
+            try
+            {
+                VaultItem it = v.Get(r.Id);
+                if (account.Trim().Length == 0) it.Fields.Remove("username");
+                else it.Fields["username"] = account.Trim();
+                v.Update(r.Id, it);
+            }
+            catch (Exception) { return; }
+            await Svc.State.SaveAsync();
+            Reload();
+            await ShowToastAsync("Аккаунт обновлён");
         }
         else if (choice == "Заменить секрет")
         {
