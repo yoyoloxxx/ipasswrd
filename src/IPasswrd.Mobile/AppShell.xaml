@@ -11,6 +11,7 @@
     <TabBar>
         <ShellContent Title="Сейф" Icon="tab_vault.png" ContentTemplate="{DataTemplate views:VaultListPage}" />
         <ShellContent Title="Коды" Icon="tab_codes.png" ContentTemplate="{DataTemplate views:AuthenticatorPage}" />
+        <ShellContent Title="Защита" Icon="tab_security.png" ContentTemplate="{DataTemplate views:SecurityPage}" />
         <ShellContent Title="Генератор" Icon="tab_generator.png" ContentTemplate="{DataTemplate views:GeneratorPage}" />
         <ShellContent Title="Настройки" Icon="tab_settings.png" ContentTemplate="{DataTemplate views:SettingsPage}" />
     </TabBar>

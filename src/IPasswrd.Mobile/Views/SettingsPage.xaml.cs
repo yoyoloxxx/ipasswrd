@@ -15,6 +15,7 @@ public partial class SettingsPage : ContentPage
     {
         InitializeComponent();
         AutolockPicker.ItemsSource = AutolockOptions.Select(o => o.Label).ToList();
+        ClipboardPicker.ItemsSource = SecureClipboard.Options.Select(o => o.Label).ToList();
     }
 
     protected override void OnAppearing()
@@ -34,6 +35,10 @@ public partial class SettingsPage : ContentPage
         int current = Svc.State.AutolockMinutes;
         int idx = Array.FindIndex(AutolockOptions, o => o.Minutes == current);
         AutolockPicker.SelectedIndex = idx >= 0 ? idx : 1;
+
+        int clip = Svc.State.ClipboardClearSeconds;
+        int ci = Array.FindIndex(SecureClipboard.Options, o => o.Secs == clip);
+        ClipboardPicker.SelectedIndex = ci >= 0 ? ci : 2;
 
         bool connected = Svc.External.IsConnected;
         SyncTitle.Text = connected ? "iCloud Drive" : "Локальный сейф";
@@ -59,6 +64,46 @@ public partial class SettingsPage : ContentPage
     {
         if (_initializing || AutolockPicker.SelectedIndex < 0) return;
         Svc.State.AutolockMinutes = AutolockOptions[AutolockPicker.SelectedIndex].Minutes;
+    }
+
+    private void OnClipboardChanged(object? sender, EventArgs e)
+    {
+        if (_initializing || ClipboardPicker.SelectedIndex < 0) return;
+        Svc.State.ClipboardClearSeconds = SecureClipboard.Options[ClipboardPicker.SelectedIndex].Secs;
+    }
+
+    // ================= импорт =================
+
+    private async void OnImport(object? sender, EventArgs e)
+    {
+        try
+        {
+            FileResult? file = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Выберите файл экспорта" });
+            if (file is null) return;
+
+            string content;
+            using (var stream = await file.OpenReadAsync())
+            using (var reader = new StreamReader(stream))
+                content = await reader.ReadToEndAsync();
+
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                await DisplayAlert("Импорт", "Файл пустой.", "Ок");
+                return;
+            }
+
+            (int added, int parsed) = await Svc.State.ImportAsync(content);
+            if (parsed == 0)
+                await DisplayAlert("Импорт", "Не удалось распознать записи в файле. Поддерживаются CSV (Chrome/Bitwarden/…) и текстовый экспорт Kaspersky.", "Ок");
+            else if (added == 0)
+                await DisplayAlert("Импорт", $"Найдено записей: {parsed}. Все они уже есть в сейфе — ничего не добавлено.", "Ок");
+            else
+                await DisplayAlert("Импорт", $"Добавлено записей: {added} (из {parsed}). Дубликаты пропущены.", "Готово");
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlert("Импорт", "Не удалось прочитать файл: " + ex.Message, "Ок");
+        }
     }
 
     // ================= синхронизация =================
