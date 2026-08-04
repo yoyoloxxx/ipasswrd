@@ -97,14 +97,30 @@ public partial class ItemDetailPage : ContentPage
                 AddCopyRow("Логин", _item.Fields.GetValueOrDefault("username", ""));
                 AddCopyRow("Пароль", _item.Fields.GetValueOrDefault("password", ""), secret: true);
                 string ownTotp = _item.Fields.GetValueOrDefault("totp", "").Trim();
-                AddTotpBlock(ownTotp);
-                // Отдельные записи из «Кодов», подходящие этому сайту (google.com ↔ «google»).
-                // Они общие для всех аккаунтов сайта, поэтому предлагаем привязать к конкретному.
-                foreach (VaultEntry t in MatchedTotps(v, _item, ownTotp))
+                if (ownTotp.Length > 0)
                 {
-                    string raw = t.Item.Fields.GetValueOrDefault("totp", "");
-                    var (_, acc) = TotpMeta.IssuerAccount(raw);
-                    AddTotpBlock(raw, acc.Length > 0 ? acc : t.Item.Title, (t.Id, raw, t.Item.Title));
+                    AddTotpBlock(ownTotp);
+                }
+                else
+                {
+                    // Как на ПК: однозначный код из «Кодов» показывается сам, без привязок
+                    // (совпали сайт и логин, или у сайта единственный аккаунт).
+                    string? linked = TotpMeta.FindLinkedTotp(v, _item);
+                    if (linked is not null)
+                    {
+                        AddTotpBlock(linked);
+                    }
+                    else
+                    {
+                        // Неоднозначные коды сайта (несколько аккаунтов, в коде логин не записан) —
+                        // показываем как общие с кнопкой «Привязать к этому аккаунту».
+                        foreach (VaultEntry t in MatchedTotps(v, _item, ownTotp))
+                        {
+                            string raw = t.Item.Fields.GetValueOrDefault("totp", "");
+                            var (_, acc) = TotpMeta.IssuerAccount(raw);
+                            AddTotpBlock(raw, acc.Length > 0 ? acc : t.Item.Title, (t.Id, raw, t.Item.Title));
+                        }
+                    }
                 }
                 AddExtraFields("url", "username", "password", "totp");
                 break;
