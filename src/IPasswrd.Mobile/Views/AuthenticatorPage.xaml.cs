@@ -233,17 +233,13 @@ public partial class AuthenticatorPage : ContentPage
         Vault? v = Svc.State.Vault;
         if (v is null) return;
 
-        if (!r.Standalone)
-        {
-            await DisplayAlert("Это код аккаунта",
-                "Название и секрет этого кода меняются в самой записи (Сейф → запись → Изменить).", "Ок");
-            return;
-        }
-
+        // Редактируются ЛЮБЫЕ коды: и отдельные записи «Кодов», и коды, живущие в записи
+        // аккаунта (r.Id тогда — id записи аккаунта; название/логин меняются и в Сейфе).
         string? choice = await DisplayActionSheet(r.Name, "Отмена", null, "Переименовать", "Изменить аккаунт", "Заменить секрет");
         if (choice == "Переименовать")
         {
-            string? name = await DisplayPromptAsync("Название", "Как подписать этот код?",
+            string? name = await DisplayPromptAsync("Название",
+                r.Standalone ? "Как подписать этот код?" : "Название записи (изменится и в Сейфе)",
                 "Сохранить", "Отмена", initialValue: r.Name);
             if (name is null || name.Trim().Length == 0 || name.Trim() == r.Name) return;
             try
@@ -268,9 +264,11 @@ public partial class AuthenticatorPage : ContentPage
             }
             catch (Exception) { }
 
-            string? account = await DisplayPromptAsync("Аккаунт", "Имя или почта (пусто — убрать)",
+            string? account = await DisplayPromptAsync("Аккаунт",
+                r.Standalone ? "Имя или почта (пусто — убрать)" : "Логин записи аккаунта (изменится и в Сейфе)",
                 "Сохранить", "Отмена", initialValue: current);
             if (account is null) return;
+            if (!r.Standalone && account.Trim().Length == 0) return;   // логин аккаунта отсюда не убираем
             try
             {
                 VaultItem it = v.Get(r.Id);
@@ -313,14 +311,30 @@ public partial class AuthenticatorPage : ContentPage
         Vault? v = Svc.State.Vault;
         if (v is null) return;
 
+        string who = r.HasSub ? $"{r.Name} ({r.Sub})" : r.Name;
+
         if (!r.Standalone)
         {
-            await DisplayAlert("Это код аккаунта",
-                "Этот код привязан к записи аккаунта. Уберите его в самой записи (Сейф → запись → Изменить).", "Ок");
+            // Код хранится внутри записи аккаунта: убираем только код, запись с логином
+            // и паролем остаётся в Сейфе.
+            bool okAcc = await DisplayAlert("Убрать код у аккаунта?",
+                $"{who}\n\nУдалится только код проверки, сама запись останется. Убедитесь, что двухэтапная проверка на сайте отключена или перенесена, иначе можно потерять доступ.",
+                "Убрать", "Отмена");
+            if (!okAcc) return;
+
+            try
+            {
+                VaultItem it = v.Get(r.Id);
+                it.Fields.Remove("totp");
+                v.Update(r.Id, it);
+            }
+            catch (Exception) { return; }
+            await Svc.State.SaveAsync();
+            Reload();
+            await ShowToastAsync("Код удалён");
             return;
         }
 
-        string who = r.HasSub ? $"{r.Name} ({r.Sub})" : r.Name;
         bool ok = await DisplayAlert("Удалить код?",
             $"{who}\n\nУбедитесь, что двухэтапная проверка на сайте отключена или перенесена, иначе можно потерять доступ.",
             "Удалить", "Отмена");
