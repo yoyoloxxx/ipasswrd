@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using Windows.UI.Notifications;
 using Windows.UI.Notifications.Management;
 
@@ -213,6 +214,10 @@ public partial class MainWindow
             sb.AppendLine();
             sb.AppendLine("Вне дома (мобильный интернет): вместо URL сохраняйте текст СМС файлом");
             sb.AppendLine("в iCloud Drive → IPasswrd → sms-inbox (действие «Сохранить файл», с заменой).");
+            sb.AppendLine();
+            sb.AppendLine("ОБЩИЙ БУФЕР ОБМЕНА (Быстрые команды, запуск вручную; та же сеть):");
+            sb.AppendLine($"  Телефон → ПК: POST http://{Environment.MachineName.ToLowerInvariant()}.local:{SmsRelayPort}/clip?t={_smsToken}   (тело — текст буфера)");
+            sb.AppendLine($"  ПК → телефон: GET  http://{Environment.MachineName.ToLowerInvariant()}.local:{SmsRelayPort}/clip?t={_smsToken}   (в ответе JSON, поле text)");
             File.WriteAllText(Path.Combine(SmsDir(), "sms-relay.txt"), sb.ToString(), new UTF8Encoding(false));
         }
         catch { /* информационный файл — не критично */ }
@@ -284,7 +289,7 @@ public partial class MainWindow
                 await stream.WriteAsync(payload, ct);
             }
 
-            // ---- только POST /sms?t=<токен> ----
+            // ---- маршруты: POST /sms, POST /clip (телефон→буфер ПК), GET /clip (буфер ПК→телефон) ----
             int q = target.IndexOf('?');
             string path = q < 0 ? target : target[..q];
             string query = q < 0 ? "" : target[(q + 1)..];
@@ -295,11 +300,28 @@ public partial class MainWindow
                 if (eq > 0 && pair[..eq] == "t") token = Uri.UnescapeDataString(pair[(eq + 1)..]);
             }
 
-            if (path != "/sms") { await Send("404 Not Found", "{\"ok\":false}"); return; }
-            if (method != "POST") { await Send("405 Method Not Allowed", "{\"ok\":false}"); return; }
+            bool smsUp  = path == "/sms"  && method == "POST";
+            bool clipUp = path == "/clip" && method == "POST";
+            bool clipDn = path == "/clip" && method == "GET";
+            if (!smsUp && !clipUp && !clipDn) { await Send("404 Not Found", "{\"ok\":false}"); return; }
             if (_smsToken.Length == 0 || !CryptographicOperations.FixedTimeEquals(
                     Encoding.UTF8.GetBytes(token), Encoding.UTF8.GetBytes(_smsToken)))
             { await Send("403 Forbidden", "{\"ok\":false}"); return; }
+
+            if (clipDn)
+            {
+                // Буфер ПК → телефон (текст; всё прочее отдаём пустым).
+                string cur = "";
+                try
+                {
+                    cur = await Dispatcher.UIThread.InvokeAsync(
+                        () => Clipboard?.GetTextAsync() ?? Task.FromResult<string?>(null)) ?? "";
+                }
+                catch { }
+                if (cur.Length > 64 * 1024) cur = cur[..(64 * 1024)];
+                await Send("200 OK", JsonSerializer.Serialize(new { ok = true, text = cur }));
+                return;
+            }
 
             int len = int.TryParse(Header("Content-Length"), out var cl) ? cl : 0;
             if (len < 0 || len > 64 * 1024) { await Send("400 Bad Request", "{\"ok\":false}"); return; }
@@ -311,10 +333,27 @@ public partial class MainWindow
                 if (n == 0) break;
                 got += n;
             }
-            string text = Encoding.UTF8.GetString(body, 0, got).Trim();
+            string raw = Encoding.UTF8.GetString(body, 0, got);
+
+            if (clipUp)
+            {
+                // Телефон → буфер ПК. Тело кладём как есть (никакого JSON-разбора:
+                // вдруг пользователь копирует именно JSON).
+                if (raw.Length == 0) { await Send("200 OK", "{\"ok\":true,\"clip\":false}"); return; }
+                try
+                {
+                    await Dispatcher.UIThread.InvokeAsync(
+                        () => Clipboard?.SetTextAsync(raw) ?? Task.CompletedTask);
+                }
+                catch { await Send("200 OK", "{\"ok\":false}"); return; }
+                await Send("200 OK", "{\"ok\":true,\"clip\":true}");
+                return;
+            }
+
+            string text = raw.Trim();
             string from = "";
 
-            // Тело: голый текст СМС либо JSON {"text":"…","from":"…"}.
+            // Тело СМС: голый текст либо JSON {"text":"…","from":"…"}.
             if (text.StartsWith('{'))
             {
                 try
