@@ -145,15 +145,7 @@ public partial class MainWindow
                 NotifLog($"[{app}] {string.Join(" | ", parts)}  => clip:{(clip is null ? "-" : clip.Length + " симв.")}");
                 if (clip is not null)
                 {
-                    bool ok = false;
-                    try
-                    {
-                        await Dispatcher.UIThread.InvokeAsync(
-                            () => Clipboard?.SetTextAsync(clip) ?? Task.CompletedTask);
-                        ok = true;
-                    }
-                    catch (Exception ex) { NotifLog("   буфер НЕ записан: " + ex.Message); }
-                    if (ok) NotifLog("   буфер записан ✓");
+                    await ApplyClipboardAsync(clip, "Bluetooth");
                     try { _notifListener?.RemoveNotification(n.Id); } catch { }
                     continue;
                 }
@@ -283,14 +275,7 @@ public partial class MainWindow
                 _lastClipDropAt = DateTimeOffset.UtcNow;
             }
 
-            try
-            {
-                await Dispatcher.UIThread.InvokeAsync(
-                    () => Clipboard?.SetTextAsync(text) ?? Task.CompletedTask);
-                NotifLog($"iCloud clip-inbox: {text.Length} симв. → буфер ✓");
-            }
-            catch (Exception ex) { NotifLog("iCloud clip-inbox: буфер НЕ записан: " + ex.Message); }
-
+            await ApplyClipboardAsync(text, "iCloud");
             TryDelete(path);
         }
         catch { /* гонка с синхронизацией — не страшно */ }
@@ -299,6 +284,24 @@ public partial class MainWindow
     private static void TryDelete(string path)
     {
         try { File.Delete(path); } catch { /* iCloud держит файл — заберём позже */ }
+    }
+
+    /// <summary>Единая точка записи буфера для всех трёх каналов (Bluetooth / сеть / iCloud):
+    /// одинаковое поведение и одинаковая запись в журнале — видно, откуда пришёл текст.</summary>
+    private async Task<bool> ApplyClipboardAsync(string text, string source)
+    {
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(
+                () => Clipboard?.SetTextAsync(text) ?? Task.CompletedTask);
+            NotifLog($"   буфер ← {source}: {text.Length} симв. ✓");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            NotifLog($"   буфер ← {source}: НЕ записан — {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>Готовые адреса для вставки в Быструю команду — в sms-relay.txt рядом с сейфом.</summary>
@@ -463,12 +466,7 @@ public partial class MainWindow
                 // Телефон → буфер ПК. Тело кладём как есть (никакого JSON-разбора:
                 // вдруг пользователь копирует именно JSON).
                 if (raw.Length == 0) { await Send("200 OK", "{\"ok\":true,\"clip\":false}"); return; }
-                try
-                {
-                    await Dispatcher.UIThread.InvokeAsync(
-                        () => Clipboard?.SetTextAsync(raw) ?? Task.CompletedTask);
-                }
-                catch { await Send("200 OK", "{\"ok\":false}"); return; }
+                if (!await ApplyClipboardAsync(raw, "сеть")) { await Send("200 OK", "{\"ok\":false}"); return; }
                 await Send("200 OK", "{\"ok\":true,\"clip\":true}");
                 return;
             }
