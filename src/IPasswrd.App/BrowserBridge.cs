@@ -226,7 +226,8 @@ public partial class MainWindow
 
     // Standalone authenticator records matched to a site: "google" <-> google.com.
     // Equality of the site base always counts; substring only when both sides are 5+ chars
-    // (so "mail" never matches "gmail").
+    // (so "mail" never matches "gmail"). Short-label domains like cs.money are ALSO matched
+    // by the whole registrable domain ("csmoney") — their brand is the full name, not "cs".
     private static bool TotpMatchesSite(VaultItem rec, string baseDom)
     {
         static string Norm(string s) => new string((s ?? "").ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
@@ -234,6 +235,7 @@ public partial class MainWindow
         int dot = baseDom.IndexOf('.');
         string b = Norm(ip ? baseDom : (dot > 0 ? baseDom.Substring(0, dot) : baseDom));
         if (b.Length == 0) return false;
+        string full = ip ? b : Norm(baseDom);   // «cs.money» → «csmoney»
 
         string issuer = "", account = "";
         try { var cfg = Totp.Parse(rec.Fields.GetValueOrDefault("totp", "")); issuer = cfg.Issuer ?? ""; account = cfg.Account ?? ""; }
@@ -243,8 +245,9 @@ public partial class MainWindow
         {
             string c = Norm(cand);
             if (c.Length == 0) continue;
-            if (c == b) return true;
+            if (c == b || c == full) return true;
             if (c.Length >= 5 && b.Length >= 5 && (c.Contains(b) || b.Contains(c))) return true;
+            if (full != b && c.Length >= 5 && full.Length >= 5 && (c.Contains(full) || full.Contains(c))) return true;
         }
         return false;
     }

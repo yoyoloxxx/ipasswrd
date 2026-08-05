@@ -85,7 +85,7 @@
       return "card-exp";
     }
     if (ac.includes("cc-name") || /cardholder|card ?holder|имя на карте|владелец|держатель|(^|[^a-z])holder([^a-z]|$)/.test(t)) return "card-holder";
-    if (ac.includes("one-time-code") || /one[- ]?time|\botp\b|\btotp\b|2fa|two[- ]?factor|verification code|проверочн(ый|ого) код|код из (смс|sms)|одноразов/.test(t)) return "otp";
+    if (ac.includes("one-time-code") || /one[- ]?time|\botp\b|\btotp\b|2fa|two[- ]?factor|verification code|authenticator|аутентификатор|проверочн(ый|ого) код|код подтвержден|код из (смс|sms)|одноразов/.test(t)) return "otp";
 
     if (type === "password") {
       if (/\bcvc\b|\bcvv\b/.test(t)) return "card-cvc";
@@ -122,7 +122,12 @@
     const map = new Map();
     for (const el of document.querySelectorAll("input")) {
       if (!visible(el)) continue;
+      // Ячейки кода (6 инпутов по одному символу) и системные one-time-code-поля не декорируем
+      // бейджем — на idmsa.apple.com и подобных он рисовался в каждой клетке. Заполняет их
+      // карточка «Код проверки» в углу страницы.
+      if (el.maxLength === 1) continue;
       const k = classify(el);
+      if (k === "otp" && (el.getAttribute("autocomplete") || "").toLowerCase().includes("one-time-code")) continue;
       if (k) map.set(el, k);
     }
     for (const p of findPairs()) {
@@ -238,7 +243,13 @@
       .uform input{all:initial;font:13px 'Segoe UI',system-ui,sans-serif;color:${PAPER};background:${INK};
         border:1px solid ${BRASS}55;border-radius:8px;padding:8px 10px;-webkit-text-security:disc}
       .uform input:focus{border-color:${BRASS}}
-      .uform .ue{color:#E5484D;font-size:12px;display:none}`;
+      .uform .ue{color:#E5484D;font-size:12px;display:none}
+      .ocode{font:700 24px/1.25 Consolas,ui-monospace,monospace;letter-spacing:4px;color:${PAPER};margin:2px 0}
+      .oit{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 10px;
+        margin:2px -6px;border-radius:8px;cursor:pointer}
+      .oit:hover{background:${BRASS}22}
+      .oit .c{font:700 15px Consolas,ui-monospace,monospace;letter-spacing:2px;color:${PAPER}}
+      .oit .n{color:${PAPER}88;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`;
     uiRoot.appendChild(style);
     document.documentElement.appendChild(uiHost);
     return uiRoot;
@@ -394,7 +405,7 @@
       add(`<div class="u">Нет связи с приложением</div><div class="t">Нажмите, чтобы попробовать снова</div>`,
           () => { setTimeout(() => openMenu(field, kind), 150); }, "act");
     } else if (!unlocked) {
-      p.appendChild(mkUnlockForm(() => { closeMenu(); filledOnce = false; autofill(); openMenu(field, kind); }));
+      p.appendChild(mkUnlockForm(() => { closeMenu(); filledOnce = false; autofill(); maybeOfferOtp(); openMenu(field, kind); }));
     } else if (group === "account") {
       if (items.length) {
         const hostOf = (u) => { try { return new URL(u && u.includes("://") ? u : "https://" + (u || "")).hostname.replace(/^www\./, ""); } catch (e) { return u || ""; } };
@@ -505,7 +516,7 @@
     const c = document.createElement("div");
     c.className = "card";
     c.innerHTML = `<div class="hd"><span class="key">⚿</span> IPasswrd</div>`;
-    c.appendChild(mkUnlockForm(() => { c.remove(); filledOnce = false; autofill(); }));
+    c.appendChild(mkUnlockForm(() => { c.remove(); filledOnce = false; autofill(); maybeOfferOtp(); }));
     const later = document.createElement("div");
     later.className = "sub";
     later.style.cssText = "margin:6px 0 0;cursor:pointer;text-align:right";
@@ -594,13 +605,130 @@
     return res;
   }
 
+  // ---------- 2FA: предложение заполнить код проверки ----------
+  // На страницах двухэтапного входа (ячейки по одному символу или одно поле one-time-code)
+  // показываем в правом верхнем углу карточку с кодом этого сайта и кнопкой «Заполнить».
+  let otpOffer = null;        // показанная карточка
+  let otpOfferDone = false;   // заполнено / «не сейчас» — на этой странице больше не предлагаем
+
+  const fmtCode = (s) => String(s || "").replace(/^(\d{3})(\d{3})$/, "$1 $2");
+
+  function otpCellGroup() {
+    const cells = [...document.querySelectorAll("input")].filter((el) => {
+      if (!visible(el) || el.maxLength !== 1) return false;
+      const t = (el.type || "text").toLowerCase();
+      return ["text", "tel", "number", "password"].includes(t);
+    });
+    return (cells.length >= 4 && cells.length <= 8) ? cells : [];
+  }
+  function otpSingleInput() {
+    for (const el of document.querySelectorAll("input"))
+      if (visible(el) && el.maxLength !== 1 && classify(el) === "otp") return el;
+    return null;
+  }
+  function otpCandidates() {
+    const seen = new Set(), out = [];
+    const push = (code, name) => {
+      if (!code) return;
+      const k = name + " " + code;
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push({ code, name });
+    };
+    for (const it of items) if (it.totp && !it.related) push(it.totp, it.username || it.title || "");
+    for (const cd of (codes || [])) push(cd.code, cd.title || "");
+    return out;
+  }
+
+  function fillOtpEverywhere(code) {
+    const digits = String(code || "").replace(/\D+/g, "") || String(code || "");
+    const cells = otpCellGroup();
+    if (cells.length) {
+      cells.forEach((el, i) => { try { el.focus(); } catch (e) { /* ignore */ } setVal(el, digits[i] || ""); });
+      const last = Math.min(digits.length, cells.length) - 1;
+      if (last >= 0) { try { cells[last].focus(); } catch (e) { /* ignore */ } }
+      return true;
+    }
+    const single = otpSingleInput();
+    if (single) { setVal(single, digits); try { single.focus(); } catch (e) { /* ignore */ } return true; }
+    return false;
+  }
+
+  async function maybeOfferOtp() {
+    if (!TOP || otpOfferDone || otpOffer) return;
+    if (!otpCellGroup().length && !otpSingleInput()) return;
+    if (!queried) await query();
+    if (!unlocked) {
+      // Ячейки кода не получают бейджей — единственный путь к разблокировке здесь наш пузырёк.
+      if (!lockBubbleShown) { lockBubbleShown = true; showLockedBubble(); }
+      return;
+    }
+    const cand = otpCandidates();
+    if (!cand.length) return;
+
+    const c = document.createElement("div");
+    c.className = "card";
+    c.innerHTML = `<div class="hd"><span class="key">⚿</span> IPasswrd · Код проверки</div><div class="sub"></div>`;
+    const site = location.hostname.replace(/^www\./, "");
+    c.querySelector(".sub").textContent = site + (cand.length === 1 && cand[0].name ? " · " + cand[0].name : "");
+
+    const dismiss = () => { c.remove(); otpOffer = null; otpOfferDone = true; };
+    const doFill = async (name) => {
+      await query();   // пока карточка висела, код мог смениться — берём свежий
+      const fresh = otpCandidates();
+      const pick = fresh.find((x) => x.name === name) || fresh[0] || null;
+      dismiss();
+      if (!pick) return;
+      if (fillOtpEverywhere(pick.code)) toast("Код вставлен ✓");
+      else toast("Код: " + fmtCode(pick.code));
+    };
+
+    if (cand.length === 1) {
+      const codeEl = document.createElement("div");
+      codeEl.className = "ocode";
+      codeEl.textContent = fmtCode(cand[0].code);
+      c.appendChild(codeEl);
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = `<button class="pri">Заполнить</button><button class="sec">Не сейчас</button>`;
+      row.querySelector(".pri").addEventListener("click", () => doFill(cand[0].name));
+      row.querySelector(".sec").addEventListener("click", dismiss);
+      c.appendChild(row);
+      const iv = setInterval(async () => {   // код живёт 30 с — держим цифры на карточке свежими
+        if (!c.isConnected) { clearInterval(iv); return; }
+        await query();
+        const f = otpCandidates();
+        const cur = f.find((x) => x.name === cand[0].name) || f[0];
+        if (cur) codeEl.textContent = fmtCode(cur.code);
+      }, 5000);
+    } else {
+      for (const it of cand) {
+        const d = document.createElement("div");
+        d.className = "oit";
+        const cc = document.createElement("span"); cc.className = "c"; cc.textContent = fmtCode(it.code);
+        const nn = document.createElement("span"); nn.className = "n"; nn.textContent = it.name;
+        d.appendChild(cc); d.appendChild(nn);
+        d.addEventListener("click", () => doFill(it.name));
+        c.appendChild(d);
+      }
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = `<button class="sec">Не сейчас</button>`;
+      row.querySelector(".sec").addEventListener("click", dismiss);
+      c.appendChild(row);
+    }
+
+    root().appendChild(c);
+    otpOffer = c;
+  }
+
   // ---------- boot ----------
-  function boot() { attachFieldHandlers(); autofill(); }
+  function boot() { attachFieldHandlers(); autofill(); maybeOfferOtp(); }
 
   let debounce = null;
   new MutationObserver(() => {
     clearTimeout(debounce);
-    debounce = setTimeout(() => { attachFieldHandlers(); autofill(); }, 400);
+    debounce = setTimeout(() => { attachFieldHandlers(); autofill(); maybeOfferOtp(); }, 400);
   }).observe(document.documentElement, { childList: true, subtree: true });
 
   window.addEventListener("scroll", repositionAll, true);
