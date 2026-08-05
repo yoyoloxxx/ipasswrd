@@ -120,12 +120,13 @@
 
   function candidateFields() {
     const map = new Map();
+    // Ячейки кода (ряд одно-символьных инпутов) и системные one-time-code-поля не декорируем
+    // бейджем — на idmsa.apple.com и подобных он рисовался в каждой клетке. Заполняет их
+    // карточка «Код проверки» в углу страницы.
+    const cells = new Set(otpCellGroup());
     for (const el of document.querySelectorAll("input")) {
       if (!visible(el)) continue;
-      // Ячейки кода (6 инпутов по одному символу) и системные one-time-code-поля не декорируем
-      // бейджем — на idmsa.apple.com и подобных он рисовался в каждой клетке. Заполняет их
-      // карточка «Код проверки» в углу страницы.
-      if (el.maxLength === 1) continue;
+      if (el.maxLength === 1 || cells.has(el)) continue;
       const k = classify(el);
       if (k === "otp" && (el.getAttribute("autocomplete") || "").toLowerCase().includes("one-time-code")) continue;
       if (k) map.set(el, k);
@@ -614,12 +615,31 @@
   const fmtCode = (s) => String(s || "").replace(/^(\d{3})(\d{3})$/, "$1 $2");
 
   function otpCellGroup() {
-    const cells = [...document.querySelectorAll("input")].filter((el) => {
-      if (!visible(el) || el.maxLength !== 1) return false;
+    // Ячейка кода: maxlength=1 ЛИБО узкий инпут с ≤1 символом значения/плейсхолдера
+    // (cs.money не ставит maxlength — там просто узкие поля с плейсхолдерами «1»…«6»).
+    const cand = [...document.querySelectorAll("input")].filter((el) => {
+      if (!visible(el)) return false;
       const t = (el.type || "text").toLowerCase();
-      return ["text", "tel", "number", "password"].includes(t);
+      if (!["text", "tel", "number", "password"].includes(t)) return false;
+      if (el.maxLength === 1) return true;
+      const r = el.getBoundingClientRect();
+      return r.width >= 18 && r.width <= 80 &&
+             String(el.value || "").length <= 1 &&
+             String(el.getAttribute("placeholder") || "").length <= 1;
     });
-    return (cells.length >= 4 && cells.length <= 8) ? cells : [];
+    if (cand.length < 4) return [];
+    // Ряд из 4–8 одинаковых по ширине ячеек на одной строке — сигнатура поля кода.
+    const rows = new Map();
+    for (const el of cand) {
+      const r = el.getBoundingClientRect();
+      const key = Math.round(r.top / 12) + ":" + Math.round(r.width / 8);
+      if (!rows.has(key)) rows.set(key, []);
+      rows.get(key).push(el);
+    }
+    for (const group of rows.values())
+      if (group.length >= 4 && group.length <= 8)
+        return group.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+    return [];
   }
   function otpSingleInput() {
     for (const el of document.querySelectorAll("input"))
