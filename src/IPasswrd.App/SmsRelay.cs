@@ -55,6 +55,61 @@ public partial class MainWindow
             WriteSmsRelayInfo();
         }
         catch { _smsRelay = null; /* порт занят — фича просто выключена */ }
+        StartSmsDropFolder();
+    }
+
+    // ---- фолбэк вне дома: файл через iCloud Drive ----
+    // С мобильного интернета телефон до ПК не достучится, поэтому вне дома Быстрая команда
+    // сохраняет текст СМС файлом в iCloud Drive\IPasswrd\sms-inbox\ — iCloud-клиент приносит
+    // его сюда (обычно за 10-60 с, СМС-коду хватает), мы подхватываем и удаляем файл.
+    private FileSystemWatcher? _smsDropWatcher;
+
+    private static string SmsDropDir()
+        => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                        "iCloudDrive", "IPasswrd", "sms-inbox");
+
+    private void StartSmsDropFolder()
+    {
+        try
+        {
+            string dir = SmsDropDir();
+            Directory.CreateDirectory(dir);
+            _smsDropWatcher = new FileSystemWatcher(dir)
+            {
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                EnableRaisingEvents = true,
+            };
+            FileSystemEventHandler h = (_, e) => _ = Task.Run(() => ConsumeSmsDropAsync(e.FullPath));
+            _smsDropWatcher.Created += h;
+            _smsDropWatcher.Changed += h;
+            _smsDropWatcher.Renamed += (_, e) => _ = Task.Run(() => ConsumeSmsDropAsync(e.FullPath));
+            foreach (string f in Directory.GetFiles(dir))                       // что уже дожидалось
+                _ = Task.Run(() => ConsumeSmsDropAsync(f));
+        }
+        catch { _smsDropWatcher = null; /* нет iCloud Drive — фолбэк выключен */ }
+    }
+
+    private async Task ConsumeSmsDropAsync(string path)
+    {
+        try
+        {
+            await Task.Delay(500);                       // дать iCloud дописать файл
+            if (!File.Exists(path)) return;
+            if (new FileInfo(path).Length > 64 * 1024) { File.Delete(path); return; }
+            string text = await File.ReadAllTextAsync(path);
+            string? code = ExtractSmsCode(text);
+            if (code is not null)
+            {
+                lock (_smsLock)
+                {
+                    _smsInbox.RemoveAll(x => DateTimeOffset.UtcNow - x.At > SmsTtl || x.Code == code);
+                    _smsInbox.Add((code, "iCloud", DateTimeOffset.UtcNow));
+                    while (_smsInbox.Count > 5) _smsInbox.RemoveAt(0);
+                }
+            }
+            try { File.Delete(path); } catch { /* iCloud держит файл — заберём при следующем событии */ }
+        }
+        catch { /* файл ещё качается — придёт Changed */ }
     }
 
     /// <summary>Готовые адреса для вставки в Быструю команду — в sms-relay.txt рядом с сейфом.</summary>
@@ -81,6 +136,9 @@ public partial class MainWindow
             sb.AppendLine($"URL по имени компьютера: http://{Environment.MachineName.ToLowerInvariant()}.local:{SmsRelayPort}/sms?t={_smsToken}");
             foreach (string ip in ips)
                 sb.AppendLine($"URL по адресу:           http://{ip}:{SmsRelayPort}/sms?t={_smsToken}");
+            sb.AppendLine();
+            sb.AppendLine("Вне дома (мобильный интернет): вместо URL сохраняйте текст СМС файлом");
+            sb.AppendLine("в iCloud Drive → IPasswrd → sms-inbox (действие «Сохранить файл», с заменой).");
             File.WriteAllText(Path.Combine(SmsDir(), "sms-relay.txt"), sb.ToString(), new UTF8Encoding(false));
         }
         catch { /* информационный файл — не критично */ }
