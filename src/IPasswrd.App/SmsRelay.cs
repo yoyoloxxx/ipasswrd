@@ -63,6 +63,7 @@ public partial class MainWindow
         catch { _smsRelay = null; /* порт занят — фича просто выключена */ }
         StartSmsDropFolder();
         StartClipDropFolder();
+        StartNetBeacon();
         StartNotifSmsListener();
     }
 
@@ -287,6 +288,72 @@ public partial class MainWindow
     private static void TryDelete(string path)
     {
         try { File.Delete(path); } catch { /* iCloud держит файл — заберём позже */ }
+    }
+
+    // ---- маячок ·в какой я сети· ----
+    // Телефону нужно понять, стоит ли биться напрямую в ПК. Пробовать и ловить ошибку
+    // нельзя: в «Быстрых командах» нет обработки ошибок — неудачный запрос рвёт
+    // всю команду с алертом. Поэтому ПК сам публикует имя своей текущей Wi-Fi-сети
+    // в iCloud (pc-net.txt), а команда просто сравнивает его со своим — сравнение
+    // упасть не может. Совпало → одна сеть → мгновенный POST; нет → через iCloud.
+    // Плюс так оно само подхватывает любую новую сеть: дача, офис, чужой Wi-Fi,
+    // переименованный роутер — ничего не надо править руками.
+    private static string PcNetPath()
+        => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                        "iCloudDrive", "IPasswrd", "pc-net.txt");
+
+    private void StartNetBeacon()
+    {
+        _ = Task.Run(async () =>
+        {
+            string last = " ";
+            while (_bridgeCts is { IsCancellationRequested: false })
+            {
+                try
+                {
+                    string ssid = CurrentSsid();
+                    string val = ssid.Length > 0 ? ssid : "(нет Wi-Fi)";
+                    if (val != last)
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(PcNetPath())!);
+                        File.WriteAllText(PcNetPath(), val, new UTF8Encoding(false));   // без перевода строки
+                        NotifLog($"сеть ПК: {val}");
+                        last = val;
+                    }
+                }
+                catch { /* нет iCloud Drive — просто нет быстрого пути */ }
+                try { await Task.Delay(TimeSpan.FromSeconds(30), _bridgeCts.Token); } catch { return; }
+            }
+        });
+    }
+
+    /// <summary>Имя текущей Wi-Fi-сети ПК (пусто, если кабель или Wi-Fi выключен).</summary>
+    private static string CurrentSsid()
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("netsh", "wlan show interfaces")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p is null) return "";
+            string outp = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(4000);
+            foreach (string line in outp.Split('\n'))
+            {
+                string t = line.Trim();
+                if (t.Contains("BSSID", StringComparison.OrdinalIgnoreCase)) continue;   // «AP BSSID» — не то
+                int i = t.IndexOf(':');
+                if (i <= 0) continue;
+                if (!t[..i].Trim().Equals("SSID", StringComparison.OrdinalIgnoreCase)) continue;
+                return t[(i + 1)..].Trim();
+            }
+        }
+        catch { }
+        return "";
     }
 
     /// <summary>Единая точка записи буфера для всех трёх каналов (Bluetooth / сеть / iCloud):
