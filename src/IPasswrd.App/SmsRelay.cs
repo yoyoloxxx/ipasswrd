@@ -7,6 +7,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Windows.UI.Notifications;
+using Windows.UI.Notifications.Management;
 
 namespace IPasswrd.App;
 
@@ -56,6 +58,78 @@ public partial class MainWindow
         }
         catch { _smsRelay = null; /* порт занят — фича просто выключена */ }
         StartSmsDropFolder();
+        StartNotifSmsListener();
+    }
+
+    // ---- главный канал: уведомления Windows от «Связи с телефоном» (Phone Link) ----
+    // Айфон спарен с ПК по Bluetooth; входящая СМС всплывает уведомлением Windows —
+    // ловим его событием + частым опросом (уведомление могут быстро прочитать/смахнуть),
+    // вытаскиваем код и кладём в тот же ящик, что и остальные каналы.
+    private UserNotificationListener? _notifListener;
+    private readonly HashSet<uint> _notifSeen = new();
+
+    private void StartNotifSmsListener()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var listener = UserNotificationListener.Current;
+                var access = await listener.RequestAccessAsync();
+                if (access != UserNotificationListenerAccessStatus.Allowed) return;
+                _notifListener = listener;
+
+                try { listener.NotificationChanged += (_, _) => _ = ScanNotifsSafeAsync(); }
+                catch { /* событие бывает недоступно для обычных приложений — остаётся опрос */ }
+
+                while (_bridgeCts is { IsCancellationRequested: false })
+                {
+                    await ScanNotifsSafeAsync();
+                    try { await Task.Delay(2000, _bridgeCts.Token); } catch { return; }
+                }
+            }
+            catch { /* WinRT недоступен — канал выключен, остальные работают */ }
+        });
+    }
+
+    private async Task ScanNotifsSafeAsync()
+    {
+        try
+        {
+            if (_notifListener is null) return;
+            var notifs = await _notifListener.GetNotificationsAsync(NotificationKinds.Toast);
+            foreach (UserNotification n in notifs)
+            {
+                if (!_notifSeen.Add(n.Id)) continue;
+
+                string app = "";
+                try { app = n.AppInfo?.DisplayInfo?.DisplayName ?? ""; } catch { }
+                // Только «Связь с телефоном» / Phone Link — там живут СМС с айфона.
+                if (app.IndexOf("телефон", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    app.IndexOf("phone", StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                string text = "";
+                try
+                {
+                    var binding = n.Notification?.Visual?.GetBinding(KnownNotificationBindings.ToastGeneric);
+                    if (binding is not null)
+                        text = string.Join(" ", binding.GetTextElements().Select(t => t.Text));
+                }
+                catch { }
+
+                string? code = ExtractSmsCode(text);
+                if (code is null) continue;
+
+                lock (_smsLock)
+                {
+                    _smsInbox.RemoveAll(x => DateTimeOffset.UtcNow - x.At > SmsTtl || x.Code == code);
+                    _smsInbox.Add((code, "СМС", DateTimeOffset.UtcNow));
+                    while (_smsInbox.Count > 5) _smsInbox.RemoveAt(0);
+                }
+            }
+            if (_notifSeen.Count > 500) _notifSeen.Clear();   // не даём множеству расти вечно
+        }
+        catch { /* гонка с исчезающим уведомлением — не страшно */ }
     }
 
     // ---- фолбэк вне дома: файл через iCloud Drive ----
