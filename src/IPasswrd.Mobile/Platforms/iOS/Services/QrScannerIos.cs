@@ -135,6 +135,7 @@ internal sealed class ScannerViewController : UIViewController
 
     private void OnCode(string value)
     {
+        if (_done) return;   // делегат может сработать несколько раз, пока сессия останавливается
 #pragma warning disable CA1422 // конструктор устарел только с iOS 17.5; на 15+ работает
         var gen = new UIImpactFeedbackGenerator(UIImpactFeedbackStyle.Medium);
 #pragma warning restore CA1422
@@ -160,7 +161,10 @@ internal sealed class ScannerViewController : UIViewController
     public override void ViewDidDisappear(bool animated)
     {
         base.ViewDidDisappear(animated);
-        _tcs.TrySetResult(null);   // смахнули шторку — отмена (если код ещё не считан)
+        // Отмена — только если Finish ещё не вызывался (закрыли экран без результата).
+        // ⚠ iOS зовёт ViewDidDisappear ДО completion-блока DismissViewController, поэтому
+        // безусловный TrySetResult(null) здесь затирал считанный код: скан всегда возвращал null.
+        if (!_done) _tcs.TrySetResult(null);
     }
 
     private sealed class MetadataDelegate : AVCaptureMetadataOutputObjectsDelegate
