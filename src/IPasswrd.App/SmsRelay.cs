@@ -69,6 +69,19 @@ public partial class MainWindow
     private UserNotificationListener? _notifListener;
     private readonly HashSet<uint> _notifSeen = new();
 
+    /// <summary>Журнал увиденных уведомлений — чтобы разбирать «почему не доехало» без гаданий.</summary>
+    private static void NotifLog(string line)
+    {
+        try
+        {
+            string p = Path.Combine(SmsDir(), "notif-log.txt");
+            File.AppendAllText(p, $"{DateTime.Now:HH:mm:ss}  {line}{Environment.NewLine}", new UTF8Encoding(false));
+            var fi = new FileInfo(p);
+            if (fi.Length > 256 * 1024) File.WriteAllText(p, "", new UTF8Encoding(false));
+        }
+        catch { }
+    }
+
     private void StartNotifSmsListener()
     {
         _ = Task.Run(async () =>
@@ -110,13 +123,39 @@ public partial class MainWindow
                     app.IndexOf("phone", StringComparison.OrdinalIgnoreCase) < 0) continue;
 
                 string text = "";
+                string[] parts = Array.Empty<string>();
                 try
                 {
                     var binding = n.Notification?.Visual?.GetBinding(KnownNotificationBindings.ToastGeneric);
                     if (binding is not null)
-                        text = string.Join(" ", binding.GetTextElements().Select(t => t.Text));
+                    {
+                        parts = binding.GetTextElements().Select(t => t.Text ?? "").ToArray();
+                        text = string.Join(" ", parts);
+                    }
                 }
                 catch { }
+
+                // ---- общий буфер «телефон → ПК» БЕЗ СЕТИ ----
+                // Быстрая команда на айфоне показывает уведомление «IPWCLIP: <буфер>»; оно
+                // уходит по Bluetooth в «Связь с телефоном» и всплывает здесь. Кладём текст
+                // в буфер Windows и стираем уведомление из центра, чтобы не мусорить.
+                // Работает везде, где телефон рядом: Wi-Fi/LTE не нужны вовсе.
+                string? clip = ExtractClipPayload(parts);
+                NotifLog($"[{app}] {string.Join(" | ", parts)}  => clip:{(clip is null ? "-" : clip.Length + " симв.")}");
+                if (clip is not null)
+                {
+                    bool ok = false;
+                    try
+                    {
+                        await Dispatcher.UIThread.InvokeAsync(
+                            () => Clipboard?.SetTextAsync(clip) ?? Task.CompletedTask);
+                        ok = true;
+                    }
+                    catch (Exception ex) { NotifLog("   буфер НЕ записан: " + ex.Message); }
+                    if (ok) NotifLog("   буфер записан ✓");
+                    try { _notifListener?.RemoveNotification(n.Id); } catch { }
+                    continue;
+                }
 
                 string? code = ExtractSmsCode(text);
                 if (code is null) continue;
@@ -393,6 +432,53 @@ public partial class MainWindow
             .OrderBy(m => m.Value.Length == 6 ? 0 : m.Value.Length >= 5 ? 1 : 2)     // сначала похожие на код
             .ThenBy(m => kw.Success ? Math.Abs(m.Index - kw.Index) : m.Index)         // затем ближайшие к слову «код»
             .First().Value;
+    }
+
+    /// <summary>Имя Быстрой команды-отправителя буфера (оно же заголовок уведомления).</summary>
+    private static readonly string[] ClipShortcutTitles = { "На ПК", "На ПК — буфер", "IPasswrd буфер" };
+
+    /// <summary>Приложение «Команды» на айфоне — первый элемент зеркального уведомления.</summary>
+    private static bool IsShortcutsApp(string s)
+    {
+        s = s.Trim();
+        return s.Equals("Команды", StringComparison.OrdinalIgnoreCase)
+            || s.Equals("Быстрые команды", StringComparison.OrdinalIgnoreCase)
+            || s.Equals("Shortcuts", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Текст буфера из уведомления Быстрой команды.
+    /// Два способа узнать своё уведомление, чтобы не зависеть от одного:
+    ///  1) метка IPWCLIP в тексте — работает для любого имени команды;
+    ///  2) заголовок = имя нашей команды — работает, даже если в теле одна переменная без метки.
+    /// Элементы зеркального уведомления: [приложение на айфоне, заголовок, тело…].</summary>
+    internal static string? ExtractClipPayload(IReadOnlyList<string> parts)
+    {
+        if (parts is null || parts.Count == 0) return null;
+
+        // 1) явная метка в любом месте текста
+        string joined = string.Join(" ", parts);
+        if (!string.IsNullOrWhiteSpace(joined))
+        {
+            var m = Regex.Match(joined, @"(?is)IPWCLIP\s*[:：]?\s*(.*)$");   // двоеточие необязательно
+            if (m.Success)
+            {
+                string p = m.Groups[1].Value.Trim();
+                if (p.Length > 0) return p;
+            }
+        }
+
+        // 2) «Команды» + заголовок нашей команды → тело целиком есть буфер
+        if (parts.Count >= 3 && IsShortcutsApp(parts[0]))
+        {
+            bool ours = ClipShortcutTitles.Any(
+                t => parts[1].Trim().Equals(t, StringComparison.OrdinalIgnoreCase));
+            if (ours)
+            {
+                string rest = string.Join(" ", parts.Skip(2)).Trim();
+                if (rest.Length > 0) return rest;
+            }
+        }
+        return null;
     }
 
     /// <summary>Свежие СМС-коды для расширения (и подчистка протухших).</summary>
