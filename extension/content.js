@@ -656,7 +656,12 @@
       seen.add(k);
       out.push({ code, name });
     };
-    for (const s of (smsCodes || [])) push(s.code, s.hint ? "СМС · " + s.hint : "Из СМС");
+    for (const s of (smsCodes || [])) {
+      const age = s.ageSec ?? 0;
+      if (age > 90) continue;                     // старая СМС — почти наверняка от прошлой попытки входа
+      const when = age < 15 ? "только что" : age < 60 ? age + " сек назад" : Math.round(age / 60) + " мин назад";
+      push(s.code, "СМС · " + when);
+    }
     for (const it of items) if (it.totp && !it.related) push(it.totp, it.username || it.title || "");
     for (const cd of (codes || [])) push(cd.code, cd.title || "");
     return out;
