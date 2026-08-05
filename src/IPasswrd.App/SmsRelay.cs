@@ -52,7 +52,10 @@ public partial class MainWindow
                 File.WriteAllText(tokenPath, _smsToken);
             }
 
-            _smsRelay = new TcpListener(IPAddress.Any, SmsRelayPort);
+            // TcpListener.Create — двухстековый сокет (IPv4 + IPv6). Важно: айфон резолвит
+            // имя «yoyoloxxx.local» через Bonjour и часто предпочитает IPv6 — на IPv4-only
+            // слушателе такое соединение просто не проходило бы.
+            _smsRelay = TcpListener.Create(SmsRelayPort);
             _smsRelay.Start();
             _ = Task.Run(() => SmsAcceptLoop(_bridgeCts!.Token));
             WriteSmsRelayInfo();
