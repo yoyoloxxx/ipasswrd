@@ -161,11 +161,16 @@ public partial class ItemDetailPage : ContentPage
         Rows.Children.Add(del);
     }
 
-    /// <summary>Отдельные totp-записи, подходящие сайту аккаунта (кроме дубля собственного секрета).</summary>
+    /// <summary>Отдельные totp-записи, подходящие сайту аккаунта (кроме дубля собственного секрета).
+    /// Как на ПК: код с ЧУЖИМ логином (в username-поле записи или в otpauth://) — это код другого
+    /// аккаунта этого сайта, здесь его не показываем и привязать не предлагаем. Остаются только
+    /// действительно неоднозначные коды: без логина, когда аккаунтов на сайте несколько,
+    /// либо несколько кодов с тем же логином.</summary>
     private static List<VaultEntry> MatchedTotps(Vault v, VaultItem account, string ownTotp)
     {
         var res = new List<VaultEntry>();
         string key = SiteGroups.KeyFor(account);
+        string user = account.Fields.GetValueOrDefault("username", "").Trim().ToLowerInvariant();
         try
         {
             foreach (VaultEntry t in v.Items())
@@ -173,7 +178,11 @@ public partial class ItemDetailPage : ContentPage
                 if (t.Item.Type != "totp") continue;
                 string raw = t.Item.Fields.GetValueOrDefault("totp", "").Trim();
                 if (raw.Length == 0 || raw == ownTotp) continue;
-                if (TotpMeta.MatchesSite(t.Item, key)) res.Add(t);
+                if (!TotpMeta.MatchesSite(t.Item, key)) continue;
+                string tuser = t.Item.Fields.GetValueOrDefault("username", "").Trim().ToLowerInvariant();
+                if (tuser.Length == 0) tuser = TotpMeta.IssuerAccount(raw).Account.Trim().ToLowerInvariant();
+                if (tuser.Length > 0 && tuser != user) continue;   // чужой код — как на ПК, пропускаем
+                res.Add(t);
             }
         }
         catch (Exception) { }
