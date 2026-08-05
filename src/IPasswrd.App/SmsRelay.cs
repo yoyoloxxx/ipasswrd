@@ -59,6 +59,7 @@ public partial class MainWindow
         }
         catch { _smsRelay = null; /* порт занят — фича просто выключена */ }
         StartSmsDropFolder();
+        StartClipDropFolder();
         StartNotifSmsListener();
     }
 
@@ -226,6 +227,80 @@ public partial class MainWindow
         catch { /* файл ещё качается — придёт Changed */ }
     }
 
+    // ---- ДЛИННЫЙ буфер через iCloud ----
+    // Уведомление по Bluetooth режет текст на ~150 символах, поэтому в Быстрой команде
+    // стоит развилка: короткое — уведомлением (мгновенно, без сети), длинное — файлом
+    // в iCloud Drive\IPasswrd\clip-inbox (туда же, где живёт сейф). Здесь ловим файл,
+    // кладём текст в буфер и сразу удаляем — копия буфера в облаке не задерживается.
+    private FileSystemWatcher? _clipDropWatcher;
+    private string _lastClipDrop = "";
+    private DateTimeOffset _lastClipDropAt = DateTimeOffset.MinValue;
+
+    private static string ClipDropDir()
+        => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                        "iCloudDrive", "IPasswrd", "clip-inbox");
+
+    private void StartClipDropFolder()
+    {
+        try
+        {
+            string dir = ClipDropDir();
+            Directory.CreateDirectory(dir);
+            _clipDropWatcher = new FileSystemWatcher(dir)
+            {
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                EnableRaisingEvents = true,
+            };
+            FileSystemEventHandler h = (_, e) => _ = Task.Run(() => ConsumeClipDropAsync(e.FullPath));
+            _clipDropWatcher.Created += h;
+            _clipDropWatcher.Changed += h;
+            _clipDropWatcher.Renamed += (_, e) => _ = Task.Run(() => ConsumeClipDropAsync(e.FullPath));
+            foreach (string f in Directory.GetFiles(dir))                       // что уже дожидалось
+                _ = Task.Run(() => ConsumeClipDropAsync(f));
+        }
+        catch { _clipDropWatcher = null; /* нет iCloud Drive — длинный канал выключен */ }
+    }
+
+    private async Task ConsumeClipDropAsync(string path)
+    {
+        try
+        {
+            if (path.EndsWith(".icloud", StringComparison.OrdinalIgnoreCase)) return;   // ещё не скачан
+            await Task.Delay(600);                       // дать iCloud дописать файл
+            if (!File.Exists(path)) return;
+            if (new FileInfo(path).Length > 1024 * 1024) { TryDelete(path); return; }
+
+            string text;
+            try { text = await File.ReadAllTextAsync(path); }
+            catch { return; }                            // файл ещё качается — придёт Changed
+            if (text.Length == 0) { TryDelete(path); return; }
+
+            lock (_smsLock)                              // Создание+Изменение приходят парой — не дублируем
+            {
+                if (text == _lastClipDrop && DateTimeOffset.UtcNow - _lastClipDropAt < TimeSpan.FromSeconds(15))
+                { TryDelete(path); return; }
+                _lastClipDrop = text;
+                _lastClipDropAt = DateTimeOffset.UtcNow;
+            }
+
+            try
+            {
+                await Dispatcher.UIThread.InvokeAsync(
+                    () => Clipboard?.SetTextAsync(text) ?? Task.CompletedTask);
+                NotifLog($"iCloud clip-inbox: {text.Length} симв. → буфер ✓");
+            }
+            catch (Exception ex) { NotifLog("iCloud clip-inbox: буфер НЕ записан: " + ex.Message); }
+
+            TryDelete(path);
+        }
+        catch { /* гонка с синхронизацией — не страшно */ }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch { /* iCloud держит файл — заберём позже */ }
+    }
+
     /// <summary>Готовые адреса для вставки в Быструю команду — в sms-relay.txt рядом с сейфом.</summary>
     private void WriteSmsRelayInfo()
     {
@@ -254,7 +329,16 @@ public partial class MainWindow
             sb.AppendLine("Вне дома (мобильный интернет): вместо URL сохраняйте текст СМС файлом");
             sb.AppendLine("в iCloud Drive → IPasswrd → sms-inbox (действие «Сохранить файл», с заменой).");
             sb.AppendLine();
-            sb.AppendLine("ОБЩИЙ БУФЕР ОБМЕНА (Быстрые команды, запуск вручную; та же сеть):");
+            sb.AppendLine("БУФЕР ТЕЛЕФОН → ПК, ОСНОВНОЙ ПУТЬ (сеть НЕ нужна):");
+            sb.AppendLine("  Быстрая команда «На ПК»: Получить буфер обмена → Показать уведомление");
+            sb.AppendLine("  (в теле — переменная «Буфер обмена»). Уведомление едет по Bluetooth");
+            sb.AppendLine("  через «Связь с телефоном». Предел канала ~150 символов.");
+            sb.AppendLine();
+            sb.AppendLine("ДЛИННЫЙ ТЕКСТ (любая сеть с интернетом, задержка 10-60 с):");
+            sb.AppendLine("  Действие «Сохранить файл» → iCloud Drive, путь /IPasswrd/clip-inbox/clip.txt");
+            sb.AppendLine("  (с заменой, без вопроса куда сохранять). Приложение заберёт и удалит.");
+            sb.AppendLine();
+            sb.AppendLine("ЗАПАСНОЙ СЕТЕВОЙ ПУТЬ (та же сеть, мгновенно):");
             sb.AppendLine($"  Телефон → ПК: POST http://{Environment.MachineName.ToLowerInvariant()}.local:{SmsRelayPort}/clip?t={_smsToken}   (тело — текст буфера)");
             sb.AppendLine($"  ПК → телефон: GET  http://{Environment.MachineName.ToLowerInvariant()}.local:{SmsRelayPort}/clip?t={_smsToken}   (в ответе JSON, поле text)");
             File.WriteAllText(Path.Combine(SmsDir(), "sms-relay.txt"), sb.ToString(), new UTF8Encoding(false));
