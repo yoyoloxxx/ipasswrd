@@ -267,7 +267,8 @@
 
   // ---------- state ----------
   let items = [];
-  let codes = [];   // standalone authenticator codes matched to this site (live, from the app)
+  let codes = [];      // standalone authenticator codes matched to this site (live, from the app)
+  let smsCodes = [];   // одноразовые коды из СМС, переданные с телефона (живут ~3 мин)
   let unlocked = false;
   let queried = false;
   let filledOnce = false;
@@ -281,7 +282,7 @@
   async function query() {
     const r = await send({ cmd: "credentials", url: location.href });
     if (!r || !r.ok) { try { console.log("[IPWNM]", location.hostname, `err=${r && r.error} ${r && r.detail || ""}`); } catch (e) {} }   // failures only, never credentials
-    if (r && r.ok) { unlocked = !!r.unlocked; items = r.items || []; codes = r.codes || []; queried = true; }
+    if (r && r.ok) { unlocked = !!r.unlocked; items = r.items || []; codes = r.codes || []; smsCodes = r.smsCodes || []; queried = true; }
     return r;
   }
   async function ensureList() {
@@ -655,9 +656,41 @@
       seen.add(k);
       out.push({ code, name });
     };
+    for (const s of (smsCodes || [])) push(s.code, s.hint ? "СМС · " + s.hint : "Из СМС");
     for (const it of items) if (it.totp && !it.related) push(it.totp, it.username || it.title || "");
     for (const cd of (codes || [])) push(cd.code, cd.title || "");
     return out;
+  }
+
+  // ---------- СМС-коды: автоввод ----------
+  // Пока открыта страница с полем кода, раз в 3 секунды спрашиваем у приложения, не пришла ли
+  // НОВАЯ СМС (пересланная Быстрой командой с телефона). Пришла и вкладка на экране —
+  // вписываем код сами; вкладка в фоне — показываем карточку. Коды, лежавшие в приложении
+  // ЕЩЁ ДО открытия страницы, сами не вписываются — только через карточку (мало ли от какого они сайта).
+  let smsWatch = null, smsWatchUntil = 0, smsSeen = new Set();
+  const smsKey = (s) => s.code + "|" + (s.hint || "");
+
+  function armSmsWatch() {
+    if (smsWatch) return;
+    smsSeen = new Set((smsCodes || []).map(smsKey));
+    smsWatchUntil = Date.now() + 180000;
+    smsWatch = setInterval(async () => {
+      if (Date.now() > smsWatchUntil) { clearInterval(smsWatch); smsWatch = null; return; }
+      if (!otpCellGroup().length && !otpSingleInput()) return;
+      await query();
+      const fresh = (smsCodes || []).filter((s) => !smsSeen.has(smsKey(s)));
+      if (!fresh.length) return;
+      for (const s of fresh) smsSeen.add(smsKey(s));
+      if (!document.hidden && fillOtpEverywhere(fresh[0].code)) {
+        toast("Код из СМС вставлен ✓");
+        if (otpOffer) { otpOffer.remove(); otpOffer = null; }
+        otpOfferDone = true;
+        return;
+      }
+      otpOfferDone = false;                       // вкладка в фоне / не вписалось — предложим карточкой
+      if (otpOffer) { otpOffer.remove(); otpOffer = null; }
+      maybeOfferOtp();
+    }, 3000);
   }
 
   function fillOtpEverywhere(code) {
@@ -675,16 +708,18 @@
   }
 
   async function maybeOfferOtp() {
-    if (!TOP || otpOfferDone || otpOffer) return;
+    if (!TOP) return;
     if (!otpCellGroup().length && !otpSingleInput()) return;
     if (!queried) await query();
-    if (!unlocked) {
-      // Ячейки кода не получают бейджей — единственный путь к разблокировке здесь наш пузырёк.
-      if (!lockBubbleShown) { lockBubbleShown = true; showLockedBubble(); }
+    armSmsWatch();                        // ждать свежие СМС-коды, пока поле кода на странице
+    if (otpOfferDone || otpOffer) return;
+    const cand = otpCandidates();         // СМС + сейф (СМС-коды есть и при заблокированном сейфе)
+    if (!cand.length) {
+      // Кодов нет совсем; если сейф заблокирован — предложим разблокировать
+      // (ячейки кода без бейджей, другого пути к разблокировке тут нет).
+      if (!unlocked && !lockBubbleShown) { lockBubbleShown = true; showLockedBubble(); }
       return;
     }
-    const cand = otpCandidates();
-    if (!cand.length) return;
 
     const c = document.createElement("div");
     c.className = "card";

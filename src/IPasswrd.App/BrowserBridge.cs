@@ -31,6 +31,7 @@ public partial class MainWindow
         _bridgeCts = new CancellationTokenSource();
         _ = Task.Run(() => BridgeAcceptLoop(_bridgeCts.Token));
         StartHttpBridge();   // loopback-HTTP fallback for when an antivirus blocks the native host (see HttpBridge.cs)
+        StartSmsRelay();     // приём СМС-кодов с телефона (Быстрые команды → LAN, см. SmsRelay.cs)
     }
 
     private async Task BridgeAcceptLoop(CancellationToken ct)
@@ -179,9 +180,10 @@ public partial class MainWindow
 
     private string BridgeCredentials(string url)
     {
-        if (_vault is null) return Resp(new { ok = true, unlocked = false, items = Array.Empty<object>() });
+        // СМС-коды не из сейфа — отдаём их и на заблокированном сейфе.
+        if (_vault is null) return Resp(new { ok = true, unlocked = false, items = Array.Empty<object>(), smsCodes = FreshSmsCodes() });
         string baseDom = Dedup.RegistrableDomain(url);
-        if (string.IsNullOrEmpty(baseDom)) return Resp(new { ok = true, unlocked = true, items = Array.Empty<object>() });
+        if (string.IsNullOrEmpty(baseDom)) return Resp(new { ok = true, unlocked = true, items = Array.Empty<object>(), smsCodes = FreshSmsCodes() });
         string nu = NormUrl(url);
 
         // "family" = domains that count as this page (auto-fillable); "related" = a redirect target on an
@@ -221,7 +223,7 @@ public partial class MainWindow
             .Select(x => new { title = x.Item.Title, code = TotpNow(x.Item.Fields.GetValueOrDefault("totp", "")) })
             .Where(c => !string.IsNullOrEmpty(c.code))
             .ToList();
-        return Resp(new { ok = true, unlocked = true, items, codes });
+        return Resp(new { ok = true, unlocked = true, items, codes, smsCodes = FreshSmsCodes() });
     }
 
     // Standalone authenticator records matched to a site: "google" <-> google.com.
