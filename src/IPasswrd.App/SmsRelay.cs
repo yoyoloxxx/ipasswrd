@@ -229,8 +229,8 @@ public partial class MainWindow
     // в iCloud Drive\IPasswrd\clip-inbox (туда же, где живёт сейф). Здесь ловим файл,
     // кладём текст в буфер и сразу удаляем — копия буфера в облаке не задерживается.
     private FileSystemWatcher? _clipDropWatcher;
-    private string _lastClipDrop = "";
-    private DateTimeOffset _lastClipDropAt = DateTimeOffset.MinValue;
+    private string _lastApplied = "";
+    private DateTimeOffset _lastAppliedAt = DateTimeOffset.MinValue;
 
     private static string ClipDropDir()
         => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -271,12 +271,13 @@ public partial class MainWindow
             catch { return; }                            // файл ещё качается — придёт Changed
             if (text.Length == 0) { TryDelete(path); return; }
 
-            lock (_smsLock)                              // Создание+Изменение приходят парой — не дублируем
+            lock (_smsLock)
             {
-                if (text == _lastClipDrop && DateTimeOffset.UtcNow - _lastClipDropAt < TimeSpan.FromSeconds(15))
+                // Два случая сразу: парные события Создание+Изменение и — главное — тот же
+                // текст, что уже приехал мгновенным путём: его iCloud-копия приходит через
+                // полминуты и НЕ должна затирать то, что человек скопировал на ПК позже.
+                if (text == _lastApplied && DateTimeOffset.UtcNow - _lastAppliedAt < TimeSpan.FromMinutes(10))
                 { TryDelete(path); return; }
-                _lastClipDrop = text;
-                _lastClipDropAt = DateTimeOffset.UtcNow;
             }
 
             await ApplyClipboardAsync(text, "iCloud");
@@ -364,6 +365,7 @@ public partial class MainWindow
         {
             await Dispatcher.UIThread.InvokeAsync(
                 () => Clipboard?.SetTextAsync(text) ?? Task.CompletedTask);
+            lock (_smsLock) { _lastApplied = text; _lastAppliedAt = DateTimeOffset.UtcNow; }
             NotifLog($"   буфер ← {source}: {text.Length} симв. ✓");
             return true;
         }
