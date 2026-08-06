@@ -6,6 +6,7 @@ using Java.Security;
 using Javax.Crypto;
 using Javax.Crypto.Spec;
 using AndroidApp = Android.App.Application;
+using CipherMode = Javax.Crypto.CipherMode;
 
 namespace IPasswrd.Mobile.Platforms.Android.Services;
 
