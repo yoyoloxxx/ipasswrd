@@ -26,6 +26,10 @@ public sealed class Vault
     /// anyone noticing is exactly the failure this whole feature exists to prevent.</summary>
     private const int FormatRecovery = 2;
 
+    /// <summary>Records may carry attachments. Same reasoning: a build that cannot show a
+    /// passport scan must not be the one that quietly deletes it.</summary>
+    private const int FormatAttachments = 3;
+
     private KdfConfig _cfg;
     private byte[] _salt;
     private readonly byte[] _dek;
@@ -34,6 +38,7 @@ public sealed class Vault
     private string _vaultId;
     private RecoveryDto? _recovery;
     private string _recoveryRevokedAt;
+    private bool? _hasAttachments;   // null = not worked out yet
 
     private static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never };
 
@@ -55,7 +60,7 @@ public sealed class Vault
     {
         VaultDocumentDto doc = JsonSerializer.Deserialize<VaultDocumentDto>(blob, Json)
                                ?? throw new FormatException("empty vault blob");
-        if (doc.Format is < FormatBase or > FormatRecovery)
+        if (doc.Format is < FormatBase or > FormatAttachments)
             throw new NotSupportedException($"unsupported vault format: {doc.Format}");
         return doc;
     }
@@ -120,9 +125,9 @@ public sealed class Vault
     {
         var doc = new VaultDocumentDto
         {
-            // stay on the baseline layout until a recovery code actually exists,
-            // so vaults that never use the feature keep opening in older builds
-            Format = (_recovery is null && _recoveryRevokedAt.Length == 0) ? FormatBase : FormatRecovery,
+            // climb only as far as the contents demand: a vault that uses neither feature
+            // keeps opening in every build ever shipped
+            Format = FormatNeeded(),
             VaultId = _vaultId,
             Kdf = new KdfDto
             {
@@ -242,6 +247,7 @@ public sealed class Vault
                 rec.Nonce = "";
                 rec.Ciphertext = "";
                 rec.UpdatedAt = NowIso();
+                _hasAttachments = null;   // the last scan may have just gone with it
                 return;
             }
         }
@@ -303,6 +309,7 @@ public sealed class Vault
         {
             _records.Clear();
             _records.AddRange(byId.Values);
+            _hasAttachments = null;
         }
 
         // The recovery envelope is not a record, so it needs its own last-write-wins rule.
@@ -455,6 +462,32 @@ public sealed class Vault
     private static byte[] Unwrap(byte[] kek, BlobDto wrapped) =>
         TryUnwrap(kek, wrapped, Crypto.AadVaultKey) ?? throw new WrongMasterPasswordException();
 
+    /// <summary>Lowest layout version that can represent what this vault currently holds.</summary>
+    private int FormatNeeded()
+    {
+        if (HasAnyAttachment()) return FormatAttachments;
+        if (_recovery is not null || _recoveryRevokedAt.Length > 0) return FormatRecovery;
+        return FormatBase;
+    }
+
+    /// <summary>
+    /// Does any live record carry a file? Answering means decrypting every record, so the
+    /// result is cached and invalidated whenever a record is written.
+    /// </summary>
+    private bool HasAnyAttachment()
+    {
+        if (_hasAttachments is bool known) return known;
+        bool found = false;
+        foreach (RecordDto rec in _records)
+        {
+            if (rec.Deleted) continue;
+            try { if (DecryptRecord(rec).Attachments.Count > 0) { found = true; break; } }
+            catch (VaultIntegrityException) { /* a damaged record cannot be asked; ignore */ }
+        }
+        _hasAttachments = found;
+        return found;
+    }
+
     private static string RecoveryStamp(RecoveryDto? rec, string revokedAt) =>
         rec is not null ? rec.CreatedAt : revokedAt;
 
@@ -469,8 +502,41 @@ public sealed class Vault
 
     // ---- record encryption ----
 
+    /// <summary>
+    /// Ceiling for one stored file. The whole vault travels as a single blob on every save, so an
+    /// unbounded attachment would turn each keystroke into a multi-megabyte upload. Pictures are
+    /// meant to be downscaled by the caller before they get here.
+    /// </summary>
+    public const int MaxAttachmentBytes = 2 * 1024 * 1024;
+
+    /// <summary>Ceiling per record, for the same reason.</summary>
+    public const int MaxAttachmentsPerItem = 10;
+
+    private static void GuardAttachments(VaultItem item)
+    {
+        if (item.Attachments.Count == 0) return;
+        if (item.Attachments.Count > MaxAttachmentsPerItem)
+            throw new AttachmentTooLargeException($"Не больше {MaxAttachmentsPerItem} вложений в одной записи.");
+
+        foreach (Attachment a in item.Attachments)
+        {
+            // Trust the payload, not the declared size: Bytes is a display convenience and a
+            // hand-edited vault could disagree with it.
+            int actual;
+            try { actual = Convert.FromBase64String(a.Data).Length; }
+            catch (FormatException) { throw new AttachmentTooLargeException($"Вложение «{a.Name}» повреждено."); }
+
+            if (actual > MaxAttachmentBytes)
+                throw new AttachmentTooLargeException(
+                    $"Вложение «{a.Name}» — {actual / 1024} КБ, предел {MaxAttachmentBytes / 1024} КБ.");
+        }
+    }
+
     private RecordDto EncryptRecord(string id, VaultItem item)
     {
+        GuardAttachments(item);
+        _hasAttachments = null;   // contents changed: the format decision has to be made again
+
         byte[] nonce = Crypto.RandomBytes(Crypto.NonceLen);
         byte[] plaintext = JsonSerializer.SerializeToUtf8Bytes(item, Json);
         byte[] ct = Crypto.Seal(_dek, nonce, plaintext, Crypto.RecordAad(id));

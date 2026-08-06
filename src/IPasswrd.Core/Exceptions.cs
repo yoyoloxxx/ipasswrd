@@ -27,3 +27,9 @@ public sealed class RecoveryNotEnabledException : Exception
     public RecoveryNotEnabledException(string message = "This vault has no recovery code.")
         : base(message) { }
 }
+
+/// <summary>Thrown when an attachment (or a record's worth of them) exceeds what the vault will carry.</summary>
+public sealed class AttachmentTooLargeException : Exception
+{
+    public AttachmentTooLargeException(string message) : base(message) { }
+}
