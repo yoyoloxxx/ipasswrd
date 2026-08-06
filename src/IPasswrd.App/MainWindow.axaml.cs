@@ -144,6 +144,7 @@ public partial class MainWindow : Window
         ["проверяю…"] = "checking…", ["установлена последняя версия"] = "up to date",
         ["готово обновление"] = "update ready", ["(применится при выходе)"] = "(applies on exit)",
         ["портативная копия, обновляется вручную"] = "portable copy, updated manually",
+        ["обновляется через Microsoft Store"] = "updated through the Microsoft Store",
         // recovery code
         ["Код восстановления"] = "Recovery code",
         ["Не создан — забытый мастер-пароль будет означать потерю сейфа."]
@@ -3051,6 +3052,8 @@ public partial class MainWindow : Window
             if (note is not null) hint.Text = version + " · " + note;
             else if (Updater.StagedVersion is { } staged)
                 hint.Text = version + " · " + Tr("готово обновление") + " " + staged + " " + Tr("(применится при выходе)");
+            else if (Updater.IsStoreBuild)
+                hint.Text = version + " · " + Tr("обновляется через Microsoft Store");
             else if (!Updater.IsManagedInstall)
                 hint.Text = version + " · " + Tr("портативная копия, обновляется вручную");
             else
