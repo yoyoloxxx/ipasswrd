@@ -15,6 +15,11 @@ using AndroidX.AppCompat.App;
 using IPasswrd.Core;
 using IPasswrd.Mobile.Services;
 using AndroidResult = Android.App.Result;
+using View = Android.Views.View;
+using Color = Android.Graphics.Color;
+using Button = Android.Widget.Button;
+using Orientation = Android.Widget.Orientation;
+using ListView = Android.Widget.ListView;
 
 namespace IPasswrd.Mobile.Platforms.Android.AutoFill;
 

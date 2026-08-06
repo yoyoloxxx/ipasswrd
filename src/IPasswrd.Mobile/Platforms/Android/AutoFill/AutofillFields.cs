@@ -174,12 +174,24 @@ internal static class AutofillParser
         if (IsPasswordInput(input)) return Kind.Password;
 
         // 3) html в браузере: <input type=password | autocomplete=one-time-code>
-        ViewStructureHtmlInfo? html = node.HtmlInfo;
-        if (html is not null)
+        try
         {
-            Kind byHtml = ByWords(HtmlAttrs(html));
-            if (byHtml != Kind.None) return byHtml;
+            var html = node.HtmlInfo;
+            if (html is not null)
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.Append(html.Tag ?? "").Append(' ');
+                // Тип коллекции атрибутов в биндинге — список пар; читаем нейтрально,
+                // нам важны только слова («password», «one-time-code», «email»).
+                if (html.Attributes is System.Collections.IEnumerable attrs)
+                {
+                    foreach (object? a in attrs) sb.Append(a?.ToString() ?? "").Append(' ');
+                }
+                Kind byHtml = ByWords(sb.ToString().ToLowerInvariant());
+                if (byHtml != Kind.None) return byHtml;
+            }
         }
+        catch (Exception) { /* html-разбор — необязательный путь */ }
 
         // 4) эвристика по id ресурса / подсказке / тексту
         string bag = string.Join(' ',
@@ -199,31 +211,12 @@ internal static class AutofillParser
     private static bool IsPasswordInput(InputTypes input)
     {
         InputTypes cls = input & InputTypes.MaskClass;
-        InputTypes var = input & InputTypes.MaskVariation;
-        if (cls == InputTypes.ClassText && (var == InputTypes.TextVariationPassword
-            || var == InputTypes.TextVariationVisiblePassword
-            || var == InputTypes.TextVariationWebPassword)) return true;
-        if (cls == InputTypes.ClassNumber && var == InputTypes.NumberVariationPassword) return true;
+        InputTypes variation = input & InputTypes.MaskVariation;
+        if (cls == InputTypes.ClassText && (variation == InputTypes.TextVariationPassword
+            || variation == InputTypes.TextVariationVisiblePassword
+            || variation == InputTypes.TextVariationWebPassword)) return true;
+        if (cls == InputTypes.ClassNumber && variation == InputTypes.NumberVariationPassword) return true;
         return false;
     }
 
-    private static string HtmlAttrs(ViewStructureHtmlInfo html)
-    {
-        try
-        {
-            var sb = new System.Text.StringBuilder();
-            sb.Append(html.Tag ?? "").Append(' ');
-            // Тип коллекции атрибутов в биндинге — список пар; читаем нейтрально,
-            // нам важны только слова («password», «one-time-code», «email»).
-            if (html.Attributes is System.Collections.IEnumerable attrs)
-            {
-                foreach (object? a in attrs) sb.Append(a?.ToString() ?? "").Append(' ');
-            }
-            return sb.ToString().ToLowerInvariant();
-        }
-        catch (Exception)
-        {
-            return "";
-        }
-    }
 }
