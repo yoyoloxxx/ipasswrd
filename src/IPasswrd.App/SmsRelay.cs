@@ -251,8 +251,18 @@ public partial class MainWindow
             _clipDropWatcher.Created += h;
             _clipDropWatcher.Changed += h;
             _clipDropWatcher.Renamed += (_, e) => _ = Task.Run(() => ConsumeClipDropAsync(e.FullPath));
-            foreach (string f in Directory.GetFiles(dir))                       // что уже дожидалось
-                _ = Task.Run(() => ConsumeClipDropAsync(f));
+
+            // Что уже дожидалось (ПК был выключен): берём ТОЛЬКО самый свежий —
+            // старые копии буфера не нужны и лежать в облаке им точно не стоит.
+            var waiting = new DirectoryInfo(dir).GetFiles()
+                                                .OrderByDescending(f => f.LastWriteTimeUtc)
+                                                .ToList();
+            if (waiting.Count > 0)
+            {
+                foreach (var stale in waiting.Skip(1)) TryDelete(stale.FullName);
+                string newest = waiting[0].FullName;
+                _ = Task.Run(() => ConsumeClipDropAsync(newest));
+            }
         }
         catch { _clipDropWatcher = null; /* нет iCloud Drive — длинный канал выключен */ }
     }
