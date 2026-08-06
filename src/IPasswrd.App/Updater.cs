@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading.Tasks;
 using Velopack;
 using Velopack.Sources;
@@ -26,13 +28,37 @@ internal static class Updater
     private static UpdateManager? _mgr;
     private static bool _armed;
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetCurrentPackageFullName(ref int length, StringBuilder? fullName);
+
+    /// <summary>
+    /// True when this copy came from the Microsoft Store. Updates there are the Store's job,
+    /// so offering a "check for updates" button would be a button that does nothing.
+    /// </summary>
+    public static bool IsStoreBuild { get; } = DetectPackaged();
+
+    private static bool DetectPackaged()
+    {
+        const int NoPackage = 15700;   // APPMODEL_ERROR_NO_PACKAGE
+        try
+        {
+            int length = 0;
+            return GetCurrentPackageFullName(ref length, null) != NoPackage;
+        }
+        catch { return false; }   // older Windows without the app-model API
+    }
+
     private static UpdateManager Manager =>
         _mgr ??= new UpdateManager(new GithubSource(RepoUrl, accessToken: null, prerelease: false));
 
     /// <summary>True when running from an installed copy that can update itself.</summary>
     public static bool IsManagedInstall
     {
-        get { try { return Manager.IsInstalled; } catch { return false; } }
+        get
+        {
+            if (IsStoreBuild) return false;   // the Store owns updates for its own copies
+            try { return Manager.IsInstalled; } catch { return false; }
+        }
     }
 
     /// <summary>Version to show in Settings — the installed one, or the assembly version for a portable run.</summary>
