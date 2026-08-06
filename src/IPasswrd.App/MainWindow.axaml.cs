@@ -416,7 +416,6 @@ public partial class MainWindow : Window
     {
         _reallyExit = true;
         try { SaveQuickUnlock(); } catch { /* ignore */ }
-        try { Updater.ApplyOnExit(); } catch { /* ignore */ }
         try { _tray?.Dispose(); } catch { /* ignore */ }
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime d)
             d.Shutdown();

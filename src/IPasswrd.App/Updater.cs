@@ -12,6 +12,10 @@ namespace IPasswrd.App;
 /// background and swapped in on exit — a password manager must not restart itself out from
 /// under someone who is halfway through editing an entry with the vault open.
 ///
+/// The waiter is armed the moment the download finishes, not on the way out of a clean
+/// shutdown. Otherwise an update would sit staged forever for anyone who ends the app by
+/// killing it, logging off or rebooting — which, for a tray app, is most people.
+///
 /// A portable copy (run straight from <c>dist</c>) is not a Velopack install; every method
 /// here degrades to "no updates" rather than pretending otherwise.
 /// </summary>
@@ -20,7 +24,7 @@ internal static class Updater
     private const string RepoUrl = "https://github.com/yoyololka/ipasswrd";
 
     private static UpdateManager? _mgr;
-    private static UpdateInfo? _staged;
+    private static bool _armed;
 
     private static UpdateManager Manager =>
         _mgr ??= new UpdateManager(new GithubSource(RepoUrl, accessToken: null, prerelease: false));
@@ -64,18 +68,21 @@ internal static class Updater
             if (info is null) return null;
 
             await Manager.DownloadUpdatesAsync(info).ConfigureAwait(false);
-            _staged = info;
             StagedVersion = info.TargetFullRelease.Version.ToString();
+
+            // Arm the swap now: Update.exe sits waiting for this process to end, however it
+            // ends. Nothing restarts on its own — the new build is simply what starts next time.
+            if (!_armed)
+            {
+                try
+                {
+                    Manager.WaitExitThenApplyUpdates(info, silent: true, restart: false);
+                    _armed = true;
+                }
+                catch { /* stays staged; the next launch will try again */ }
+            }
             return StagedVersion;
         }
         catch { return null; }
-    }
-
-    /// <summary>Hand the staged build over to the updater, to be applied once this process exits.</summary>
-    public static void ApplyOnExit()
-    {
-        if (_staged is null) return;
-        try { Manager.WaitExitThenApplyUpdates(_staged, silent: true, restart: false); }
-        catch { /* the update simply stays staged for next time */ }
     }
 }
