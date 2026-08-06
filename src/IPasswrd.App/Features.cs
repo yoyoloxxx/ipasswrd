@@ -276,11 +276,11 @@ public partial class MainWindow
 
     /// <summary>
     /// Identity assigned by the Chrome Web Store. It does NOT match the development one — the
-    /// Store signs the package with its own key — and it only becomes known after the first
-    /// upload. Fill it in then: it has to be baked into the build, because every user's app
-    /// must trust the published extension, not just ours.
+    /// Store signs the package with its own key — and it became known only after the first
+    /// upload. It is baked into the build on purpose: every user's app has to trust the
+    /// published extension, so this cannot be a per-machine setting.
     /// </summary>
-    private const string StoreExtensionId = "";
+    private const string StoreExtensionId = "dpagdbbdjphchgihnheiiibgmnndhchd";
 
     private const string NativeHostName = "com.yoyoloxxx.ipasswrd";
 
