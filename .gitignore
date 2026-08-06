@@ -14,14 +14,14 @@ _to_delete/
 *.tgz
 
 # Velopack: промежуточная папка публикации и готовые релизы
-build-vpk/
-Releases/
+/build-vpk/
+/Releases/
 installer-build.log
 vpk-install.log
 vpk-add.log
 
 # MSIX: промежуточная папка, готовые пакеты и добытые инструменты SDK
-build-msix/
-Store/
+/build-msix/
+/Store/
 tools/msix/sdk/
-build-extension/
+/build-extension/
