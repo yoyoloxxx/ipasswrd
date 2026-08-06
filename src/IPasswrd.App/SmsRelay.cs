@@ -149,6 +149,15 @@ public partial class MainWindow
                 NotifLog($"[{app}] {string.Join(" | ", parts)}  => clip:{(clip is null ? "-" : clip.Length + " симв.")}");
                 if (clip is not null)
                 {
+                    // Уведомление приходит по Bluetooth на пару секунд ПОЗЖЕ мгновенного POST —
+                    // и несёт обрезок (~150 символов и «…»). Затирать им уже приехавший
+                    // полный текст нельзя: человек вставит огрызок вместо абзаца.
+                    if (IsPrefixOfLastApplied(clip))
+                    {
+                        NotifLog("   Bluetooth: это обрезок уже приехавшего текста — пропускаю");
+                        try { _notifListener?.RemoveNotification(n.Id); } catch { }
+                        continue;
+                    }
                     await ApplyClipboardAsync(clip, "Bluetooth");
                     try { _notifListener?.RemoveNotification(n.Id); } catch { }
                     continue;
@@ -287,7 +296,11 @@ public partial class MainWindow
                 // текст, что уже приехал мгновенным путём: его iCloud-копия приходит через
                 // полминуты и НЕ должна затирать то, что человек скопировал на ПК позже.
                 if (text == _lastApplied && DateTimeOffset.UtcNow - _lastAppliedAt < TimeSpan.FromMinutes(10))
-                { TryDelete(path); return; }
+                {
+                    NotifLog($"   iCloud: тот же текст ({text.Length} симв.) уже приехал раньше — пропускаю");
+                    TryDelete(path);
+                    return;
+                }
             }
 
             await ApplyClipboardAsync(text, "iCloud");
@@ -365,6 +378,22 @@ public partial class MainWindow
         }
         catch { }
         return "";
+    }
+
+    /// <summary>Пробелы/переводы строк — в один пробел: в тексте уведомления переносов нет.</summary>
+    private static string NormWs(string s) => Regex.Replace(s, @"\s+", " ").Trim();
+
+    /// <summary>Это обрезок («…») того же текста, что уже лежит в буфере целиком?</summary>
+    private bool IsPrefixOfLastApplied(string candidate)
+    {
+        string head = NormWs(candidate).TrimEnd('…', '.', ' ');
+        if (head.Length < 12) return false;                 // слишком коротко, чтобы судить
+        lock (_smsLock)
+        {
+            if (DateTimeOffset.UtcNow - _lastAppliedAt > TimeSpan.FromMinutes(3)) return false;
+            string last = NormWs(_lastApplied);
+            return last.Length > head.Length && last.StartsWith(head, StringComparison.Ordinal);
+        }
     }
 
     /// <summary>Единая точка записи буфера для всех трёх каналов (Bluetooth / сеть / iCloud):
