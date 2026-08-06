@@ -1,21 +1,21 @@
 @echo off
-rem Собирает установщик и пакет обновления через Velopack.
-rem Использование: publish-installer.cmd [версия]   (по умолчанию 1.0.0)
+rem я┐╜я┐╜я┐╜я┐╜раея┐╜ я┐╜я┐╜таня┐╜я┐╜щик я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜рез Velopack.
+rem я┐╜споя┐╜ьзоя┐╜я┐╜я┐╜я┐╜я┐╜: publish-installer.cmd [я┐╜я┐╜я┐╜я┐╜я┐╜]   (я┐╜я┐╜ умоя┐╜чаня┐╜я┐╜ 1.0.0)
 rem
-rem ВАЖНО: packId = IPasswrdApp, а НЕ IPasswrd. Velopack ставит программу в
-rem %LocalAppData%\<packId>, а сейф лежит в %LocalAppData%\IPasswrd - при
-rem совпадении имён удаление программы снесло бы сейф вместе с паролями.
+rem я┐╜я┐╜я┐╜я┐╜я┐╜: packId = IPasswrdApp, я┐╜ я┐╜я┐╜ IPasswrd. Velopack я┐╜тавя┐╜я┐╜ я┐╜рограмя┐╜я┐╜ я┐╜
+rem %LocalAppData%\<packId>, я┐╜ сейя┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜ %LocalAppData%\IPasswrd - я┐╜я┐╜
+rem совя┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜ удая┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜рограмя┐╜я┐╜ снесло я┐╜я┐╜ сейя┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜ я┐╜я┐╜ролями.
 rem
-rem Single-file здесь ВЫКЛЮЧЕН намеренно: из одного 55-мегабайтного блоба
-rem не выходит дельта-обновлений, качать пришлось бы всё целиком.
+rem Single-file я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜реня┐╜я┐╜: я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜ 55-я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜тноя┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜
+rem я┐╜я┐╜ я┐╜я┐╜ходя┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜-я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜, я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜шлоя┐╜я┐╜ я┐╜я┐╜ я┐╜я┐╜я┐╜ целя┐╜я┐╜я┐╜я┐╜.
 rem
-rem ДЕЛЬТЫ ПОКА ОТКЛЮЧЕНЫ (--delta None). Проверено 06.08.2026: дельта
-rem скачивается, но локально в полный пакет не собирается, и Update.exe
-rem применяет ПРЕДЫДУЩУЮ версию вместо новой. Вручную
-rem "Update.exe apply --package <дельта>" отрабатывает верно - значит
-rem ломается стык скачивания и применения. Пока не разобрались, качаем
-rem пакет целиком: лишний трафик неприятен, необновившийся менеджер
-rem паролей хуже.
+rem я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜ (--delta None). я┐╜ровя┐╜реня┐╜ 06.08.2026: я┐╜я┐╜я┐╜я┐╜я┐╜
+rem скачивя┐╜я┐╜я┐╜я┐╜я┐╜, я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜ьно я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜ собя┐╜раея┐╜я┐╜я┐╜, я┐╜ Update.exe
+rem я┐╜римя┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜. я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜
+rem "Update.exe apply --package <я┐╜я┐╜я┐╜я┐╜я┐╜>" я┐╜я┐╜рабя┐╜я┐╜ывая┐╜я┐╜ я┐╜я┐╜рно - я┐╜я┐╜я┐╜я┐╜я┐╜
+rem я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜ скачивя┐╜я┐╜я┐╜я┐╜ я┐╜ я┐╜римя┐╜я┐╜я┐╜я┐╜я┐╜я┐╜. я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜ разя┐╜я┐╜раля┐╜я┐╜я┐╜, я┐╜я┐╜чаея┐╜
+rem я┐╜я┐╜я┐╜я┐╜я┐╜ целя┐╜я┐╜я┐╜я┐╜: я┐╜я┐╜шния┐╜ я┐╜я┐╜фик я┐╜я┐╜я┐╜я┐╜я┐╜тен, я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜шийя┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜
+rem я┐╜я┐╜роля┐╜я┐╜ я┐╜уже.
 
 setlocal
 set VER=%1
@@ -31,13 +31,13 @@ if exist "%OUT%" rmdir /S /Q "%OUT%"
 "C:\Program Files\dotnet\dotnet.exe" publish "%ROOT%\src\IPasswrd.App\IPasswrd.App.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:DebugType=None -p:Version=%VER% -o "%OUT%" >> "%LOG%" 2>&1
 if errorlevel 1 goto fail
 
-rem Расширение и нативный хост едут рядом с программой, чтобы кнопка
-rem "Установить расширение" нашла всё в одной папке.
+rem я┐╜я┐╜я┐╜я┐╜реня┐╜я┐╜ я┐╜ я┐╜я┐╜тивя┐╜я┐╜ я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜ я┐╜ядоя┐╜ я┐╜ я┐╜рограмя┐╜я┐╜я┐╜, я┐╜тобя┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜я┐╜
+rem "я┐╜я┐╜таня┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜реня┐╜я┐╜" я┐╜я┐╜шла я┐╜я┐╜я┐╜ я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜ я┐╜я┐╜я┐╜я┐╜я┐╜.
 xcopy /E /I /Y "%ROOT%\extension" "%OUT%\extension" >> "%LOG%" 2>&1
 if exist "%ROOT%\dist-host\IPasswrd.Host.exe" copy /Y "%ROOT%\dist-host\IPasswrd.Host.exe" "%OUT%\IPasswrd.Host.exe" >> "%LOG%" 2>&1
 
 echo === pack === >> "%LOG%"
-"%VPK%" pack --packId IPasswrdApp --packTitle IPasswrd --packAuthors "yoyoloxxx Dev" --packVersion %VER% --packDir "%OUT%" --mainExe IPasswrd.App.exe --icon "%ROOT%\src\IPasswrd.App\Assets\ipasswrd_app.ico" --outputDir "%ROOT%\Releases" >> "%LOG%" 2>&1
+"%VPK%" pack --packId IPasswrdApp --packTitle IPasswrd --packAuthors "yoyoloxxx Dev" --packVersion %VER% --packDir "%OUT%" --mainExe IPasswrd.App.exe --icon "%ROOT%\src\IPasswrd.App\Assets\ipasswrd_app.ico" --delta None --outputDir "%ROOT%\Releases" >> "%LOG%" 2>&1
 if errorlevel 1 goto fail
 
 echo === OK === >> "%LOG%"

@@ -78,7 +78,7 @@ public partial class MainWindow : Window
         // sidebar / sections / tools
         ["Все записи"] = "All items", ["Аккаунты"] = "Accounts", ["Ключи доступа"] = "Passkeys",
         ["Карты"] = "Cards", ["Документы"] = "Documents", ["Заметки"] = "Notes", ["ИНСТРУМЕНТЫ"] = "TOOLS", ["ПАПКИ"] = "FOLDERS", ["Папка"] = "Folder",
-        ["Новая папка"] = "New folder", ["Добавить в папку"] = "Add to folder", ["Копировать пароль"] = "Copy password", ["Копировать логин"] = "Copy login", ["Убрать из папки"] = "Remove from folder", ["Без папки"] = "Unfiled",
+        ["Новая папка"] = "New folder", ["Новая папка…"] = "New folder…", ["Название папки"] = "Folder name", ["Создать"] = "Create", ["Введите название"] = "Enter a name",  ["Добавить в папку"] = "Add to folder", ["Копировать пароль"] = "Copy password", ["Копировать логин"] = "Copy login", ["Убрать из папки"] = "Remove from folder", ["Без папки"] = "Unfiled",
         ["Необязательно — например: "] = "Optional — e.g.: ", ["Необязательно — например: Работа"] = "Optional — e.g.: Work",
         ["Аутентификатор"] = "Authenticator", ["Генератор"] = "Generator", ["Проверка"] = "Security", ["Настройки"] = "Settings",
         ["Локальный сейф"] = "Local storage", ["без синхронизации"] = "no sync",
@@ -1499,9 +1499,10 @@ public partial class MainWindow : Window
         }
         if (folderItems.Count > 0) folderItems.Add(new Separator());
 
-        // A text box living in the menu: naming a new folder should not cost a separate dialog.
-        var box = new TextBox { Watermark = Tr("Новая папка"), MinWidth = 170, Margin = new Thickness(0, 2) };
-        folderItems.Add(new MenuItem { Header = box, StaysOpenOnClick = true });
+        // Поле ввода внутри меню не ловит клики — имя новой папки спрашиваем отдельной карточкой.
+        var make = new MenuItem { Header = Tr("Новая папка…"), Icon = MakeIcon(IconData("plus"), 15, Text2, 1.8) };
+        make.Click += (_, _) => PromptNewFolder(ids);
+        folderItems.Add(make);
 
         if (current.Length > 0)
         {
@@ -1522,16 +1523,81 @@ public partial class MainWindow : Window
         EntryList.ContextFlyout = flyout;
         flyout.ShowAt(EntryList, showAtPointer: true);
         e.Handled = true;
+    }
 
-        box.KeyDown += (_, ke) =>
+    /// <summary>Name a new folder in a card over the window — a TextBox inside a menu never receives the click.</summary>
+    private void PromptNewFolder(IReadOnlyList<string> ids)
+    {
+        if (this.Content is not Grid root) return;
+
+        var box = new TextBox { Watermark = Tr("Название папки"), Width = 300 };
+        var error = new TextBlock { Foreground = Bad, IsVisible = false, TextWrapping = TextWrapping.Wrap };
+        var ok = new Button { Content = Tr("Создать"), IsDefault = true };
+        ok.Classes.Add("primary");
+        var cancel = new Button { Content = Tr("Отмена"), IsCancel = true };
+
+        var buttons = new StackPanel
         {
-            if (ke.Key != Key.Enter) return;
-            ke.Handled = true;
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(ok);
+
+        var stack = new StackPanel { Spacing = 14 };
+        stack.Children.Add(new TextBlock
+        {
+            Text = Tr("Новая папка"),
+            FontSize = 17,
+            FontWeight = FontWeight.Bold,
+            Foreground = Text,
+        });
+        stack.Children.Add(box);
+        stack.Children.Add(error);
+        stack.Children.Add(buttons);
+
+        var card = new Border
+        {
+            Background = Surface,
+            BorderBrush = HairStrong,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(26, 22),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = stack,
+        };
+
+        var dim = new Border { Background = new SolidColorBrush(Color.FromArgb(0xB4, 0, 0, 0)), Child = card };
+        Grid.SetRow(dim, 0);
+        Grid.SetRowSpan(dim, root.RowDefinitions.Count > 0 ? root.RowDefinitions.Count : 1);
+        root.Children.Add(dim);
+
+        void Close() => root.Children.Remove(dim);
+
+        cancel.Click += (_, _) => Close();
+        ok.Click += (_, _) =>
+        {
             string name = (box.Text ?? "").Trim();
-            if (name.Length == 0) return;
-            flyout.Hide();
+            if (name.Length == 0)
+            {
+                error.Text = Tr("Введите название");
+                error.IsVisible = true;
+                box.Focus();
+                return;
+            }
+            Close();
             MoveToFolder(ids, name);
         };
+        dim.KeyDown += (_, ke) =>
+        {
+            if (ke.Key != Key.Escape) return;
+            ke.Handled = true;
+            Close();
+        };
+
+        Dispatcher.UIThread.Post(() => box.Focus(), DispatcherPriority.Input);
     }
 
     /// <summary>Put every login of the clicked tile in the same folder — a site group moves together.</summary>
