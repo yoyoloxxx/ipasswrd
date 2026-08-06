@@ -78,6 +78,7 @@ public partial class MainWindow : Window
         // sidebar / sections / tools
         ["Все записи"] = "All items", ["Аккаунты"] = "Accounts", ["Ключи доступа"] = "Passkeys",
         ["Карты"] = "Cards", ["Документы"] = "Documents", ["Заметки"] = "Notes", ["ИНСТРУМЕНТЫ"] = "TOOLS", ["ПАПКИ"] = "FOLDERS", ["Папка"] = "Folder",
+        ["Новая папка"] = "New folder", ["Убрать из папки"] = "Remove from folder", ["Без папки"] = "Unfiled",
         ["Необязательно — например: "] = "Optional — e.g.: ", ["Необязательно — например: Работа"] = "Optional — e.g.: Work",
         ["Аутентификатор"] = "Authenticator", ["Генератор"] = "Generator", ["Проверка"] = "Security", ["Настройки"] = "Settings",
         ["Локальный сейф"] = "Local storage", ["без синхронизации"] = "no sync",
@@ -380,6 +381,7 @@ public partial class MainWindow : Window
         KeyDown += (_, _) => _lastActivity = DateTimeOffset.UtcNow;
         SetupUnlock();
         Opened += (_, _) => SetupGlobalHotkey();   // needs a real window handle, so not in the ctor
+        EntryList.ContextRequested += OnEntryContext;
         _ = Updater.CheckAndStageAsync();   // quiet; nothing is applied until the app exits
 
         // --tray (background) start is handled in App.axaml.cs: MainWindow is simply never
@@ -1462,6 +1464,89 @@ public partial class MainWindow : Window
             Strength.Fair => (false, true),
             _ => (false, false),
         };
+    }
+
+    /// <summary>
+    /// Right-click a record to file it. Folders used to be reachable only through a field at the
+    /// bottom of the editor, which meant nobody found them: a feature you cannot stumble into is
+    /// the same as one that is not there.
+    /// </summary>
+    private void OnEntryContext(object? sender, ContextRequestedEventArgs e)
+    {
+        if (_vault is null) return;
+
+        // walk up from whatever was clicked to the row it belongs to
+        EntryRow? row = null;
+        for (var v = e.Source as Control; v is not null; v = v.Parent as Control)
+            if (v.DataContext is EntryRow r) { row = r; break; }
+        if (row is null) return;
+
+        IReadOnlyList<string> ids = row.Ids.Count > 0 ? row.Ids : new[] { row.Id };
+        string current = "";
+        try { current = _vault.Get(ids[0]).Folder; } catch { /* vanished */ }
+
+        var items = new List<Control>();
+        foreach (string folder in KnownFolders())
+        {
+            var mi = new MenuItem { Header = folder };
+            if (string.Equals(folder, current, StringComparison.Ordinal))
+                mi.Icon = MakeIcon(IconData("check"), 14, Ok, 1.8);
+            string target = folder;
+            mi.Click += (_, _) => MoveToFolder(ids, target);
+            items.Add(mi);
+        }
+
+        if (items.Count > 0) items.Add(new Separator());
+
+        // A text box living in the menu: naming a new folder should not cost a separate dialog.
+        var box = new TextBox { Watermark = Tr("Новая папка"), MinWidth = 170, Margin = new Thickness(0, 2) };
+        var newItem = new MenuItem { Header = box, StaysOpenOnClick = true };
+        box.KeyDown += (_, ke) =>
+        {
+            if (ke.Key != Key.Enter) return;
+            ke.Handled = true;
+            string name = (box.Text ?? "").Trim();
+            if (name.Length == 0) return;
+            EntryList.ContextFlyout?.Hide();
+            MoveToFolder(ids, name);
+        };
+        items.Add(newItem);
+
+        if (current.Length > 0)
+        {
+            items.Add(new Separator());
+            var clear = new MenuItem { Header = Tr("Убрать из папки") };
+            clear.Click += (_, _) => MoveToFolder(ids, "");
+            items.Add(clear);
+        }
+
+        var flyout = new MenuFlyout { ItemsSource = items };
+        EntryList.ContextFlyout = flyout;
+        flyout.ShowAt(EntryList, showAtPointer: true);
+        e.Handled = true;
+
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => box.Focus());
+    }
+
+    /// <summary>Put every login of the clicked tile in the same folder — a site group moves together.</summary>
+    private void MoveToFolder(IReadOnlyList<string> ids, string folder)
+    {
+        if (_vault is null) return;
+        _lastActivity = DateTimeOffset.UtcNow;
+        try
+        {
+            foreach (string id in ids)
+            {
+                VaultItem item = _vault.Get(id);
+                if (string.Equals(item.Folder, folder, StringComparison.Ordinal)) continue;
+                item.Folder = folder;
+                _vault.Update(id, item);
+            }
+            Save();
+            LoadEntries(selectFirst: false);
+            RenderSidebar();
+        }
+        catch { /* ignore */ }
     }
 
     private void OnEntrySelected(object? sender, SelectionChangedEventArgs e)
