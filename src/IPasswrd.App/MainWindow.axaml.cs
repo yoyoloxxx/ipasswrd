@@ -383,10 +383,23 @@ public partial class MainWindow : Window
         Opened += (_, _) => SetupGlobalHotkey();   // needs a real window handle, so not in the ctor
         EntryList.ContextRequested += OnEntryContext;
         _ = Updater.CheckAndStageAsync();   // quiet; nothing is applied until the app exits
+        StartUpdateWatch();
 
         // --tray (background) start is handled in App.axaml.cs: MainWindow is simply never
         // assigned/shown. No Opened+=Hide hack here — it used to re-hide the window the first
         // time the user explicitly opened it from the browser.
+    }
+
+    /// <summary>
+    /// Стартовой проверки мало: это значок в трее, его не закрывают неделями. Без
+    /// повторных проверок такой человек не получит ни одного обновления — для менеджера
+    /// паролей это не мелочь. Найденное всё равно только скачивается и ждёт выхода.
+    /// </summary>
+    private void StartUpdateWatch()
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromHours(4) };
+        timer.Tick += (_, _) => _ = Updater.CheckAndStageAsync();
+        timer.Start();
     }
 
     // ================= tray =================
