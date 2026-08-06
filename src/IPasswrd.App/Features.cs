@@ -271,8 +271,29 @@ public partial class MainWindow
 
     // ================= install browser extension =================
 
-    private const string ExtensionId = "pedodpphbjijbfpepobhfeedodepmean";   // fixed by the "key" in extension/manifest.json
+    /// <summary>Development identity — fixed by the "key" in extension/manifest.json.</summary>
+    private const string DevExtensionId = "pedodpphbjijbfpepobhfeedodepmean";
+
+    /// <summary>
+    /// Identity assigned by the Chrome Web Store. It does NOT match the development one — the
+    /// Store signs the package with its own key — and it only becomes known after the first
+    /// upload. Fill it in then: it has to be baked into the build, because every user's app
+    /// must trust the published extension, not just ours.
+    /// </summary>
+    private const string StoreExtensionId = "";
+
     private const string NativeHostName = "com.yoyoloxxx.ipasswrd";
+
+    /// <summary>
+    /// Every extension identity this app answers to. The settings override exists so a build
+    /// can be pointed at a freshly uploaded draft without waiting for a new release.
+    /// </summary>
+    private IEnumerable<string> TrustedExtensionIds()
+    {
+        yield return DevExtensionId;
+        if (StoreExtensionId.Length > 0) yield return StoreExtensionId;
+        if (!string.IsNullOrWhiteSpace(_extraExtensionId)) yield return _extraExtensionId.Trim();
+    }
 
     private static string? FirstExisting(params string[] paths) => paths.FirstOrDefault(File.Exists);
 
@@ -306,7 +327,7 @@ public partial class MainWindow
 
     /// <summary>Write the native-messaging manifest next to the host exe and register it for all
     /// Chromium-family browsers on this account (HKCU). Idempotent. Returns the manifest path.</summary>
-    private static string RegisterNativeHost(string hostExe)
+    private string RegisterNativeHost(string hostExe)
     {
         string dir = Path.GetDirectoryName(hostExe)!;
         string manifestPath = Path.Combine(dir, NativeHostName + ".json");
@@ -317,7 +338,9 @@ public partial class MainWindow
             ["description"] = "IPasswrd browser bridge",
             ["path"] = hostExe,
             ["type"] = "stdio",
-            ["allowed_origins"] = new[] { $"chrome-extension://{ExtensionId}/" },
+            // all trusted identities at once: the same host serves the unpacked copy and the
+            // Store one, and a user may well have both during the switchover
+            ["allowed_origins"] = TrustedExtensionIds().Select(id => $"chrome-extension://{id}/").ToArray(),
         };
         File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
 

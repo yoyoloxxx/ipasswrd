@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -22,7 +23,6 @@ namespace IPasswrd.App;
 public partial class MainWindow
 {
     private const int HttpBridgePort = 38799;
-    private const string AllowedOrigin = "chrome-extension://pedodpphbjijbfpepobhfeedodepmean";
     private TcpListener? _httpBridge;
 
     private void StartHttpBridge()
@@ -97,12 +97,18 @@ public partial class MainWindow
             string host = Header("Host");
             string origin = Header("Origin");
             bool hostOk = host == $"127.0.0.1:{HttpBridgePort}" || host == $"localhost:{HttpBridgePort}";
-            bool originOk = string.Equals(origin, AllowedOrigin, StringComparison.OrdinalIgnoreCase);
+            // The Store build of the extension has a different identity from the unpacked one,
+            // so this is a set rather than a single string. Anything not in it gets nothing:
+            // no site may pump passwords out of the vault through this port.
+            string? matched = TrustedExtensionIds()
+                .Select(id => "chrome-extension://" + id)
+                .FirstOrDefault(o => string.Equals(origin, o, StringComparison.OrdinalIgnoreCase));
+            bool originOk = matched is not null;
 
             async Task Send(string status, string body, bool cors)
             {
                 string extra = cors
-                    ? $"Access-Control-Allow-Origin: {AllowedOrigin}\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: content-type\r\nAccess-Control-Max-Age: 600\r\n"
+                    ? $"Access-Control-Allow-Origin: {matched}\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: content-type\r\nAccess-Control-Max-Age: 600\r\n"
                     : "";
                 byte[] payload = Encoding.UTF8.GetBytes(body);
                 string h = $"HTTP/1.1 {status}\r\n{extra}Content-Type: application/json; charset=utf-8\r\nContent-Length: {payload.Length}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n";

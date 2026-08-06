@@ -24,3 +24,4 @@ vpk-add.log
 build-msix/
 Store/
 tools/msix/sdk/
+build-extension/

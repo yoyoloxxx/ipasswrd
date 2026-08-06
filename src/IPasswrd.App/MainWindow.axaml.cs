@@ -448,6 +448,9 @@ public partial class MainWindow : Window
 
     private static string SettingsPath() => System.IO.Path.Combine(LocalDataDir(), "settings.json");
 
+    /// <summary>Extra extension identity to trust, from settings. See Features.TrustedExtensionIds.</summary>
+    private string? _extraExtensionId;
+
     private sealed class AppSettings
     {
         public int AutolockMinutes { get; set; }
@@ -458,6 +461,9 @@ public partial class MainWindow : Window
         public HashSet<string>? KeepAsIs { get; set; }
         public string? SyncProvider { get; set; }
         public int ClipboardClearSeconds { get; set; } = 30;
+
+        /// <summary>Extra extension identity to trust — for pointing a build at a freshly uploaded Store draft.</summary>
+        public string? ExtraExtensionId { get; set; }
     }
 
     private void LoadSettings()
@@ -467,7 +473,7 @@ public partial class MainWindow : Window
             string p = SettingsPath();
             if (!System.IO.File.Exists(p)) return;
             var s = JsonSerializer.Deserialize<AppSettings>(System.IO.File.ReadAllText(p));
-            if (s is not null) { _autolockMinutes = s.AutolockMinutes; _light = s.Light; _lang = string.IsNullOrEmpty(s.Lang) ? "ru" : s.Lang; _syncPath = s.SyncPath; _siteNames = s.SiteNames is null ? new(StringComparer.Ordinal) : new(s.SiteNames, StringComparer.Ordinal); _keepAsIs = s.KeepAsIs is null ? new(StringComparer.Ordinal) : new(s.KeepAsIs, StringComparer.Ordinal); _syncProvider = s.SyncProvider ?? ""; _clipboardClearSeconds = s.ClipboardClearSeconds; }
+            if (s is not null) { _autolockMinutes = s.AutolockMinutes; _light = s.Light; _lang = string.IsNullOrEmpty(s.Lang) ? "ru" : s.Lang; _syncPath = s.SyncPath; _siteNames = s.SiteNames is null ? new(StringComparer.Ordinal) : new(s.SiteNames, StringComparer.Ordinal); _keepAsIs = s.KeepAsIs is null ? new(StringComparer.Ordinal) : new(s.KeepAsIs, StringComparer.Ordinal); _syncProvider = s.SyncProvider ?? ""; _clipboardClearSeconds = s.ClipboardClearSeconds; _extraExtensionId = s.ExtraExtensionId; }
         }
         catch { /* ignore */ }
     }
@@ -478,7 +484,7 @@ public partial class MainWindow : Window
         {
             string p = SettingsPath();
             System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(p)!);
-            System.IO.File.WriteAllText(p, JsonSerializer.Serialize(new AppSettings { AutolockMinutes = _autolockMinutes, Light = _light, Lang = _lang, SyncPath = _syncPath, SiteNames = _siteNames.Count > 0 ? _siteNames : null, KeepAsIs = _keepAsIs.Count > 0 ? _keepAsIs : null, SyncProvider = string.IsNullOrEmpty(_syncProvider) ? null : _syncProvider, ClipboardClearSeconds = _clipboardClearSeconds }));
+            System.IO.File.WriteAllText(p, JsonSerializer.Serialize(new AppSettings { AutolockMinutes = _autolockMinutes, Light = _light, Lang = _lang, SyncPath = _syncPath, SiteNames = _siteNames.Count > 0 ? _siteNames : null, KeepAsIs = _keepAsIs.Count > 0 ? _keepAsIs : null, SyncProvider = string.IsNullOrEmpty(_syncProvider) ? null : _syncProvider, ClipboardClearSeconds = _clipboardClearSeconds, ExtraExtensionId = string.IsNullOrWhiteSpace(_extraExtensionId) ? null : _extraExtensionId }));
         }
         catch { /* best effort */ }
         SavePrefsToVault();   // mirror the syncable prefs (site names + keep-marks) into the vault
