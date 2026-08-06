@@ -137,6 +137,11 @@ public partial class MainWindow : Window
         ["Выкл"] = "Off", ["1 минута"] = "1 minute", ["5 минут"] = "5 minutes", ["15 минут"] = "15 minutes",
         ["1 час"] = "1 hour", ["3 часа"] = "3 hours", ["12 часов"] = "12 hours",
         ["Сменить пароль от сейфа"] = "Change the storage password", ["Изменить"] = "Change", ["Отмена"] = "Cancel",
+        // attachments
+        ["Вложения"] = "Attachments", ["Прикрепить файл"] = "Attach a file",
+        ["Выберите файл"] = "Choose a file", ["Сканы и документы"] = "Scans and documents",
+        ["Сохранить вложение"] = "Save the attachment", ["Сохранить как…"] = "Save as…",
+        ["Удалить вложение"] = "Delete the attachment",
         // password history
         ["Прежние пароли"] = "Previous passwords", ["Забыть историю"] = "Forget history",
         // updates
@@ -1418,6 +1423,8 @@ public partial class MainWindow : Window
         if (item.Type != "note" && !string.IsNullOrWhiteSpace(item.Notes))
             wrap.Children.Add(NoteSection(item.Notes, mono: false, title: "Заметки"));
 
+        wrap.Children.Add(AttachmentsSection(item, id));
+
         wrap.Children.Add(Foot(id));
         var shorten = ShortenDomainButton(item, id);
         if (shorten is not null) wrap.Children.Add(shorten);
@@ -1698,6 +1705,186 @@ public partial class MainWindow : Window
     /// Previous passwords, folded away by default. Earns its place exactly when a site claims
     /// to have accepted a change and quietly did not — without this the old one is simply gone.
     /// </summary>
+    /// <summary>
+    /// Files kept with the record. Pictures are shown inside the app rather than handed to an
+    /// external viewer on purpose: opening one would mean writing a decrypted passport scan to a
+    /// temporary file on disk, and something has to remember to delete it.
+    /// </summary>
+    private Control AttachmentsSection(VaultItem item, string id)
+    {
+        var sp = new StackPanel { Spacing = 8, Margin = new Thickness(0, 18, 0, 0) };
+
+        var head = new TextBlock
+        {
+            Text = item.Attachments.Count > 0 ? Tr("Вложения") + " · " + item.Attachments.Count : Tr("Вложения"),
+            Foreground = Text3, FontSize = 12.5, Margin = new Thickness(2, 0, 0, 0),
+        };
+        sp.Children.Add(head);
+
+        var status = new TextBlock { IsVisible = false, TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Bad, Margin = new Thickness(2, 0, 0, 0) };
+
+        if (item.Attachments.Count > 0)
+        {
+            var rows = new List<Control>();
+            foreach (Attachment a in item.Attachments)
+                rows.Add(AttachmentRow(a, item, id));
+            sp.Children.Add(FGroup(rows));
+        }
+
+        var add = new Button { Content = Tr("Прикрепить файл"), Padding = new Thickness(13, 6), HorizontalAlignment = HorizontalAlignment.Left };
+        add.Click += async (_, _) =>
+        {
+            _lastActivity = DateTimeOffset.UtcNow;
+            status.IsVisible = false;
+            await AttachFileAsync(id, m => { status.Text = m; status.IsVisible = true; });
+        };
+
+        sp.Children.Add(add);
+        sp.Children.Add(status);
+        return sp;
+    }
+
+    private Control AttachmentRow(Attachment a, VaultItem item, string id)
+    {
+        byte[]? bytes = null;
+        try { bytes = Convert.FromBase64String(a.Data); } catch { /* damaged: row still lists it */ }
+
+        var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        left.Children.Add(new TextBlock { Text = a.Name, Foreground = Text, FontSize = 13.5, TextTrimming = TextTrimming.CharacterEllipsis });
+        left.Children.Add(new TextBlock
+        {
+            Text = Attachments.HumanSize(a.Bytes) + (a.AddedAt.Length > 0 ? " · " + WhenLabel(a.AddedAt) : ""),
+            Foreground = Text3, FontSize = 11.5,
+        });
+        Grid.SetColumn(left, 1);
+
+        // thumbnail for pictures, a plain icon for everything else
+        Control mark;
+        Avalonia.Media.Imaging.Bitmap? thumb = null;
+        if (bytes is not null && a.Mime.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            try { thumb = new Avalonia.Media.Imaging.Bitmap(new System.IO.MemoryStream(bytes)); } catch { thumb = null; }
+        }
+        if (thumb is not null)
+        {
+            mark = new Border
+            {
+                Width = 40, Height = 40, CornerRadius = new CornerRadius(8), ClipToBounds = true,
+                BorderBrush = Hair, BorderThickness = new Thickness(1),
+                Child = new Image { Source = thumb, Stretch = Stretch.UniformToFill },
+            };
+        }
+        else
+        {
+            mark = new Border
+            {
+                Width = 40, Height = 40, CornerRadius = new CornerRadius(8), Background = Surface2,
+                Child = (Control)MakeIcon(IconData("doc"), 17, Text3, 1.6),
+            };
+        }
+        mark.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(mark, 0);
+
+        var save = IconButton("copy", Text2, "Сохранить как…");
+        save.Content = MakeIcon(IconData("open"), 15, Text2, 1.5);
+        save.Click += async (_, _) => { _lastActivity = DateTimeOffset.UtcNow; if (bytes is not null) await SaveAttachmentAsync(a, bytes); };
+
+        var drop = IconButton("trash", Bad, "Удалить вложение");
+        drop.Click += (_, _) =>
+        {
+            _lastActivity = DateTimeOffset.UtcNow;
+            try
+            {
+                VaultItem fresh = _vault!.Get(id);
+                fresh.Attachments.RemoveAll(x => x.Name == a.Name && x.AddedAt == a.AddedAt);
+                _vault.Update(id, fresh);
+                Save();
+                ShowDetail(_vault.Get(id), id);
+            }
+            catch { /* ignore */ }
+        };
+
+        var acts = Actions(save, drop);
+        Grid.SetColumn(acts, 2);
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Margin = new Thickness(14, 10) };
+        grid.Children.Add(mark);
+        grid.Children.Add(left);
+        grid.Children.Add(acts);
+
+        if (thumb is null) return grid;
+
+        // click the row to see the scan at a size you can actually read
+        var big = new Image { Source = thumb, Stretch = Stretch.Uniform, MaxHeight = 460, IsVisible = false, Margin = new Thickness(14, 0, 14, 12) };
+        var wrap = new StackPanel();
+        var toggle = new Button
+        {
+            Content = grid, Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        };
+        toggle.Click += (_, _) => big.IsVisible = !big.IsVisible;
+        wrap.Children.Add(toggle);
+        wrap.Children.Add(big);
+        return wrap;
+    }
+
+    private async Task AttachFileAsync(string id, Action<string> onError)
+    {
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null || _vault is null) return;
+        try
+        {
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = Tr("Выберите файл"),
+                AllowMultiple = false,
+                FileTypeFilter = new[]
+                {
+                    new FilePickerFileType(Tr("Сканы и документы")) { Patterns = new[] { "*.jpg", "*.jpeg", "*.png", "*.pdf", "*.bmp", "*.tif", "*.tiff", "*.webp" } },
+                    FilePickerFileTypes.All,
+                },
+            });
+            if (files.Count == 0) return;
+
+            byte[] raw;
+            await using (var stream = await files[0].OpenReadAsync())
+            using (var ms = new System.IO.MemoryStream())
+            {
+                await stream.CopyToAsync(ms);
+                raw = ms.ToArray();
+            }
+
+            Attachment prepared = Attachments.Prepare(files[0].Name, raw);
+            VaultItem fresh = _vault.Get(id);
+            fresh.Attachments.Add(prepared);
+            _vault.Update(id, fresh);
+            Save();
+            ShowDetail(_vault.Get(id), id);
+        }
+        catch (AttachmentTooLargeException ex) { onError(ex.Message); }
+        catch (Exception ex) { onError(Tr("Ошибка: ") + ex.Message); }
+    }
+
+    private async Task SaveAttachmentAsync(Attachment a, byte[] bytes)
+    {
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null) return;
+        try
+        {
+            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = Tr("Сохранить вложение"),
+                SuggestedFileName = a.Name,
+                DefaultExtension = System.IO.Path.GetExtension(a.Name).TrimStart('.'),
+            });
+            if (file is null) return;
+            await using var stream = await file.OpenWriteAsync();
+            await stream.WriteAsync(bytes);
+        }
+        catch { /* cancelled or unwritable target */ }
+    }
+
     private Control? PasswordHistoryGroup(VaultItem item, string id)
     {
         if (item.History.Count == 0) return null;
