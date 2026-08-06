@@ -154,7 +154,8 @@ public class QrScanActivity : AppCompatActivity
                     provider.UnbindAll();
 
                     var preview = new CameraPreview.Builder().Build();
-                    preview.SetSurfaceProvider(_previewView!.SurfaceProvider);
+                    // в этой версии биндинга у SetSurfaceProvider только перегрузка с executor
+                    preview.SetSurfaceProvider(ContextCompat.GetMainExecutor(this)!, _previewView!.SurfaceProvider);
 
                     var analysis = new ImageAnalysis.Builder()
                         .SetBackpressureStrategy(ImageAnalysis.StrategyKeepOnlyLatest)
