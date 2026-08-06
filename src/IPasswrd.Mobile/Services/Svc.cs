@@ -49,11 +49,14 @@ public static class Svc
     public static IBiometricAuth Biometric { get; private set; } = new NullBiometric();
     public static ISecureKeyStore KeyStore { get; private set; } = new PrefsKeyStore();
     public static IExternalVaultFile External { get; private set; } = new NullExternalVaultFile();
+    public static IImageShrink Shrink { get; private set; } = new NullImageShrink();
     public static AppState State { get; } = new();
 
-    public static void Init(IQrScanner qr, IBiometricAuth biometric, ISecureKeyStore keyStore, IExternalVaultFile external)
+    public static void Init(IQrScanner qr, IBiometricAuth biometric, ISecureKeyStore keyStore,
+                            IExternalVaultFile external, IImageShrink? shrink = null)
     {
         Qr = qr; Biometric = biometric; KeyStore = keyStore; External = external;
+        if (shrink is not null) Shrink = shrink;
     }
 }
 

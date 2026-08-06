@@ -36,6 +36,7 @@ jobs:
           -p:RuntimeIdentifier=ios-arm64
           -p:EnableCodeSigning=false
           -p:IpwNet9Only=true
+          -p:IpwIosOnly=true
       - name: Embed AutoFill appex (MAUI не встраивает ProjectReference-расширение сам)
         run: |
           APP=$(find bin/Release/net9.0-ios -name "*.app" -type d | head -1)

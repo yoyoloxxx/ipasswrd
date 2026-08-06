@@ -23,7 +23,27 @@ public partial class ItemDetailPage : ContentPage
         if (_ids.Count == 0) _ids.Add("");
         _index = Math.Clamp(startIndex, 0, _ids.Count - 1);
         _id = _ids[_index];
+#if ANDROID
+        AttachAndroidSwipes();
+#endif
     }
+
+#if ANDROID
+    /// <summary>Свайпы влево/вправо между записями сайта. На Android горизонтальный жест
+    /// не спорит с вертикальной прокруткой, поэтому хватает обычных распознавателей MAUI.</summary>
+    private void AttachAndroidSwipes()
+    {
+        if (Content is null) return;
+
+        var left = new SwipeGestureRecognizer { Direction = SwipeDirection.Left };
+        left.Swiped += (_, _) => Switch(_index + 1);
+        var right = new SwipeGestureRecognizer { Direction = SwipeDirection.Right };
+        right.Swiped += (_, _) => Switch(_index - 1);
+
+        Content.GestureRecognizers.Add(left);
+        Content.GestureRecognizers.Add(right);
+    }
+#endif
 
 #if IOS
     // Свайп влево/вправо переключает аккаунты. MAUI-жест не срабатывает поверх ScrollView,
@@ -156,9 +176,216 @@ public partial class ItemDetailPage : ContentPage
             Rows.Children.Add(border);
         }
 
+        AddAttachments();
+
         var del = new Button { Text = "Удалить", Style = (Style)Application.Current!.Resources["Danger"], Margin = new Thickness(0, 24, 0, 0) };
         del.Clicked += OnDelete;
         Rows.Children.Add(del);
+    }
+
+    // ================= вложения =================
+
+    /// <summary>Раздел показывается всегда, даже пустой: функция, на которую нельзя случайно
+    /// наткнуться, всё равно что отсутствует — на папках это уже проверено.</summary>
+    private void AddAttachments()
+    {
+        if (_item is null) return;
+
+        AddSection("Вложения");
+
+        foreach (Attachment a in _item.Attachments)
+        {
+            Attachment att = a;
+
+            var name = new Label { Text = att.Name, FontSize = 15, LineBreakMode = LineBreakMode.MiddleTruncation };
+            string when = Attachments.AddedOn(att);
+            var meta = new Label
+            {
+                Text = Attachments.HumanSize(att.Bytes) + (when.Length > 0 ? " · " + when : ""),
+                Style = MutedStyle(),
+                FontSize = 12,
+            };
+
+            var stack = new VerticalStackLayout { Spacing = 1 };
+            stack.Children.Add(name);
+            stack.Children.Add(meta);
+
+            var grid = new Grid { ColumnSpacing = 10 };
+            grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+            grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+            grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+            grid.Add(new Label
+            {
+                Text = Attachments.IsPicture(att) ? "🖼" : "📄",
+                FontSize = 20,
+                VerticalOptions = LayoutOptions.Center,
+            }, 0, 0);
+            grid.Add(stack, 1, 0);
+
+            var kill = new Button { Text = "✕", FontSize = 15, Padding = new Thickness(10, 4), BackgroundColor = Colors.Transparent };
+            kill.Clicked += async (_, _) => await RemoveAttachmentAsync(att);
+            grid.Add(kill, 2, 0);
+
+            var border = new Border { Style = CardStyle(), Content = grid };
+            var tap = new TapGestureRecognizer();
+            tap.Tapped += async (_, _) => await OpenAttachmentAsync(att);
+            border.GestureRecognizers.Add(tap);
+            Rows.Children.Add(border);
+        }
+
+        var add = new Button
+        {
+            Text = _item.Attachments.Count == 0 ? "＋ Добавить фото или файл" : "＋ Добавить ещё",
+            FontSize = 14,
+            Padding = new Thickness(0, 6),
+            BackgroundColor = Colors.Transparent,
+            HorizontalOptions = LayoutOptions.Start,
+        };
+        AccentText(add);
+        add.Clicked += OnAddAttachment;
+        Rows.Children.Add(add);
+    }
+
+    private static void AccentText(Button b)
+    {
+        if (Application.Current?.Resources.TryGetValue("IpAccent", out var dc) == true && dc is Color dark
+            && Application.Current.Resources.TryGetValue("IpAccentL", out var lc) && lc is Color light)
+            b.SetAppThemeColor(Button.TextColorProperty, light, dark);
+    }
+
+    private async void OnAddAttachment(object? sender, EventArgs e)
+    {
+        if (_item is null) return;
+
+        if (_item.Attachments.Count >= Vault.MaxAttachmentsPerItem)
+        {
+            await DisplayAlert("Больше не поместится",
+                $"В одной записи не больше {Vault.MaxAttachmentsPerItem} вложений.", "Ок");
+            return;
+        }
+
+        const string shoot = "Снять фото";
+        const string library = "Из фотоплёнки";
+        const string file = "Файл";
+        string choice = await DisplayActionSheet("Добавить вложение", "Отмена", null, shoot, library, file);
+
+        FileResult? picked;
+        try
+        {
+            if (choice == shoot)
+            {
+                if (!MediaPicker.Default.IsCaptureSupported)
+                {
+                    await DisplayAlert("Не получилось", "Камера недоступна.", "Ок");
+                    return;
+                }
+                picked = await MediaPicker.Default.CapturePhotoAsync();
+            }
+            else if (choice == library) picked = await MediaPicker.Default.PickPhotoAsync();
+            else if (choice == file) picked = await FilePicker.Default.PickAsync();
+            else return;
+        }
+        catch (Exception)
+        {
+            await DisplayAlert("Не получилось",
+                "Нет доступа к камере или фотографиям. Разрешение выдаётся в Настройках iPhone → IPasswrd.", "Ок");
+            return;
+        }
+
+        if (picked is null) return;
+
+        byte[] raw;
+        try
+        {
+            await using Stream src = await picked.OpenReadAsync();
+            using var ms = new MemoryStream();
+            await src.CopyToAsync(ms);
+            raw = ms.ToArray();
+        }
+        catch (Exception)
+        {
+            await DisplayAlert("Не получилось", "Файл не прочитался.", "Ок");
+            return;
+        }
+
+        Attachment att;
+        try { att = Attachments.Prepare(picked.FileName ?? "файл", raw); }
+        catch (AttachmentTooLargeException ex)
+        {
+            await DisplayAlert("Слишком большой файл", ex.Message, "Ок");
+            return;
+        }
+        catch (Exception)
+        {
+            await DisplayAlert("Не получилось", "Файл не подготовился.", "Ок");
+            return;
+        }
+
+        Vault? v = Svc.State.Vault;
+        if (v is null) return;
+
+        _item.Attachments.Add(att);
+        try { v.Update(_id, _item); }
+        catch (Exception ex)
+        {
+            _item.Attachments.Remove(att);
+            await DisplayAlert("Не получилось", ex.Message, "Ок");
+            return;
+        }
+
+        await Svc.State.SaveAsync();
+        Load();
+        await ShowToastAsync("Вложение добавлено");
+    }
+
+    private async Task RemoveAttachmentAsync(Attachment att)
+    {
+        Vault? v = Svc.State.Vault;
+        if (v is null || _item is null) return;
+
+        bool ok = await DisplayAlert("Удалить вложение?", att.Name, "Удалить", "Отмена");
+        if (!ok) return;
+
+        _item.Attachments.Remove(att);
+        try { v.Update(_id, _item); }
+        catch (Exception) { return; }
+
+        await Svc.State.SaveAsync();
+        Load();
+    }
+
+    private async Task OpenAttachmentAsync(Attachment att)
+    {
+        byte[] data;
+        try { data = Convert.FromBase64String(att.Data); }
+        catch (Exception)
+        {
+            await DisplayAlert("Не получилось", "Вложение повреждено.", "Ок");
+            return;
+        }
+
+        if (Attachments.IsPicture(att))
+        {
+            await Navigation.PushAsync(new AttachmentPage(att.Name, data));
+            return;
+        }
+
+        // PDF и прочее показывать нечем — отдаём системе. Временную копию кладём в кэш
+        // приложения и подчищаем прошлые перед каждым разом: удалять сразу нельзя,
+        // лист «Поделиться» читает файл уже после возврата из RequestAsync.
+        string dir = Path.Combine(FileSystem.CacheDirectory, "attach");
+        try
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+            Directory.CreateDirectory(dir);
+            string path = Path.Combine(dir, Attachments.SafeFileName(att.Name));
+            await File.WriteAllBytesAsync(path, data);
+            await Share.Default.RequestAsync(new ShareFileRequest { Title = att.Name, File = new ShareFile(path) });
+        }
+        catch (Exception)
+        {
+            await DisplayAlert("Не получилось", "Файл не открылся.", "Ок");
+        }
     }
 
     /// <summary>Отдельные totp-записи, подходящие сайту аккаунта (кроме дубля собственного секрета).
