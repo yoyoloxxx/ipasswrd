@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Манифест пакета для Microsoft Store.
+
+  Identity ниже выдан Store и должен совпадать СЛОВО В СЛОВО с тем, что показано
+  в Partner Center → Product Identity, иначе загрузка пакета отклоняется.
+
+  Версию подставляет build-msix.ps1: четыре части, последняя ОБЯЗАНА быть 0.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 desktop6 rescap">
+
+  <Identity
+    Name="yoyoloxxx.IPasswrd"
+    Publisher="CN=847C0328-6A65-405B-AF69-647AF7B6E509"
+    Version="0.0.0.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>IPasswrd</DisplayName>
+    <PublisherDisplayName>yoyoloxxx</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+
+    <!--
+      БЕЗ ЭТИХ ДВУХ СТРОК ПРИЛОЖЕНИЕ ЛОМАЕТСЯ.
+      По умолчанию MSIX подменяет запакованному приложению файловую систему и
+      реестр: запись в %LOCALAPPDATA%\IPasswrd уехала бы в песочницу пакета, и
+      человек увидел бы пустой сейф вместо своих паролей; а регистрация
+      нативного хоста стала бы не видна Chrome, и расширение потеряло бы мост.
+    -->
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="ru-RU" />
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Applications>
+    <Application Id="IPasswrd" Executable="IPasswrd.App.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="IPasswrd"
+        Description="Менеджер паролей: зашифрованный сейф, автозаполнение, коды проверки"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        BackgroundColor="transparent">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- обычное десктопное приложение, не AppContainer: отсюда и доступ к loopback 38799 -->
+    <rescap:Capability Name="runFullTrust" />
+    <!--
+      Требуется для двух строк про виртуализацию выше. Это ОГРАНИЧЕННОЕ разрешение:
+      при отправке в Store его придётся обосновать письменно. Обоснование по сути одно -
+      менеджер паролей обязан читать и писать сейф там же, где его видят браузерное
+      расширение и мобильная синхронизация, а не в подменённой папке пакета.
+    -->
+    <rescap:Capability Name="unvirtualizedResources" />
+    <!-- перехват СМС-кодов из тостов «Связи с телефоном» -->
+    <uap3:Capability Name="userNotificationListener" />
+    <Capability Name="internetClient" />
+  </Capabilities>
+</Package>
