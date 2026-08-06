@@ -75,6 +75,10 @@
     <PackageReference Include="Xamarin.AndroidX.Camera.View" Version="1.4.*" />
     <!-- Декодер QR — чистый управляемый код, без нативных зависимостей -->
     <PackageReference Include="ZXing.Net" Version="0.16.9" />
+    <!-- ⚠ CameraX тянет старый savedstate-ktx, а MAUI — savedstate 1.3, куда ktx уже
+         вошёл целиком: androidx.savedstate.ViewKt оказывается в двух jar и D8 падает
+         («Type … is defined multiple times»). Ktx-пакет выкидываем — он пустой дубль. -->
+    <PackageReference Include="Xamarin.AndroidX.SavedState.SavedState.Ktx" Version="1.*" ExcludeAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
