@@ -26,3 +26,4 @@ vpk-add.log
 tools/msix/sdk/
 /build-extension/
 /demo-vault/
+/dist-android/
