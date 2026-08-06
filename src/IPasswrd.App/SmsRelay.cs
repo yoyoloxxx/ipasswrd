@@ -434,17 +434,32 @@ public partial class MainWindow
     /// <summary>Пробелы/переводы строк — в один пробел: в тексте уведомления переносов нет.</summary>
     private static string NormWs(string s) => Regex.Replace(s, @"\s+", " ").Trim();
 
+    /// <summary>Отпечаток для сравнения начал двух текстов: только буквы и цифры.
+    /// Пунктуацию и пробелы выбрасываем: в уведомлении они часто другие, чем в исходном тексте
+    /// (переносы становятся пробелами, тире и кавычки подменяются).</summary>
+    private static string Sig(string s)
+    {
+        var sb = new StringBuilder();
+        foreach (char c in s) if (char.IsLetterOrDigit(c)) sb.Append(char.ToLowerInvariant(c));
+        return sb.ToString();
+    }
+
     /// <summary>Это обрезок («…») того же текста, что уже лежит в буфере целиком?</summary>
     private bool IsPrefixOfLastApplied(string candidate)
     {
-        string head = NormWs(candidate).TrimEnd('…', '.', ' ');
-        if (head.Length < 12) return false;                 // слишком коротко, чтобы судить
+        string head = Sig(candidate);
+        if (head.Length < 20) return false;                 // слишком коротко, чтобы судить
+        if (head.Length > 60) head = head[..60];            // хватит для уверенного совпадения
+        string last;
         lock (_smsLock)
         {
             if (DateTimeOffset.UtcNow - _lastAppliedAt > TimeSpan.FromMinutes(3)) return false;
-            string last = NormWs(_lastApplied);
-            return last.Length > head.Length && last.StartsWith(head, StringComparison.Ordinal);
+            last = Sig(_lastApplied);
         }
+        bool same = last.Length > head.Length && last.StartsWith(head, StringComparison.Ordinal);
+        if (!same && last.Length > 0)
+            NotifLog($"   (не обрезок: начало «{head[..Math.Min(24, head.Length)]}…» в буфере «{last[..Math.Min(24, last.Length)]}…»)");
+        return same;
     }
 
     /// <summary>Единая точка записи буфера для всех трёх каналов (Bluetooth / сеть / iCloud):
