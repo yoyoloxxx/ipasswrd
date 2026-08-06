@@ -77,7 +77,8 @@ public partial class MainWindow : Window
     {
         // sidebar / sections / tools
         ["Все записи"] = "All items", ["Аккаунты"] = "Accounts", ["Ключи доступа"] = "Passkeys",
-        ["Карты"] = "Cards", ["Документы"] = "Documents", ["Заметки"] = "Notes", ["ИНСТРУМЕНТЫ"] = "TOOLS",
+        ["Карты"] = "Cards", ["Документы"] = "Documents", ["Заметки"] = "Notes", ["ИНСТРУМЕНТЫ"] = "TOOLS", ["ПАПКИ"] = "FOLDERS", ["Папка"] = "Folder",
+        ["Необязательно — например: "] = "Optional — e.g.: ", ["Необязательно — например: Работа"] = "Optional — e.g.: Work",
         ["Аутентификатор"] = "Authenticator", ["Генератор"] = "Generator", ["Проверка"] = "Security", ["Настройки"] = "Settings",
         ["Локальный сейф"] = "Local storage", ["без синхронизации"] = "no sync",
         ["Импорт из файла"] = "Import from file", ["Заблокировать"] = "Lock",
@@ -137,6 +138,10 @@ public partial class MainWindow : Window
         ["Выкл"] = "Off", ["1 минута"] = "1 minute", ["5 минут"] = "5 minutes", ["15 минут"] = "15 minutes",
         ["1 час"] = "1 hour", ["3 часа"] = "3 hours", ["12 часов"] = "12 hours",
         ["Сменить пароль от сейфа"] = "Change the storage password", ["Изменить"] = "Change", ["Отмена"] = "Cancel",
+        // quick search
+        ["Название, логин или сайт"] = "Name, login or site",
+        ["Enter — пароль · Tab — логин · Esc — закрыть"] = "Enter — password · Tab — login · Esc — close",
+        ["Быстрый поиск"] = "Quick search", ["Ctrl+Shift+Пробел из любого окна"] = "Ctrl+Shift+Space from anywhere",
         // attachments
         ["Вложения"] = "Attachments", ["Прикрепить файл"] = "Attach a file",
         ["Выберите файл"] = "Choose a file", ["Сканы и документы"] = "Scans and documents",
@@ -163,6 +168,14 @@ public partial class MainWindow : Window
             = "Write the code down now — it will not be shown again.",
         ["Мастер-пароль неверный."] = "Master password is incorrect.",
         ["Сохранить памятку восстановления"] = "Save the recovery printout", ["Текстовый файл"] = "Text file",
+        // first run
+        ["Сейф создан"] = "Storage created", ["Запишите код восстановления"] = "Write down the recovery code",
+        ["Мастер-пароль знаете только вы — восстановить его нам нечем. Поэтому запишите код ниже: он откроет сейф, если пароль забудется."]
+            = "Only you know the master password — we have no way to recover it. So write down the code below: it opens the vault if the password is ever forgotten.",
+        ["Держите памятку на бумаге и отдельно от компьютера: вместе с файлом сейфа код даёт полный доступ."]
+            = "Keep the printout on paper and away from the computer: together with the vault file, the code grants full access.",
+        ["Я записал, открыть сейф"] = "I wrote it down — open the vault",
+        ["Пропустить — я приму риск"] = "Skip — I accept the risk",
         // recovery on the unlock screen
         ["Забыли мастер-пароль?"] = "Forgot your master password?",
         ["Восстановление доступа"] = "Recover access",
@@ -332,6 +345,9 @@ public partial class MainWindow : Window
         InstallBrandLogos();
     }
 
+    /// <summary>Marks a sidebar selection as a folder rather than a record type.</summary>
+    private const string FolderPrefix = "folder:";
+
     private static readonly (string Label, string Type, string Icon)[] _sections =
     {
         ("Все записи",        "all",     "grid"),
@@ -363,6 +379,7 @@ public partial class MainWindow : Window
         PointerMoved += (_, _) => _lastActivity = DateTimeOffset.UtcNow;
         KeyDown += (_, _) => _lastActivity = DateTimeOffset.UtcNow;
         SetupUnlock();
+        Opened += (_, _) => SetupGlobalHotkey();   // needs a real window handle, so not in the ctor
         _ = Updater.CheckAndStageAsync();   // quiet; nothing is applied until the app exits
 
         // --tray (background) start is handled in App.axaml.cs: MainWindow is simply never
@@ -424,6 +441,7 @@ public partial class MainWindow : Window
     private void ExitApp()
     {
         _reallyExit = true;
+        try { ReleaseGlobalHotkey(); } catch { /* ignore */ }
         try { SaveQuickUnlock(); } catch { /* ignore */ }
         try { _tray?.Dispose(); } catch { /* ignore */ }
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime d)
@@ -831,6 +849,7 @@ public partial class MainWindow : Window
         UnlockButton.IsVisible = true;
         RecoveryPanel.IsVisible = false;
         RecoveryDonePanel.IsVisible = false;
+        FirstRunPanel.IsVisible = false;
         RecoveryBox.Text = "";
         RecoveryPw1.Text = "";
         RecoveryPw2.Text = "";
@@ -867,6 +886,9 @@ public partial class MainWindow : Window
                 if (pw.Length < 8) { Err("Минимум 8 символов."); return; }
                 _vault = Vault.Create(pw);
                 Save();
+                ResetLockout();
+                ShowFirstRunRecovery();   // код восстановления выдаётся сразу, а не когда-нибудь потом
+                return;
             }
             else
             {
@@ -984,6 +1006,69 @@ public partial class MainWindow : Window
         void Err(string m) { UnlockError.Text = Tr(m); UnlockError.IsVisible = true; }
     }
 
+    // ================= первый запуск =================
+
+    /// <summary>
+    /// Issue the recovery code the moment the vault is born. Offering it later, buried in
+    /// Settings, means most people never see it — and a forgotten master password with no code
+    /// is the one failure in this program that nobody can undo.
+    /// </summary>
+    private void ShowFirstRunRecovery()
+    {
+        string code;
+        try
+        {
+            code = _vault!.EnableRecovery();
+            Save();
+        }
+        catch
+        {
+            EnterVault();   // никогда не запирать человека снаружи из-за необязательного шага
+            return;
+        }
+
+        FirstRunCode.Text = code;
+        MasterBox.IsVisible = false;
+        MasterBox2.IsVisible = false;
+        UnlockButton.IsVisible = false;
+        ForgotButton.IsVisible = false;
+        UnlockError.IsVisible = false;
+        UnlockSub.Text = Tr("Запишите код восстановления");
+        FirstRunPanel.IsVisible = true;
+    }
+
+    private async void OnFirstRunCopy(object? sender, RoutedEventArgs e)
+    {
+        string val = FirstRunCode.Text ?? "";
+        try { if (Clipboard is { } cb) await cb.SetTextAsync(val); } catch { /* ignore */ }
+        ScheduleClipboardClear(val);
+        FirstRunCopy.Content = Tr("Скопировано");
+        try { await Task.Delay(1100); } catch { /* ignore */ }
+        FirstRunCopy.Content = Tr("Скопировать");
+    }
+
+    private async void OnFirstRunSave(object? sender, RoutedEventArgs e)
+        => await SaveRecoveryKitAsync(FirstRunCode.Text ?? "");
+
+    private void OnFirstRunDone(object? sender, RoutedEventArgs e)
+    {
+        FirstRunCode.Text = "";
+        FirstRunPanel.IsVisible = false;
+        SaveQuickUnlock();
+        EnterVault();
+    }
+
+    /// <summary>
+    /// Refusing the code is allowed — it is their vault. But the code just issued is thrown away
+    /// rather than left lying around unseen: a recovery code nobody wrote down is not a safety
+    /// net, it is a second door with the key under the mat.
+    /// </summary>
+    private void OnFirstRunSkip(object? sender, RoutedEventArgs e)
+    {
+        try { _vault!.DisableRecovery(); Save(); } catch { /* ignore */ }
+        OnFirstRunDone(sender, e);
+    }
+
     private void OnRecoveryDone(object? sender, RoutedEventArgs e)
     {
         RecoveryDonePanel.IsVisible = false;
@@ -1056,6 +1141,42 @@ public partial class MainWindow : Window
                 LoadEntries();
                 RenderSidebar();
             }));
+        }
+
+        // Folders appear only once something is in one — an empty "ПАПКИ" heading would be
+        // a permanent invitation to organise, which is not what anyone opens a vault to do.
+        var folders = all
+            .Where(x => x.Item.Type != "totp" && x.Item.Type != "meta")
+            .Where(x => x.Item.Folder.Length > 0)
+            .GroupBy(x => x.Item.Folder, StringComparer.Ordinal)
+            .OrderBy(g => g.Key, StringComparer.CurrentCulture)
+            .ToList();
+
+        if (folders.Count > 0)
+        {
+            SectionHost.Children.Add(new TextBlock
+            {
+                Text = "ПАПКИ", FontSize = 10.5, FontWeight = FontWeight.Bold, Foreground = Text3,
+                Margin = new Thickness(10, 14, 10, 5),
+            });
+
+            foreach (var g in folders)
+            {
+                string folder = g.Key;
+                string key = FolderPrefix + folder;
+                bool active = _toolMode is null && _section == key;
+                SectionHost.Children.Add(SideButton(folder, "folder", g.Count(), active, () =>
+                {
+                    _toolMode = null;
+                    _authAdding = false;
+                    _authEditId = null;
+                    _section = key;
+                    ListTitle.Text = folder;
+                    ToolPane.IsVisible = false;
+                    LoadEntries();
+                    RenderSidebar();
+                }));
+            }
         }
 
         SectionHost.Children.Add(new TextBlock
@@ -1178,7 +1299,12 @@ public partial class MainWindow : Window
         string q = (SearchBox.Text ?? "").Trim().ToLowerInvariant();
         IEnumerable<VaultEntry> items = _vault.Items()
             .Where(x => x.Item.Type != "totp" && x.Item.Type != "meta");   // 2FA codes live in the Authenticator; meta is the synced-prefs record
-        if (_section != "all")
+        if (_section.StartsWith(FolderPrefix, StringComparison.Ordinal))
+        {
+            string folder = _section[FolderPrefix.Length..];
+            items = items.Where(x => string.Equals(x.Item.Folder, folder, StringComparison.Ordinal));
+        }
+        else if (_section != "all")
             items = items.Where(x => x.Item.Type == _section);   // a type section (incl. «Ключи доступа») lists every record of that type
         else
         {
@@ -3632,6 +3758,12 @@ public partial class MainWindow : Window
         if (_editType != "note")
             AddField("notes", "Заметка", existing?.Notes, multiline: true);
 
+        // Suggest folders that already exist so the same one does not end up spelled three ways.
+        AddField("folder", "Папка", existing?.Folder,
+            watermark: KnownFolders() is { Count: > 0 } known
+                ? Tr("Необязательно — например: ") + string.Join(", ", known.Take(3))
+                : Tr("Необязательно — например: Работа"));
+
         // bottom action row (prototype: source badge left, Save right)
         var save = new Button { Content = "Сохранить", Padding = new Thickness(18, 9) };
         save.Classes.Add("primary");
@@ -3787,6 +3919,22 @@ public partial class MainWindow : Window
         VaultScreen.IsVisible = true;
     }
 
+    /// <summary>Folder names already in use, most-used first — for hinting in the editor.</summary>
+    private List<string> KnownFolders()
+    {
+        if (_vault is null) return new List<string>();
+        try
+        {
+            return _vault.Items()
+                .Where(x => x.Item.Folder.Length > 0)
+                .GroupBy(x => x.Item.Folder, StringComparer.Ordinal)
+                .OrderByDescending(g => g.Count())
+                .Select(g => g.Key)
+                .ToList();
+        }
+        catch { return new List<string>(); }
+    }
+
     private void OnEditorSave(object? sender, RoutedEventArgs e)
     {
         if (_vault is null) return;
@@ -3797,6 +3945,7 @@ public partial class MainWindow : Window
         if (_editType == "account" || _editType == "passkey")
             item.Title = DeriveTitle(Get("url"), Get("username"));   // record keeps its own site title; the group name lives in _siteNames
         if (string.IsNullOrWhiteSpace(item.Title)) item.Title = TypeLabel(_editType);
+        item.Folder = Get("folder");
 
         switch (_editType)
         {
@@ -4171,6 +4320,7 @@ public partial class MainWindow : Window
         "key"     => "M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L19 4m-3.5 3.5L18 10",
         "lock"    => "M5 11h14v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9zm3 0V7a4 4 0 0 1 8 0v4",
         "grid"    => "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+        "folder"  => "M4 6.5A1.5 1.5 0 0 1 5.5 5h3.2a1.5 1.5 0 0 1 1.2.6l1 1.4h7.6A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-11z",
         "globe"   => "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 0c2.5 2.4 3.8 5.5 3.8 9s-1.3 6.6-3.8 9m0-18c-2.5 2.4-3.8 5.5-3.8 9s1.3 6.6 3.8 9M3.5 9h17M3.5 15h17",
         "card"    => "M3 6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-11zM3 9.5h18M6.5 14.5H11",
         "doc"     => "M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 0v4h4M9 12h6M9 16h6",

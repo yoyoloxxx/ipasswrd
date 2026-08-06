@@ -21,6 +21,12 @@ public sealed class VaultItem
     [JsonPropertyName("favorite")] public bool Favorite { get; set; }
 
     /// <summary>
+    /// Optional grouping, empty means ungrouped. Flat on purpose: a tree looks tidier in a
+    /// screenshot and turns into busywork the moment you have to decide where something lives.
+    /// </summary>
+    [JsonPropertyName("folder")] public string Folder { get; set; } = "";
+
+    /// <summary>
     /// Passwords this record used to have, newest first. Maintained by <see cref="Vault.Update"/> —
     /// callers build items from a form and leave this alone.
     /// </summary>
