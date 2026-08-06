@@ -352,8 +352,50 @@ public partial class MainWindow
         => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                         "iCloudDrive", "IPasswrd", "pc-net.txt");
 
+    /// <summary>Готовый адрес приёмника для Быстрой команды. Имя «yoyoloxxx.local» годится
+    /// не всегда: в режиме модема айфон не резолвит .local через свой же мост — запрос висит.
+    /// Поэтому ПК публикует свой текущий IP — и он же сам меняется при смене сети.</summary>
+    private static string PcUrlPath()
+        => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                        "iCloudDrive", "IPasswrd", "pc-url.txt");
+
+    /// <summary>IPv4 той сетевой карты, через которую ПК виден телефону:
+    /// сначала Wi-Fi, потом любая другая. Тоннели VPN исключаем — туда телефону не попасть.</summary>
+    private static string BestLanIPv4()
+    {
+        try
+        {
+            var nics = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => n.OperationalStatus == OperationalStatus.Up
+                            && n.NetworkInterfaceType != NetworkInterfaceType.Loopback
+                            && n.NetworkInterfaceType != NetworkInterfaceType.Tunnel
+                            && n.Description.IndexOf("tun", StringComparison.OrdinalIgnoreCase) < 0
+                            && n.Name.IndexOf("tun", StringComparison.OrdinalIgnoreCase) < 0)
+                .ToList();
+
+            string Pick(Func<NetworkInterface, bool> where) => nics
+                .Where(where)
+                .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+                .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork)
+                .Select(a => a.Address.ToString())
+                .FirstOrDefault(ip => !ip.StartsWith("169.254.", StringComparison.Ordinal)) ?? "";
+
+            string wifi = Pick(n => n.NetworkInterfaceType == NetworkInterfaceType.Wireless80211);
+            return wifi.Length > 0 ? wifi : Pick(_ => true);
+        }
+        catch { return ""; }
+    }
+
+    private readonly SemaphoreSlim _netChanged = new(0);
+
     private void StartNetBeacon()
     {
+        // Пересаживание с домашнего Wi-Fi на раздачу телефона должно попадать в маячок
+        // СРАЗУ, а не через полминуты: иначе команда всё это время считает, что ПК
+        // в другой сети, и гонит длинный текст через облако вместо прямого пути.
+        try { NetworkChange.NetworkAddressChanged += (_, _) => { try { _netChanged.Release(); } catch { } }; }
+        catch { /* без событий останется опрос раз в 30 с */ }
+
         _ = Task.Run(async () =>
         {
             string last = " ";
@@ -363,16 +405,31 @@ public partial class MainWindow
                 {
                     string ssid = CurrentSsid();
                     string val = ssid.Length > 0 ? ssid : "(нет Wi-Fi)";
-                    if (val != last)
+                    string ip  = BestLanIPv4();
+                    string url = ip.Length > 0 ? $"http://{ip}:{SmsRelayPort}/clip?t={_smsToken}" : "";
+                    string stamp = val + "|" + url;
+                    if (stamp != last)
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(PcNetPath())!);
                         File.WriteAllText(PcNetPath(), val, new UTF8Encoding(false));   // без перевода строки
-                        NotifLog($"сеть ПК: {val}");
-                        last = val;
+                        if (url.Length > 0)
+                            File.WriteAllText(PcUrlPath(), url, new UTF8Encoding(false));
+                        NotifLog($"сеть ПК: {val}  →  {ip}");
+                        last = stamp;
                     }
                 }
                 catch { /* нет iCloud Drive — просто нет быстрого пути */ }
-                try { await Task.Delay(TimeSpan.FromSeconds(30), _bridgeCts.Token); } catch { return; }
+
+                // Ждём либо смены сети, либо 30 секунд — что раньше.
+                try
+                {
+                    if (await _netChanged.WaitAsync(TimeSpan.FromSeconds(30), _bridgeCts.Token))
+                    {
+                        while (await _netChanged.WaitAsync(0, _bridgeCts.Token)) { }   // события прилетают пачкой
+                        await Task.Delay(TimeSpan.FromSeconds(2), _bridgeCts.Token);   // дать адаптеру устояться
+                    }
+                }
+                catch { return; }
             }
         });
     }
