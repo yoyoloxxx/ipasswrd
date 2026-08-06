@@ -47,10 +47,17 @@
          в отличие от iOS, на Android нет запрета JIT. -->
   </PropertyGroup>
 
-  <ItemGroup>
+  <!-- iOS: как было до Android-порта, ничего не трогаем -->
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
     <TrimmerRootAssembly Include="IPasswrd.Core" />
+  </ItemGroup>
+
+  <!-- ⚠ Android-овский ILLink требует у TrimmerRootAssembly метаданные RootMode,
+       иначе MSB4096 на шаге триммера в Release. -->
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+    <TrimmerRootAssembly Include="IPasswrd.Core" RootMode="All" />
     <!-- классы, которые создаёт сама система (AutofillService, Activity) — только по имени из манифеста -->
-    <TrimmerRootAssembly Include="IPasswrd.Mobile" />
+    <TrimmerRootAssembly Include="IPasswrd.Mobile" RootMode="All" />
   </ItemGroup>
 
   <ItemGroup>
