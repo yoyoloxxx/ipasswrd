@@ -272,6 +272,24 @@ public partial class MainWindow
                 string newest = waiting[0].FullName;
                 _ = Task.Run(() => ConsumeClipDropAsync(newest));
             }
+
+            // Подстраховка: iCloud кладёт файл своим способом и FileSystemWatcher его иногда
+            // не видит (ловили живьём: файл лежит, события нет). Раз в 20 секунд смотрим сами.
+            _ = Task.Run(async () =>
+            {
+                while (_bridgeCts is { IsCancellationRequested: false })
+                {
+                    try { await Task.Delay(TimeSpan.FromSeconds(20), _bridgeCts.Token); } catch { return; }
+                    try
+                    {
+                        var f = new DirectoryInfo(dir).GetFiles()
+                                                      .OrderByDescending(x => x.LastWriteTimeUtc)
+                                                      .FirstOrDefault();
+                        if (f is not null) await ConsumeClipDropAsync(f.FullName);
+                    }
+                    catch { }
+                }
+            });
         }
         catch { _clipDropWatcher = null; /* нет iCloud Drive — длинный канал выключен */ }
     }
@@ -289,6 +307,14 @@ public partial class MainWindow
             try { text = await File.ReadAllTextAsync(path); }
             catch { return; }                            // файл ещё качается — придёт Changed
             if (text.Length == 0) { TryDelete(path); return; }
+
+            // Разворачиваем RTF ДО сравнения — иначе сравнивали бы разметку с готовым текстом
+            // и дубль проходил бы как новый (видели: файл применялся дважды).
+            if (text.StartsWith(@"{\rtf", StringComparison.Ordinal))
+            {
+                string plain = RtfToText(text);
+                if (plain.Length > 0) text = plain;
+            }
 
             lock (_smsLock)
             {
@@ -380,6 +406,31 @@ public partial class MainWindow
         return "";
     }
 
+    /// <summary>RTF → обычный текст. Без полноценного парсера: хватает для того,
+    /// что реально копируют — абзацы из браузера, заметок и переписки.</summary>
+    internal static string RtfToText(string rtf)
+    {
+        string s = rtf;
+        // служебные группы: таблицы шрифтов/цветов, метаданные, картинки
+        for (int i = 0; i < 4; i++)
+            s = Regex.Replace(s, @"\{\\\*?\\?(?:fonttbl|colortbl|stylesheet|info|pict|object|themedata|datastore|listtable|listoverridetable|expandedcolortbl|generator)[^{}]*\}", "");
+        s = Regex.Replace(s, @"\\par[d]?(?![a-zA-Z])", "\n");
+        s = Regex.Replace(s, @"\\line(?![a-zA-Z])", "\n");
+        s = Regex.Replace(s, @"\\tab(?![a-zA-Z])", "\t");
+        s = Regex.Replace(s, @"\\u(-?\d+)\s?\??", m =>                      // кириллица и эмодзи
+        {
+            if (!int.TryParse(m.Groups[1].Value, out int code)) return "";
+            if (code < 0) code += 65536;
+            return code is > 0 and < 0x110000 ? char.ConvertFromUtf32(code) : "";
+        });
+        s = Regex.Replace(s, @"\\'([0-9a-fA-F]{2})", m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
+        s = Regex.Replace(s, @"\\[a-zA-Z]+-?\d*\s?", "");                    // остальные команды
+        s = s.Replace("{", "").Replace("}", "").Replace("\\\n", "\n");
+        s = Regex.Replace(s, @"[ \t]+(\n)", "$1");
+        s = Regex.Replace(s, @"\n{3,}", "\n\n");
+        return s.Trim();
+    }
+
     /// <summary>Пробелы/переводы строк — в один пробел: в тексте уведомления переносов нет.</summary>
     private static string NormWs(string s) => Regex.Replace(s, @"\s+", " ").Trim();
 
@@ -402,6 +453,20 @@ public partial class MainWindow
     {
         try
         {
+            // Если на телефоне скопирован ФОРМАТИРОВАННЫЙ текст (из Safari, Заметок, чата),
+            // «Буфер обмена» в Быстрых командах отдаёт RTF — и в буфер ПК легла бы разметка
+            // вместо текста. Разворачиваем сами — подстраховка на случай, если на телефоне
+            // забыли действие «Получить текст из ввода».
+            if (text.StartsWith(@"{\rtf", StringComparison.Ordinal))
+            {
+                string plain = RtfToText(text);
+                if (plain.Length > 0)
+                {
+                    NotifLog($"   RTF → текст: {text.Length} → {plain.Length} симв.");
+                    text = plain;
+                }
+            }
+
             await Dispatcher.UIThread.InvokeAsync(
                 () => Clipboard?.SetTextAsync(text) ?? Task.CompletedTask);
             lock (_smsLock) { _lastApplied = text; _lastAppliedAt = DateTimeOffset.UtcNow; }
