@@ -16,7 +16,7 @@
     <!-- Издатель. ⚠ Пока сборка не подписана сертификатом, это только сведения о файле:
          Windows всё равно скажет «неизвестный издатель». Настоящую подпись даёт
          Microsoft Store (бесплатно) либо сертификат. -->
-    <Version>1.0.8</Version>
+    <Version>1.0.9</Version>
     <Company>yoyoloxxx Dev</Company>
     <Authors>yoyoloxxx Dev</Authors>
     <Product>IPasswrd</Product>
@@ -38,6 +38,9 @@
     <!-- Registry for "start with Windows" -->
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
     <PackageReference Include="Velopack" Version="1.2.0" />
+    <!-- Ужатие картинок перед тем, как положить их в сейф: сейф едет в облако целиком
+         на каждое сохранение, поэтому скан с телефона надо уменьшить, а не хранить как есть. -->
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>
