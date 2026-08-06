@@ -13,3 +13,17 @@ public sealed class VaultIntegrityException : Exception
     public VaultIntegrityException(string message = "Vault data failed integrity verification.")
         : base(message) { }
 }
+
+/// <summary>Thrown when the recovery code fails to unwrap the vault key (or is malformed).</summary>
+public sealed class WrongRecoveryCodeException : Exception
+{
+    public WrongRecoveryCodeException(string message = "Recovery code is incorrect.")
+        : base(message) { }
+}
+
+/// <summary>Thrown when a vault is opened by recovery code but no code was ever issued for it.</summary>
+public sealed class RecoveryNotEnabledException : Exception
+{
+    public RecoveryNotEnabledException(string message = "This vault has no recovery code.")
+        : base(message) { }
+}

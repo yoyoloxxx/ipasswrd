@@ -26,6 +26,9 @@ internal static class Crypto
     public const int SaltLen = 16;
 
     public static readonly byte[] AadVaultKey = Encoding.ASCII.GetBytes("ipasswrd/vault-key/v1");
+
+    /// <summary>Domain separation: a recovery envelope can never be swapped in for the master one.</summary>
+    public static readonly byte[] AadRecoveryKey = Encoding.ASCII.GetBytes("ipasswrd/recovery-key/v1");
     private static readonly byte[] AadRecordPrefix = Encoding.ASCII.GetBytes("ipasswrd/record/v1/");
 
     public static byte[] RecordAad(string id)

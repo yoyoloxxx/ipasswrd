@@ -39,6 +39,35 @@
             <TextBlock x:Name="UnlockError" Foreground="{DynamicResource IpBad}" TextWrapping="Wrap" IsVisible="False"/>
             <Button x:Name="UnlockButton" Classes="primary" Content="Открыть" Click="OnUnlockClick"
                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="10"/>
+            <Button x:Name="ForgotButton" Content="Забыли мастер-пароль?" Click="OnForgotClick" IsVisible="False"
+                    HorizontalAlignment="Center" Background="Transparent" BorderThickness="0" Padding="4,2"
+                    FontSize="12" Foreground="{DynamicResource IpText3}"/>
+
+            <!-- recovery: enter the written-down code, set a new master password -->
+            <StackPanel x:Name="RecoveryPanel" Spacing="12" IsVisible="False">
+              <TextBlock Text="Введите код восстановления и придумайте новый мастер-пароль."
+                         Foreground="{DynamicResource IpText2}" TextWrapping="Wrap" FontSize="12.5"/>
+              <TextBox x:Name="RecoveryBox" Watermark="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+                       FontFamily="Cascadia Code, Consolas, monospace" KeyDown="OnRecoveryKeyDown"/>
+              <TextBox x:Name="RecoveryPw1" PasswordChar="●" Watermark="Новый мастер-пароль (минимум 8)"
+                       FontFamily="Cascadia Code, Consolas, monospace" KeyDown="OnRecoveryKeyDown"/>
+              <TextBox x:Name="RecoveryPw2" PasswordChar="●" Watermark="Повторите новый пароль"
+                       FontFamily="Cascadia Code, Consolas, monospace" KeyDown="OnRecoveryKeyDown"/>
+              <Button x:Name="RecoverButton" Classes="primary" Content="Восстановить доступ" Click="OnRecoverClick"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="10"/>
+              <Button Content="← Назад ко входу" Click="OnRecoveryBack" HorizontalAlignment="Center"
+                      Background="Transparent" BorderThickness="0" Padding="4,2"
+                      FontSize="12" Foreground="{DynamicResource IpText3}"/>
+            </StackPanel>
+
+            <StackPanel x:Name="RecoveryDonePanel" Spacing="12" IsVisible="False">
+              <TextBlock Text="Доступ восстановлен" FontSize="15" FontWeight="Bold"
+                         Foreground="{DynamicResource IpOk}" HorizontalAlignment="Center"/>
+              <TextBlock Text="Мастер-пароль заменён на новый. Код восстановления продолжает действовать — если бумажка могла попасть в чужие руки, пересоздайте код в Настройках."
+                         Foreground="{DynamicResource IpText2}" TextWrapping="Wrap" FontSize="12.5"/>
+              <Button Classes="primary" Content="Открыть сейф" Click="OnRecoveryDone"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="10"/>
+            </StackPanel>
           </StackPanel>
         </Border>
       </Border>

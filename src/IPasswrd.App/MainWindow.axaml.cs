@@ -137,6 +137,33 @@ public partial class MainWindow : Window
         ["Выкл"] = "Off", ["1 минута"] = "1 minute", ["5 минут"] = "5 minutes", ["15 минут"] = "15 minutes",
         ["1 час"] = "1 hour", ["3 часа"] = "3 hours", ["12 часов"] = "12 hours",
         ["Сменить пароль от сейфа"] = "Change the storage password", ["Изменить"] = "Change", ["Отмена"] = "Cancel",
+        // recovery code
+        ["Код восстановления"] = "Recovery code",
+        ["Не создан — забытый мастер-пароль будет означать потерю сейфа."]
+            = "Not created — a forgotten master password would mean losing the vault.",
+        ["Создан"] = "Created", ["Создать"] = "Create", ["Пересоздать"] = "Re-create", ["Удалить"] = "Delete",
+        ["Создать код"] = "Create code", ["Я записал"] = "I wrote it down",
+        ["Скопировать"] = "Copy", ["Скопировано"] = "Copied", ["Сохранить памятку…"] = "Save a printout…",
+        ["Код открывает сейф без мастер-пароля. Запишите его на бумаге и держите отдельно от компьютера: вместе с файлом сейфа он даёт полный доступ. После создания сейф перестанут открывать сборки старее v18 — обновите приложение на телефоне."]
+            = "The code opens the vault without the master password. Write it on paper and keep it away from the computer: together with the vault file it grants full access. Once created, builds older than v18 will no longer open this vault — update the app on your phone.",
+        ["Запишите код сейчас — второй раз он показан не будет."]
+            = "Write the code down now — it will not be shown again.",
+        ["Мастер-пароль неверный."] = "Master password is incorrect.",
+        ["Сохранить памятку восстановления"] = "Save the recovery printout", ["Текстовый файл"] = "Text file",
+        // recovery on the unlock screen
+        ["Забыли мастер-пароль?"] = "Forgot your master password?",
+        ["Восстановление доступа"] = "Recover access",
+        ["Введите код восстановления и придумайте новый мастер-пароль."]
+            = "Enter your recovery code and choose a new master password.",
+        ["Новый мастер-пароль (минимум 8)"] = "New master password (8 or more)",
+        ["Повторите новый пароль"] = "Repeat the new password",
+        ["Восстановить доступ"] = "Recover access", ["← Назад ко входу"] = "← Back to sign-in",
+        ["Доступ восстановлен"] = "Access recovered",
+        ["Мастер-пароль заменён на новый. Код восстановления продолжает действовать — если бумажка могла попасть в чужие руки, пересоздайте код в Настройках."]
+            = "The master password has been replaced. The recovery code still works — if the paper copy might have been seen, re-create the code in Settings.",
+        ["Открыть сейф"] = "Open the vault",
+        ["Новый пароль — минимум 8 символов."] = "The new password must be at least 8 characters.",
+        ["Для этого сейфа код восстановления не создавался."] = "No recovery code was ever created for this vault.",
         ["Текущий пароль"] = "Current password", ["Новый пароль (минимум 8)"] = "New password (min 8)", ["Повторите новый пароль"] = "Repeat new password",
         ["Сменить пароль"] = "Change password", ["Новый пароль — минимум 8 символов."] = "New password — at least 8 characters.",
         ["Новые пароли не совпадают."] = "New passwords don’t match.", ["Текущий пароль неверный."] = "Current password is incorrect.",
@@ -686,6 +713,12 @@ public partial class MainWindow : Window
         MasterBox.IsEnabled = on;
         MasterBox2.IsEnabled = on;
         UnlockButton.IsEnabled = on;
+        // the recovery form is another way in, so the lockout has to freeze it as well
+        ForgotButton.IsEnabled = on;
+        RecoveryBox.IsEnabled = on;
+        RecoveryPw1.IsEnabled = on;
+        RecoveryPw2.IsEnabled = on;
+        RecoverButton.IsEnabled = on;
     }
 
     private void StartLockCountdown()
@@ -749,6 +782,14 @@ public partial class MainWindow : Window
         UnlockError.IsVisible = false;
         MasterBox.Text = "";
         MasterBox2.Text = "";
+        MasterBox.IsVisible = true;
+        UnlockButton.IsVisible = true;
+        RecoveryPanel.IsVisible = false;
+        RecoveryDonePanel.IsVisible = false;
+        RecoveryBox.Text = "";
+        RecoveryPw1.Text = "";
+        RecoveryPw2.Text = "";
+        ForgotButton.IsVisible = !Creating && VaultFileHasRecovery();
         UnlockScreen.IsVisible = true;
         VaultScreen.IsVisible = false;
         EditorScreen.IsVisible = false;
@@ -815,6 +856,94 @@ public partial class MainWindow : Window
         EnterVault();
 
         void Err(string m) { UnlockError.Text = Tr(m); UnlockError.IsVisible = true; }
+    }
+
+    // ================= unlock by recovery code =================
+
+    /// <summary>Peek at the vault file: is there a second door to offer? No password needed.</summary>
+    private bool VaultFileHasRecovery()
+    {
+        try
+        {
+            string p = VaultPath();
+            return System.IO.File.Exists(p) && Vault.IsRecoveryAvailable(System.IO.File.ReadAllBytes(p));
+        }
+        catch { return false; }
+    }
+
+    private void OnForgotClick(object? sender, RoutedEventArgs e)
+    {
+        MasterBox.IsVisible = false;
+        MasterBox2.IsVisible = false;
+        UnlockButton.IsVisible = false;
+        ForgotButton.IsVisible = false;
+        UnlockError.IsVisible = false;
+        UnlockSub.Text = Tr("Восстановление доступа");
+        RecoveryPanel.IsVisible = true;
+        RecoveryBox.Focus();
+    }
+
+    private void OnRecoveryBack(object? sender, RoutedEventArgs e) => SetupUnlock();
+
+    private void OnRecoveryKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) OnRecoverClick(sender, new RoutedEventArgs());
+    }
+
+    private void OnRecoverClick(object? sender, RoutedEventArgs e)
+    {
+        string code = RecoveryBox.Text ?? "", n = RecoveryPw1.Text ?? "", c = RecoveryPw2.Text ?? "";
+        if (n.Length < 8) { Err("Новый пароль — минимум 8 символов."); return; }
+        if (n != c) { Err("Пароли не совпадают."); return; }
+
+        Vault restored;
+        try
+        {
+            restored = Vault.UnlockWithRecoveryCode(System.IO.File.ReadAllBytes(VaultPath()), code);
+        }
+        catch (WrongRecoveryCodeException)
+        {
+            // a recovery code must not be a way around the brute-force lockout
+            _fails++;
+            TimeSpan pen = Lockout.PenaltyFor(_fails);
+            if (pen > TimeSpan.Zero)
+            {
+                _lockedUntil = DateTimeOffset.UtcNow + pen;
+                SaveLockout();
+                RecoveryBox.Text = "";
+                StartLockCountdown();
+            }
+            else
+            {
+                SaveLockout();
+                int left = Lockout.AttemptsLeft(_fails);
+                Err(left > 0
+                    ? $"Неверный код восстановления. Осталось попыток до блокировки: {left}"
+                    : "Неверный код восстановления. Следующая попытка заблокирует вход.");
+            }
+            return;
+        }
+        catch (RecoveryNotEnabledException) { Err("Для этого сейфа код восстановления не создавался."); return; }
+        catch (Exception ex) { Err("Ошибка: " + ex.Message); return; }
+
+        // the vault is open but still wrapped by the forgotten password — replace it before saving
+        restored.ResetMasterPassword(n);
+        _vault = restored;
+        Save();
+        ResetLockout();
+
+        RecoveryPanel.IsVisible = false;
+        UnlockError.IsVisible = false;
+        RecoveryDonePanel.IsVisible = true;
+
+        void Err(string m) { UnlockError.Text = Tr(m); UnlockError.IsVisible = true; }
+    }
+
+    private void OnRecoveryDone(object? sender, RoutedEventArgs e)
+    {
+        RecoveryDonePanel.IsVisible = false;
+        SaveQuickUnlock();
+        EnterVault();
     }
 
     private void OnLockClick(object? sender, RoutedEventArgs e)
@@ -2417,6 +2546,8 @@ public partial class MainWindow : Window
         g.Children.Add(Hairline());
         g.Children.Add(ChangePasswordRow());
         g.Children.Add(Hairline());
+        g.Children.Add(RecoveryRow());
+        g.Children.Add(Hairline());
         g.Children.Add(InstallExtensionRow());
         g.Children.Add(Hairline());
         g.Children.Add(SetRowControl("Тема оформления", "Тёмное или светлое оформление", ThemeControl()));
@@ -2581,6 +2712,209 @@ public partial class MainWindow : Window
         };
 
         return sp;
+    }
+
+    private Control RecoveryRow()
+    {
+        var sp = new StackPanel();
+
+        var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        left.Children.Add(new TextBlock { Text = "Код восстановления", Foreground = Text, FontSize = 13.5, FontWeight = FontWeight.SemiBold });
+        var hint = new TextBlock { FontSize = 11.5, TextWrapping = TextWrapping.Wrap, MaxWidth = 430 };
+        left.Children.Add(hint);
+        Grid.SetColumn(left, 0);
+
+        var revoke = new Button { Content = "Удалить", Padding = new Thickness(13, 6) };
+        var toggle = new Button { Content = "Создать", Padding = new Thickness(13, 6) };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        buttons.Children.Add(revoke);
+        buttons.Children.Add(toggle);
+        Grid.SetColumn(buttons, 1);
+
+        var rowGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(17, 13) };
+        rowGrid.Children.Add(left);
+        rowGrid.Children.Add(buttons);
+        sp.Children.Add(rowGrid);
+
+        // step 1 — prove it is the owner sitting here, not someone who walked up to an open screen
+        var pwBox = new TextBox { PasswordChar = '●', Watermark = "Мастер-пароль", FontFamily = MonoFont };
+        var status = new TextBlock { IsVisible = false, TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        var make = new Button { Content = "Создать код", Padding = new Thickness(16, 9), HorizontalAlignment = HorizontalAlignment.Right };
+        make.Classes.Add("primary");
+        var form = new StackPanel { Spacing = 9, Margin = new Thickness(17, 0, 17, 14), IsVisible = false };
+        form.Children.Add(new TextBlock
+        {
+            Text = "Код открывает сейф без мастер-пароля. Запишите его на бумаге и держите отдельно от компьютера: вместе с файлом сейфа он даёт полный доступ. После создания сейф перестанут открывать сборки старее v18 — обновите приложение на телефоне.",
+            Foreground = Text3, FontSize = 11.5, TextWrapping = TextWrapping.Wrap,
+        });
+        form.Children.Add(pwBox);
+        form.Children.Add(status);
+        form.Children.Add(make);
+        sp.Children.Add(form);
+
+        // step 2 — the code itself, on screen exactly once
+        var codeText = new TextBlock
+        {
+            FontFamily = MonoFont, FontSize = 18, FontWeight = FontWeight.Bold, Foreground = Accent,
+            TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        var codeBox = new Border
+        {
+            Background = AccentWash, BorderBrush = Accent, BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10), Padding = new Thickness(14, 13), Child = codeText,
+        };
+        var copyBtn = new Button { Content = "Скопировать", Padding = new Thickness(13, 6) };
+        var saveBtn = new Button { Content = "Сохранить памятку…", Padding = new Thickness(13, 6) };
+        var doneBtn = new Button { Content = "Я записал", Padding = new Thickness(13, 6) };
+        doneBtn.Classes.Add("primary");
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right };
+        actions.Children.Add(copyBtn);
+        actions.Children.Add(saveBtn);
+        actions.Children.Add(doneBtn);
+
+        var shown = new StackPanel { Spacing = 10, Margin = new Thickness(17, 0, 17, 14), IsVisible = false };
+        shown.Children.Add(new TextBlock
+        {
+            Text = "Запишите код сейчас — второй раз он показан не будет.",
+            Foreground = Warn, FontSize = 12, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap,
+        });
+        shown.Children.Add(codeBox);
+        shown.Children.Add(actions);
+        sp.Children.Add(shown);
+
+        void SetStatus(string m, bool error)
+        {
+            status.Text = Tr(m);
+            status.Foreground = error ? Bad : Ok;
+            status.IsVisible = true;
+        }
+
+        void Refresh()
+        {
+            bool has = _vault!.HasRecoveryCode;
+            if (has)
+            {
+                string when = _vault.RecoveryCodeIssuedAt ?? "";
+                if (DateTime.TryParse(when, System.Globalization.CultureInfo.InvariantCulture,
+                                      System.Globalization.DateTimeStyles.AdjustToUniversal
+                                      | System.Globalization.DateTimeStyles.AssumeUniversal, out DateTime dt))
+                    when = dt.ToLocalTime().ToString("dd.MM.yyyy");
+                hint.Text = Tr("Создан") + " " + when;
+                hint.Foreground = Text3;
+            }
+            else
+            {
+                hint.Text = Tr("Не создан — забытый мастер-пароль будет означать потерю сейфа.");
+                hint.Foreground = Warn;
+            }
+            toggle.Content = Tr(has ? "Пересоздать" : "Создать");
+            revoke.IsVisible = has;
+        }
+
+        toggle.Click += (_, _) =>
+        {
+            shown.IsVisible = false;
+            form.IsVisible = !form.IsVisible;
+            status.IsVisible = false;
+            pwBox.Text = "";
+            if (form.IsVisible) pwBox.Focus();
+        };
+
+        revoke.Click += (_, _) =>
+        {
+            _lastActivity = DateTimeOffset.UtcNow;
+            _vault!.DisableRecovery();
+            Save();
+            form.IsVisible = false;
+            shown.IsVisible = false;
+            Refresh();
+        };
+
+        make.Click += (_, _) =>
+        {
+            _lastActivity = DateTimeOffset.UtcNow;
+            string pw = pwBox.Text ?? "";
+            try
+            {
+                // cheapest honest check that this really is the owner: re-open the saved vault
+                Vault.Unlock(System.IO.File.ReadAllBytes(VaultPath()), pw);
+            }
+            catch (WrongMasterPasswordException) { SetStatus("Мастер-пароль неверный.", true); return; }
+            catch (Exception ex) { SetStatus("Ошибка: " + ex.Message, true); return; }
+
+            string code = _vault!.EnableRecovery();
+            Save();
+
+            pwBox.Text = "";
+            form.IsVisible = false;
+            codeText.Text = code;
+            shown.IsVisible = true;
+            Refresh();
+        };
+
+        copyBtn.Click += async (_, _) =>
+        {
+            string val = codeText.Text ?? "";
+            try { if (Clipboard is { } cb) await cb.SetTextAsync(val); } catch { /* ignore */ }
+            ScheduleClipboardClear(val);
+            copyBtn.Content = Tr("Скопировано");
+            try { await Task.Delay(1100); } catch { /* ignore */ }
+            copyBtn.Content = Tr("Скопировать");
+        };
+
+        saveBtn.Click += async (_, _) => await SaveRecoveryKitAsync(codeText.Text ?? "");
+
+        doneBtn.Click += (_, _) =>
+        {
+            codeText.Text = "";
+            shown.IsVisible = false;
+        };
+
+        Refresh();
+        return sp;
+    }
+
+    /// <summary>Write the code out as a page meant to be printed and put somewhere physical.</summary>
+    private async Task SaveRecoveryKitAsync(string code)
+    {
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null || string.IsNullOrEmpty(code)) return;
+
+        try
+        {
+            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = Tr("Сохранить памятку восстановления"),
+                SuggestedFileName = "IPasswrd-памятка-восстановления.txt",
+                DefaultExtension = "txt",
+                FileTypeChoices = new[] { new FilePickerFileType(Tr("Текстовый файл")) { Patterns = new[] { "*.txt" } } },
+            });
+            if (file is null) return;
+
+            string text = string.Join(Environment.NewLine, new[]
+            {
+                "IPasswrd — памятка восстановления",
+                "",
+                "Код восстановления:",
+                "",
+                "    " + code,
+                "",
+                "Если мастер-пароль забыт: на экране входа нажмите «Забыли мастер-пароль?»,",
+                "введите этот код и придумайте новый пароль.",
+                "",
+                "Держите памятку на бумаге и отдельно от компьютера: вместе с файлом сейфа",
+                "код даёт полный доступ ко всем записям. Файл сейфа лежит здесь:",
+                "    " + VaultPath(),
+                "",
+                "Создан: " + DateTime.Now.ToString("dd.MM.yyyy HH:mm"),
+                "",
+            });
+
+            await using var stream = await file.OpenWriteAsync();
+            await using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(true));
+            await writer.WriteAsync(text);
+        }
+        catch { /* the code is still on screen; a failed save is not worth an alarm */ }
     }
 
     private Control ThemeControl()

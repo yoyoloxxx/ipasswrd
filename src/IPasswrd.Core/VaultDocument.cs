@@ -11,7 +11,26 @@ internal sealed class VaultDocumentDto
     [JsonPropertyName("vaultId")] public string VaultId { get; set; } = "";  // clear-text lineage id, for safe sync merges
     [JsonPropertyName("kdf")] public KdfDto Kdf { get; set; } = new();
     [JsonPropertyName("wrappedKey")] public BlobDto WrappedKey { get; set; } = new();
+
+    /// <summary>Second envelope around the same DEK, locked by the recovery code. Absent = no code issued.</summary>
+    [JsonPropertyName("recovery")] public RecoveryDto? Recovery { get; set; }
+
+    /// <summary>Clear-text ISO stamp of the last revocation, so a merge can tell "revoked" from "never had one".</summary>
+    [JsonPropertyName("recoveryRevokedAt")] public string RecoveryRevokedAt { get; set; } = "";
+
     [JsonPropertyName("records")] public List<RecordDto> Records { get; set; } = new();
+}
+
+/// <summary>
+/// The recovery envelope. Its own salt and its own AAD, so it is cryptographically
+/// independent of the master-password envelope even though both wrap the same DEK.
+/// </summary>
+internal sealed class RecoveryDto
+{
+    [JsonPropertyName("kdf")] public KdfDto Kdf { get; set; } = new();
+    [JsonPropertyName("wrappedKey")] public BlobDto WrappedKey { get; set; } = new();
+    /// <summary>Clear-text ISO stamp: shown in Settings, and used to converge on sync.</summary>
+    [JsonPropertyName("createdAt")] public string CreatedAt { get; set; } = "";
 }
 
 internal sealed class KdfDto
