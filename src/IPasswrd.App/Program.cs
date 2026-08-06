@@ -11,6 +11,20 @@ internal static class Program
     private const string MutexName = @"Local\IPasswrd.App.SingleInstance";
     private const string ShowEventName = @"Local\IPasswrd.App.Show";
 
+    internal static void LogCrash(Exception? ex, string where)
+    {
+        try
+        {
+            string dir = Environment.GetEnvironmentVariable("IPASSWRD_VAULT") is { Length: > 0 } v
+                ? System.IO.Path.GetDirectoryName(v)!
+                : System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "IPasswrd");
+            System.IO.Directory.CreateDirectory(dir);
+            System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "crash-log.txt"),
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{where}] {ex}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch { /* если и это не вышло, помочь уже нечем */ }
+    }
+
     [STAThread]
     public static void Main(string[] args)
     {
@@ -18,6 +32,11 @@ internal static class Program
         // exe with its own arguments, does its work and exits. Putting the single-instance
         // guard ahead of it would make those hooks silently no-op whenever a copy is running.
         VelopackApp.Build().Run();
+
+        // Падение менеджера паролей без следов - худший вид падения: человек видит, что окно
+        // исчезло, и не может сказать нам ничего полезного. Пишем причину рядом с сейфом.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash(e.ExceptionObject as Exception, "domain");
+        TaskScheduler.UnobservedTaskException += (_, e) => { LogCrash(e.Exception, "task"); e.SetObserved(); };
 
         using var single = new Mutex(initiallyOwned: true, MutexName, out bool first);
         using var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);

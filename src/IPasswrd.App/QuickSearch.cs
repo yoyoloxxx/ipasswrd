@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -23,92 +24,80 @@ namespace IPasswrd.App;
 public partial class MainWindow
 {
     private const int HotkeyId = 0xA17;
-    private const int WmHotkey = 0x0312;
+    private const uint WmHotkey = 0x0312, WmQuit = 0x0012;
     private const uint ModControl = 0x0002, ModShift = 0x0004, ModNoRepeat = 0x4000;
     private const uint VkSpace = 0x20;
 
-    private delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct WndClassEx
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Msg
     {
-        public uint cbSize, style;
-        [MarshalAs(UnmanagedType.FunctionPtr)] public WndProc lpfnWndProc;
-        public int cbClsExtra, cbWndExtra;
-        public IntPtr hInstance, hIcon, hCursor, hbrBackground;
-        [MarshalAs(UnmanagedType.LPWStr)] public string lpszMenuName;
-        [MarshalAs(UnmanagedType.LPWStr)] public string lpszClassName;
-        public IntPtr hIconSm;
+        public IntPtr hwnd;
+        public uint message;
+        public IntPtr wParam, lParam;
+        public uint time;
+        public int ptX, ptY;
     }
 
     [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern ushort RegisterClassEx(ref WndClassEx c);
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern IntPtr CreateWindowEx(
-        uint exStyle, string className, string? windowName, uint style, int x, int y, int w, int h,
-        IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
-    [DllImport("user32.dll", SetLastError = true)] private static extern bool DestroyWindow(IntPtr hWnd);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
-    private static readonly IntPtr HwndMessage = new(-3);
-
+    [DllImport("user32.dll")] private static extern int GetMessage(out Msg msg, IntPtr hWnd, uint min, uint max);
+    [DllImport("user32.dll")] private static extern bool PostThreadMessage(uint threadId, uint msg, IntPtr wParam, IntPtr lParam);
+    
     private QuickSearchWindow? _quick;
-    private bool _hotkeyOn;
-    private IntPtr _hotkeyWindow;
-    private WndProc? _hotkeyProc;   // held in a field: the GC must not collect a callback Windows still owns
+    private Thread? _hotkeyThread;
+    private uint _hotkeyThreadId;
 
     /// <summary>
     /// Claim Ctrl+Shift+Space system-wide.
     ///
-    /// The hotkey arrives as a window message, and Avalonia does not expose its own window
-    /// procedure, so this creates a private message-only window to receive it. Failure is silent
-    /// on purpose: another program may already own the combination, and a lost shortcut is not
-    /// worth a dialog at startup.
+    /// The hotkey lives on its own thread with its own message loop, and registers against a null
+    /// window so the message lands in that thread's queue. The alternative — a private window
+    /// class in the UI thread — put hand-marshalled Win32 structures next to Avalonia's own
+    /// window handling and crashed the app on open. This way the worst a mistake here can do is
+    /// lose the shortcut.
+    ///
+    /// Failure is silent by design: another program may already own the combination, and that is
+    /// not worth a dialog at startup.
     /// </summary>
     private void SetupGlobalHotkey()
     {
+        if (_hotkeyThread is not null) return;
         try
         {
-            if (_hotkeyWindow != IntPtr.Zero) return;
-
-            _hotkeyProc = HotkeyWndProc;
-            var cls = new WndClassEx
-            {
-                cbSize = (uint)Marshal.SizeOf<WndClassEx>(),
-                lpfnWndProc = _hotkeyProc,
-                lpszClassName = "IPasswrdHotkeySink",
-                lpszMenuName = string.Empty,
-            };
-            RegisterClassEx(ref cls);   // a second run in the same process returns 0; harmless
-
-            _hotkeyWindow = CreateWindowEx(0, "IPasswrdHotkeySink", null, 0, 0, 0, 0, 0,
-                                           HwndMessage, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
-            if (_hotkeyWindow == IntPtr.Zero) return;
-
-            _hotkeyOn = RegisterHotKey(_hotkeyWindow, HotkeyId, ModControl | ModShift | ModNoRepeat, VkSpace);
+            _hotkeyThread = new Thread(HotkeyPump) { IsBackground = true, Name = "IPasswrd hotkey" };
+            _hotkeyThread.Start();
         }
-        catch { _hotkeyOn = false; }
+        catch { _hotkeyThread = null; }
+    }
+
+    private void HotkeyPump()
+    {
+        try
+        {
+            _hotkeyThreadId = GetCurrentThreadId();   // объявлена в BrowserBridge.cs, класс частичный
+            if (!RegisterHotKey(IntPtr.Zero, HotkeyId, ModControl | ModShift | ModNoRepeat, VkSpace)) return;
+
+            try
+            {
+                while (GetMessage(out Msg msg, IntPtr.Zero, 0, 0) > 0)
+                {
+                    if (msg.message == WmHotkey && msg.wParam.ToInt32() == HotkeyId)
+                        Avalonia.Threading.Dispatcher.UIThread.Post(OpenQuickSearch);
+                }
+            }
+            finally { UnregisterHotKey(IntPtr.Zero, HotkeyId); }
+        }
+        catch { /* the shortcut is a convenience; never take the app down with it */ }
     }
 
     private void ReleaseGlobalHotkey()
     {
         try
         {
-            if (_hotkeyOn && _hotkeyWindow != IntPtr.Zero) UnregisterHotKey(_hotkeyWindow, HotkeyId);
-            if (_hotkeyWindow != IntPtr.Zero) DestroyWindow(_hotkeyWindow);
+            if (_hotkeyThreadId != 0) PostThreadMessage(_hotkeyThreadId, WmQuit, IntPtr.Zero, IntPtr.Zero);
         }
         catch { /* shutting down anyway */ }
-        finally { _hotkeyOn = false; _hotkeyWindow = IntPtr.Zero; }
-    }
-
-    private IntPtr HotkeyWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
-    {
-        if (msg == WmHotkey && wParam.ToInt32() == HotkeyId)
-        {
-            Avalonia.Threading.Dispatcher.UIThread.Post(OpenQuickSearch);
-            return IntPtr.Zero;
-        }
-        return DefWindowProc(hWnd, msg, wParam, lParam);
+        finally { _hotkeyThread = null; _hotkeyThreadId = 0; }
     }
 
     private void OpenQuickSearch()
@@ -225,13 +214,15 @@ internal sealed class QuickSearchWindow : Window
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
             MaxHeight = 340,
-            ItemTemplate = new FuncDataTemplate<Row>((r, _) =>
+            // Avalonia вызывает фабрику шаблона и с пустым элементом — без проверки это
+            // разыменование null посреди отрисовки списка, то есть падение всего приложения.
+            ItemTemplate = new FuncDataTemplate<Row?>((r, _) =>
             {
-                var title = new TextBlock { Text = r.Title, Foreground = _owner.QsText, FontWeight = FontWeight.SemiBold, FontSize = 13.5 };
-                var sub = new TextBlock { Text = r.Subtitle, Foreground = _owner.QsText3, FontSize = 11.5 };
                 var sp = new StackPanel { Margin = new Thickness(4, 3) };
-                sp.Children.Add(title);
-                if (r.Subtitle.Length > 0) sp.Children.Add(sub);
+                if (r is null) return sp;
+                sp.Children.Add(new TextBlock { Text = r.Title, Foreground = _owner.QsText, FontWeight = FontWeight.SemiBold, FontSize = 13.5 });
+                if (r.Subtitle.Length > 0)
+                    sp.Children.Add(new TextBlock { Text = r.Subtitle, Foreground = _owner.QsText3, FontSize = 11.5 });
                 return sp;
             }),
         };
@@ -268,10 +259,21 @@ internal sealed class QuickSearchWindow : Window
 
     private void Refresh()
     {
-        _rows = _owner.QuickSearchRows(_box.Text ?? "");
-        _list.ItemsSource = _rows.Select(r => new Row(r.Id, r.Title, r.Subtitle)).ToList();
-        if (_rows.Count > 0) _list.SelectedIndex = 0;
-        _list.IsVisible = _rows.Count > 0;
+        // Ни одна ошибка поиска не стоит того, чтобы уронить приложение вместе с открытым сейфом.
+        try
+        {
+            _rows = _owner.QuickSearchRows(_box.Text ?? "");
+            _list.ItemsSource = _rows.Select(r => new Row(r.Id, r.Title, r.Subtitle)).ToList();
+            _list.IsVisible = _rows.Count > 0;
+            if (_rows.Count > 0) _list.SelectedIndex = 0;
+        }
+        catch (Exception ex)
+        {
+            Program.LogCrash(ex, "quick-search");
+            _rows = new();
+            _list.ItemsSource = null;
+            _list.IsVisible = false;
+        }
     }
 
     private void OnKey(object? sender, KeyEventArgs e)
