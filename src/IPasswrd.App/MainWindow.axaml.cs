@@ -78,7 +78,7 @@ public partial class MainWindow : Window
         // sidebar / sections / tools
         ["Все записи"] = "All items", ["Аккаунты"] = "Accounts", ["Ключи доступа"] = "Passkeys",
         ["Карты"] = "Cards", ["Документы"] = "Documents", ["Заметки"] = "Notes", ["ИНСТРУМЕНТЫ"] = "TOOLS", ["ПАПКИ"] = "FOLDERS", ["Папка"] = "Folder",
-        ["Новая папка"] = "New folder", ["Убрать из папки"] = "Remove from folder", ["Без папки"] = "Unfiled",
+        ["Новая папка"] = "New folder", ["Добавить в папку"] = "Add to folder", ["Копировать пароль"] = "Copy password", ["Копировать логин"] = "Copy login", ["Убрать из папки"] = "Remove from folder", ["Без папки"] = "Unfiled",
         ["Необязательно — например: "] = "Optional — e.g.: ", ["Необязательно — например: Работа"] = "Optional — e.g.: Work",
         ["Аутентификатор"] = "Authenticator", ["Генератор"] = "Generator", ["Проверка"] = "Security", ["Настройки"] = "Settings",
         ["Локальный сейф"] = "Local storage", ["без синхронизации"] = "no sync",
@@ -1482,10 +1482,12 @@ public partial class MainWindow : Window
         if (row is null) return;
 
         IReadOnlyList<string> ids = row.Ids.Count > 0 ? row.Ids : new[] { row.Id };
-        string current = "";
-        try { current = _vault.Get(ids[0]).Folder; } catch { /* vanished */ }
+        VaultItem? item = null;
+        try { item = _vault.Get(ids[0]); } catch { return; }
+        string current = item.Folder;
 
-        var items = new List<Control>();
+        // ---- вложенное меню папок ----
+        var folderItems = new List<Control>();
         foreach (string folder in KnownFolders())
         {
             var mi = new MenuItem { Header = folder };
@@ -1493,39 +1495,43 @@ public partial class MainWindow : Window
                 mi.Icon = MakeIcon(IconData("check"), 14, Ok, 1.8);
             string target = folder;
             mi.Click += (_, _) => MoveToFolder(ids, target);
-            items.Add(mi);
+            folderItems.Add(mi);
         }
-
-        if (items.Count > 0) items.Add(new Separator());
+        if (folderItems.Count > 0) folderItems.Add(new Separator());
 
         // A text box living in the menu: naming a new folder should not cost a separate dialog.
         var box = new TextBox { Watermark = Tr("Новая папка"), MinWidth = 170, Margin = new Thickness(0, 2) };
-        var newItem = new MenuItem { Header = box, StaysOpenOnClick = true };
+        folderItems.Add(new MenuItem { Header = box, StaysOpenOnClick = true });
+
+        if (current.Length > 0)
+        {
+            folderItems.Add(new Separator());
+            var clear = new MenuItem { Header = Tr("Убрать из папки") };
+            clear.Click += (_, _) => MoveToFolder(ids, "");
+            folderItems.Add(clear);
+        }
+
+        var intoFolder = new MenuItem
+        {
+            Header = Tr("Добавить в папку"),
+            Icon = MakeIcon(IconData("folder"), 15, Text2, 1.6),
+            ItemsSource = folderItems,
+        };
+
+        var flyout = new MenuFlyout { ItemsSource = new List<Control> { intoFolder } };
+        EntryList.ContextFlyout = flyout;
+        flyout.ShowAt(EntryList, showAtPointer: true);
+        e.Handled = true;
+
         box.KeyDown += (_, ke) =>
         {
             if (ke.Key != Key.Enter) return;
             ke.Handled = true;
             string name = (box.Text ?? "").Trim();
             if (name.Length == 0) return;
-            EntryList.ContextFlyout?.Hide();
+            flyout.Hide();
             MoveToFolder(ids, name);
         };
-        items.Add(newItem);
-
-        if (current.Length > 0)
-        {
-            items.Add(new Separator());
-            var clear = new MenuItem { Header = Tr("Убрать из папки") };
-            clear.Click += (_, _) => MoveToFolder(ids, "");
-            items.Add(clear);
-        }
-
-        var flyout = new MenuFlyout { ItemsSource = items };
-        EntryList.ContextFlyout = flyout;
-        flyout.ShowAt(EntryList, showAtPointer: true);
-        e.Handled = true;
-
-        Avalonia.Threading.Dispatcher.UIThread.Post(() => box.Focus());
     }
 
     /// <summary>Put every login of the clicked tile in the same folder — a site group moves together.</summary>
