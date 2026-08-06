@@ -68,7 +68,15 @@ public static class AutoFillShare
     {
         try
         {
-            var entries = v.Items().ToList();
+            // Подсказкам над клавиатурой нужны домен и логин. Список целиком — это ещё и все
+            // вложения разом, а они здесь ни при чём; отпускаем их сразу после расшифровки.
+            var entries = new List<VaultEntry>();
+            foreach (VaultEntry e in v.Stream())
+            {
+                e.Item.Attachments.Clear();
+                e.Item.History.Clear();
+                entries.Add(e);
+            }
             var pwd = new List<ASPasswordCredentialIdentity>();
             var all = new List<IASCredentialIdentity>();
             bool otcSupported = OperatingSystem.IsIOSVersionAtLeast(18);

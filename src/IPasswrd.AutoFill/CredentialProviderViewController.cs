@@ -256,7 +256,7 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
 
         try
         {
-            foreach (VaultEntry e in _vault.Items())
+            foreach (VaultEntry e in _vault.Stream())
             {
                 if (_otcMode)
                 {

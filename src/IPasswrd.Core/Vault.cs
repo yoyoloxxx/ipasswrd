@@ -263,6 +263,21 @@ public sealed class Vault
         return list;
     }
 
+    /// <summary>
+    /// Те же записи, что и <see cref="Items"/>, но по одной и без накопления списка.
+    ///
+    /// Расширение автозаполнения iOS живёт в жёстком лимите памяти, а ему нужны только
+    /// логин с паролем. С появлением вложений «расшифровать всё сразу» стало означать
+    /// «держать в памяти все сканы паспорта разом» — и быть убитым посреди подстановки
+    /// пароля. Здесь жива ровно одна расшифрованная запись.
+    /// </summary>
+    public IEnumerable<VaultEntry> Stream()
+    {
+        foreach (RecordDto rec in _records)
+            if (!rec.Deleted)
+                yield return new VaultEntry(rec.Id, DecryptRecord(rec), rec.UpdatedAt);
+    }
+
     public VaultItem Get(string id)
     {
         foreach (RecordDto rec in _records)
