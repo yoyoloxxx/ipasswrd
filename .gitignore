@@ -12,3 +12,10 @@ publish-host.cmd
 _to_delete/
 *.lnk
 *.tgz
+
+# Velopack: промежуточная папка публикации и готовые релизы
+build-vpk/
+Releases/
+installer-build.log
+vpk-install.log
+vpk-add.log
