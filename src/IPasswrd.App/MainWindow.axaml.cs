@@ -137,6 +137,11 @@ public partial class MainWindow : Window
         ["Выкл"] = "Off", ["1 минута"] = "1 minute", ["5 минут"] = "5 minutes", ["15 минут"] = "15 minutes",
         ["1 час"] = "1 hour", ["3 часа"] = "3 hours", ["12 часов"] = "12 hours",
         ["Сменить пароль от сейфа"] = "Change the storage password", ["Изменить"] = "Change", ["Отмена"] = "Cancel",
+        // updates
+        ["Обновления"] = "Updates", ["Проверить"] = "Check", ["Версия"] = "Version",
+        ["проверяю…"] = "checking…", ["установлена последняя версия"] = "up to date",
+        ["готово обновление"] = "update ready", ["(применится при выходе)"] = "(applies on exit)",
+        ["портативная копия, обновляется вручную"] = "portable copy, updated manually",
         // recovery code
         ["Код восстановления"] = "Recovery code",
         ["Не создан — забытый мастер-пароль будет означать потерю сейфа."]
@@ -349,6 +354,7 @@ public partial class MainWindow : Window
         PointerMoved += (_, _) => _lastActivity = DateTimeOffset.UtcNow;
         KeyDown += (_, _) => _lastActivity = DateTimeOffset.UtcNow;
         SetupUnlock();
+        _ = Updater.CheckAndStageAsync();   // quiet; nothing is applied until the app exits
 
         // --tray (background) start is handled in App.axaml.cs: MainWindow is simply never
         // assigned/shown. No Opened+=Hide hack here — it used to re-hide the window the first
@@ -410,6 +416,7 @@ public partial class MainWindow : Window
     {
         _reallyExit = true;
         try { SaveQuickUnlock(); } catch { /* ignore */ }
+        try { Updater.ApplyOnExit(); } catch { /* ignore */ }
         try { _tray?.Dispose(); } catch { /* ignore */ }
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime d)
             d.Shutdown();
@@ -580,6 +587,30 @@ public partial class MainWindow : Window
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValue = "IPasswrd";
 
+    /// <summary>
+    /// Path to put in the Run key. In an installed copy the real executable lives in
+    /// <c>...\IPasswrdApp\current\</c>, and that folder is replaced wholesale on every update —
+    /// so we point at the stub one level up, which never moves and forwards its arguments.
+    /// Falls back to the running executable for a portable copy.
+    /// </summary>
+    private static string LauncherPath()
+    {
+        string exe = Environment.ProcessPath ?? "";
+        try
+        {
+            string? dir = System.IO.Path.GetDirectoryName(exe);
+            if (dir is not null
+                && string.Equals(System.IO.Path.GetFileName(dir), "current", StringComparison.OrdinalIgnoreCase))
+            {
+                string stub = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(dir) ?? dir, System.IO.Path.GetFileName(exe));
+                if (System.IO.File.Exists(stub)) return stub;
+            }
+        }
+        catch { /* fall through to the running exe */ }
+        return exe;
+    }
+
     private static bool IsAutostartOn()
     {
         try
@@ -599,7 +630,7 @@ public partial class MainWindow : Window
             if (k is null) return;
             if (on)
             {
-                string exe = Environment.ProcessPath ?? "";
+                string exe = LauncherPath();
                 if (exe.Length > 0) k.SetValue(RunValue, $"\"{exe}\" --tray");
             }
             else k.DeleteValue(RunValue, throwOnMissingValue: false);
@@ -2556,6 +2587,8 @@ public partial class MainWindow : Window
         g.Children.Add(Hairline());
         g.Children.Add(SetRowControl("Запускать с Windows", "Открывать в трее при входе в систему", AutostartControl()));
         g.Children.Add(Hairline());
+        g.Children.Add(UpdateRow());
+        g.Children.Add(Hairline());
         g.Children.Add(SyncRow());
         g.Children.Add(Hairline());
         g.Children.Add(SetRowControl("Импорт из файла", "Kaspersky, Chrome, Edge, Яндекс и другие", ImportControl()));
@@ -2915,6 +2948,47 @@ public partial class MainWindow : Window
             await writer.WriteAsync(text);
         }
         catch { /* the code is still on screen; a failed save is not worth an alarm */ }
+    }
+
+    private Control UpdateRow()
+    {
+        var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        left.Children.Add(new TextBlock { Text = "Обновления", Foreground = Text, FontSize = 13.5, FontWeight = FontWeight.SemiBold });
+        var hint = new TextBlock { Foreground = Text3, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, MaxWidth = 430 };
+        left.Children.Add(hint);
+        Grid.SetColumn(left, 0);
+
+        var check = new Button { Content = "Проверить", Padding = new Thickness(13, 6), VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(check, 1);
+
+        void Refresh(string? note = null)
+        {
+            string version = Tr("Версия") + " " + Updater.CurrentVersion;
+            if (note is not null) hint.Text = version + " · " + note;
+            else if (Updater.StagedVersion is { } staged)
+                hint.Text = version + " · " + Tr("готово обновление") + " " + staged + " " + Tr("(применится при выходе)");
+            else if (!Updater.IsManagedInstall)
+                hint.Text = version + " · " + Tr("портативная копия, обновляется вручную");
+            else
+                hint.Text = version;
+            check.IsEnabled = Updater.IsManagedInstall;
+        }
+
+        check.Click += async (_, _) =>
+        {
+            _lastActivity = DateTimeOffset.UtcNow;
+            check.IsEnabled = false;
+            Refresh(Tr("проверяю…"));
+            string? found = await Updater.CheckAndStageAsync();
+            Refresh(found is null ? Tr("установлена последняя версия") : null);
+            check.IsEnabled = Updater.IsManagedInstall;
+        };
+
+        Refresh();
+        var g = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(17, 13) };
+        g.Children.Add(left);
+        g.Children.Add(check);
+        return g;
     }
 
     private Control ThemeControl()

@@ -12,6 +12,16 @@
     <ApplicationIcon>Assets\ipasswrd_app.ico</ApplicationIcon>
     <AssemblyName>IPasswrd.App</AssemblyName>
     <RootNamespace>IPasswrd.App</RootNamespace>
+
+    <!-- Издатель. ⚠ Пока сборка не подписана сертификатом, это только сведения о файле:
+         Windows всё равно скажет «неизвестный издатель». Настоящую подпись даёт
+         Microsoft Store (бесплатно) либо сертификат. -->
+    <Version>1.0.1</Version>
+    <Company>yoyoloxxx Dev</Company>
+    <Authors>yoyoloxxx Dev</Authors>
+    <Product>IPasswrd</Product>
+    <AssemblyTitle>IPasswrd</AssemblyTitle>
+    <Copyright>© yoyoloxxx Dev</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +37,7 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
     <!-- Registry for "start with Windows" -->
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 
   <ItemGroup>

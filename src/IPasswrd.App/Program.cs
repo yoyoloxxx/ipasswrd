@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
+using Velopack;
 
 namespace IPasswrd.App;
 
@@ -13,6 +14,11 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Must be the very first thing: on install, update and uninstall Velopack re-runs this
+        // exe with its own arguments, does its work and exits. Putting the single-instance
+        // guard ahead of it would make those hooks silently no-op whenever a copy is running.
+        VelopackApp.Build().Run();
+
         using var single = new Mutex(initiallyOwned: true, MutexName, out bool first);
         using var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
 
