@@ -60,6 +60,31 @@
                       FontSize="12" Foreground="{DynamicResource IpText3}"/>
             </StackPanel>
 
+            <!-- первый запуск: код восстановления выдаётся сразу после создания сейфа -->
+            <StackPanel x:Name="FirstRunPanel" Spacing="12" IsVisible="False">
+              <TextBlock Text="Сейф создан" FontSize="15" FontWeight="Bold"
+                         Foreground="{DynamicResource IpOk}" HorizontalAlignment="Center"/>
+              <TextBlock Text="Мастер-пароль знаете только вы — восстановить его нам нечем. Поэтому запишите код ниже: он откроет сейф, если пароль забудется."
+                         Foreground="{DynamicResource IpText2}" TextWrapping="Wrap" FontSize="12.5"/>
+              <Border Background="{DynamicResource IpAccentWash}" BorderBrush="{DynamicResource IpAccent}"
+                      BorderThickness="1" CornerRadius="10" Padding="14,13">
+                <TextBlock x:Name="FirstRunCode" FontFamily="Cascadia Code, Consolas, monospace"
+                           FontSize="17" FontWeight="Bold" Foreground="{DynamicResource IpAccent}"
+                           TextWrapping="Wrap" HorizontalAlignment="Center"/>
+              </Border>
+              <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+                <Button x:Name="FirstRunCopy" Content="Скопировать" Click="OnFirstRunCopy" Padding="13,6"/>
+                <Button x:Name="FirstRunSave" Content="Сохранить памятку…" Click="OnFirstRunSave" Padding="13,6"/>
+              </StackPanel>
+              <TextBlock Text="Держите памятку на бумаге и отдельно от компьютера: вместе с файлом сейфа код даёт полный доступ."
+                         Foreground="{DynamicResource IpText3}" TextWrapping="Wrap" FontSize="11.5"/>
+              <Button Classes="primary" Content="Я записал, открыть сейф" Click="OnFirstRunDone"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="10"/>
+              <Button Content="Пропустить — я приму риск" Click="OnFirstRunSkip" HorizontalAlignment="Center"
+                      Background="Transparent" BorderThickness="0" Padding="4,2"
+                      FontSize="12" Foreground="{DynamicResource IpText3}"/>
+            </StackPanel>
+
             <StackPanel x:Name="RecoveryDonePanel" Spacing="12" IsVisible="False">
               <TextBlock Text="Доступ восстановлен" FontSize="15" FontWeight="Bold"
                          Foreground="{DynamicResource IpOk}" HorizontalAlignment="Center"/>
