@@ -32,7 +32,9 @@
 		<string>ru</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Камера нужна, чтобы сканировать QR-коды для кодов проверки (двухэтапный вход).</string>
+	<string>Камера нужна, чтобы сканировать QR-коды для кодов проверки и снимать документы во вложения записей.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Доступ к фотографиям нужен, чтобы прикрепить скан или снимок документа к записи. Файл шифруется внутри сейфа и никуда больше не отправляется.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Face ID открывает сейф без ввода мастер-пароля.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>

@@ -1,10 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- net9.0-ios (не net10): Hot Restart в VS 2022 работает только с net9 (в net10 сломан,
-         dotnet/maui#33553; в VS 2026 Hot Restart удалён совсем). Android добавится сюда же
-         вторым TFM, когда поставим Android SDK: net9.0-ios;net9.0-android -->
-    <TargetFramework>net9.0-ios</TargetFramework>
+    <!-- net9.0 (не net10): Hot Restart в VS 2022 работает только с net9 (в net10 сломан,
+         dotnet/maui#33553; в VS 2026 Hot Restart удалён совсем).
+         Два TFM сразу нельзя восстанавливать там, где стоит только одна нагрузка MAUI:
+         на macOS-раннере есть maui-ios, на ubuntu-раннере — maui-android. Поэтому
+         сборки в CI передают -p:IpwIosOnly=true / -p:IpwAndroidOnly=true. -->
+    <TargetFrameworks>net9.0-ios;net9.0-android</TargetFrameworks>
+    <TargetFrameworks Condition="'$(IpwIosOnly)'=='true'">net9.0-ios</TargetFrameworks>
+    <TargetFrameworks Condition="'$(IpwAndroidOnly)'=='true'">net9.0-android</TargetFrameworks>
+
     <OutputType>Exe</OutputType>
     <RootNamespace>IPasswrd.Mobile</RootNamespace>
     <UseMaui>true</UseMaui>
@@ -19,19 +24,33 @@
     <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>
 
-    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
-
-    <!-- Argon2id (Konscious) — управляемый код: в Debug/Hot Restart работает интерпретатор,
-         первая разблокировка может занять несколько секунд; в Release с AOT — быстро. -->
-    <MtouchInterpreter Condition="'$(Configuration)'=='Debug'">-all</MtouchInterpreter>
-
     <!-- сейф сериализуется рефлексией System.Text.Json — защищаем от триммера в Release -->
     <TrimMode>partial</TrimMode>
     <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
 
+  <!-- ================= iOS ================= -->
+  <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+    <!-- Argon2id (Konscious) — управляемый код: в Debug/Hot Restart работает интерпретатор,
+         первая разблокировка может занять несколько секунд; в Release с AOT — быстро. -->
+    <MtouchInterpreter Condition="'$(Configuration)'=='Debug'">-all</MtouchInterpreter>
+  </PropertyGroup>
+
+  <!-- ================= Android ================= -->
+  <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+    <!-- 26 = Android 8.0: минимум для системного автозаполнения (AutofillService) -->
+    <SupportedOSPlatformVersion>26.0</SupportedOSPlatformVersion>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <!-- Полный AOT (RunAOTCompilation) ускорил бы Argon2id, но раздувает время сборки в CI
+         в разы. По умолчанию для Release работает профильный AOT — этого достаточно:
+         в отличие от iOS, на Android нет запрета JIT. -->
+  </PropertyGroup>
+
   <ItemGroup>
     <TrimmerRootAssembly Include="IPasswrd.Core" />
+    <!-- классы, которые создаёт сама система (AutofillService, Activity) — только по имени из манифеста -->
+    <TrimmerRootAssembly Include="IPasswrd.Mobile" />
   </ItemGroup>
 
   <ItemGroup>
@@ -47,9 +66,24 @@
     <PackageReference Include="Microsoft.Maui.Controls" Version="9.0.120" />
   </ItemGroup>
 
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+    <!-- Отпечаток/лицо — системный диалог BiometricPrompt -->
+    <PackageReference Include="Xamarin.AndroidX.Biometric" Version="1.1.0.*" />
+    <!-- Камера для QR: CameraX (превью + покадровый анализ) -->
+    <PackageReference Include="Xamarin.AndroidX.Camera.Camera2" Version="1.4.*" />
+    <PackageReference Include="Xamarin.AndroidX.Camera.Lifecycle" Version="1.4.*" />
+    <PackageReference Include="Xamarin.AndroidX.Camera.View" Version="1.4.*" />
+    <!-- Декодер QR — чистый управляемый код, без нативных зависимостей -->
+    <PackageReference Include="ZXing.Net" Version="0.16.9" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\IPasswrd.Core\IPasswrd.Core.csproj" />
-    <!-- Системное автозаполнение iOS: .appex собирается и кладётся в PlugIns автоматически -->
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <!-- Системное автозаполнение iOS: .appex собирается и кладётся в PlugIns автоматически.
+         На Android автозаполнение живёт внутри этого же apk (Platforms/Android/AutoFill). -->
     <ProjectReference Include="..\IPasswrd.AutoFill\IPasswrd.AutoFill.csproj" />
   </ItemGroup>
 

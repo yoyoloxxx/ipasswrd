@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- allowBackup=false: зашифрованный сейф и ключ Keystore не должны уезжать в облачный
+       бэкап Google (аналог kSecAttrAccessibleWhenUnlockedThisDeviceOnly на iOS). -->
+  <application
+      android:allowBackup="false"
+      android:fullBackupContent="false"
+      android:dataExtractionRules="@xml/ipw_data_extraction_rules"
+      android:supportsRtl="true" />
+
+  <!-- Google Drive, HIBP (проверка утечек) -->
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <!-- сканирование QR для кодов проверки и съёмка вложений -->
+  <uses-permission android:name="android.permission.CAMERA" />
+  <!-- вложения: выбор картинки из галереи -->
+  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+  <!-- быстрая разблокировка отпечатком/лицом -->
+  <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+  <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+
+  <uses-feature android:name="android.hardware.camera" android:required="false" />
+  <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+  <uses-feature android:name="android.hardware.fingerprint" android:required="false" />
+
+  <queries>
+    <!-- вход Google открывается в Custom Tab системного браузера -->
+    <intent>
+      <action android:name="android.support.customtabs.action.CustomTabsService" />
+    </intent>
+    <intent>
+      <action android:name="android.intent.action.VIEW" />
+      <category android:name="android.intent.category.BROWSABLE" />
+      <data android:scheme="https" />
+    </intent>
+  </queries>
+
+</manifest>

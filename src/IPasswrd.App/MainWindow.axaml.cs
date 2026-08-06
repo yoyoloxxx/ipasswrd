@@ -1504,14 +1504,6 @@ public partial class MainWindow : Window
         make.Click += (_, _) => PromptNewFolder(ids);
         folderItems.Add(make);
 
-        if (current.Length > 0)
-        {
-            folderItems.Add(new Separator());
-            var clear = new MenuItem { Header = Tr("Убрать из папки") };
-            clear.Click += (_, _) => MoveToFolder(ids, "");
-            folderItems.Add(clear);
-        }
-
         var intoFolder = new MenuItem
         {
             Header = Tr("Добавить в папку"),
@@ -1519,7 +1511,22 @@ public partial class MainWindow : Window
             ItemsSource = folderItems,
         };
 
-        var flyout = new MenuFlyout { ItemsSource = new List<Control> { intoFolder } };
+        var top = new List<Control> { intoFolder };
+
+        // «Убрать из папки» — только когда открыта та самая папка. В общем списке пункт
+        // значил бы «убрать неизвестно откуда»: человек не видит, какую полку трогает.
+        string openFolder = _section.StartsWith(FolderPrefix, StringComparison.Ordinal)
+            ? _section[FolderPrefix.Length..]
+            : "";
+        if (openFolder.Length > 0 && string.Equals(current, openFolder, StringComparison.Ordinal))
+        {
+            top.Add(new Separator());
+            var clear = new MenuItem { Header = Tr("Убрать из папки") };
+            clear.Click += (_, _) => MoveToFolder(ids, "");
+            top.Add(clear);
+        }
+
+        var flyout = new MenuFlyout { ItemsSource = top };
         EntryList.ContextFlyout = flyout;
         flyout.ShowAt(EntryList, showAtPointer: true);
         e.Handled = true;

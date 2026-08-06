@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Описание службы автозаполнения. Пустой элемент допустим: экран настроек службы
+     открывается самим приложением (Настройки → Автозаполнение). -->
+<autofill-service xmlns:android="http://schemas.android.com/apk/res/android" />
