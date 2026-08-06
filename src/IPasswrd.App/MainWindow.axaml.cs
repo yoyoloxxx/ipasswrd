@@ -137,6 +137,8 @@ public partial class MainWindow : Window
         ["Выкл"] = "Off", ["1 минута"] = "1 minute", ["5 минут"] = "5 minutes", ["15 минут"] = "15 minutes",
         ["1 час"] = "1 hour", ["3 часа"] = "3 hours", ["12 часов"] = "12 hours",
         ["Сменить пароль от сейфа"] = "Change the storage password", ["Изменить"] = "Change", ["Отмена"] = "Cancel",
+        // password history
+        ["Прежние пароли"] = "Previous passwords", ["Забыть историю"] = "Forget history",
         // updates
         ["Обновления"] = "Updates", ["Проверить"] = "Check", ["Версия"] = "Version",
         ["проверяю…"] = "checking…", ["установлена последняя версия"] = "up to date",
@@ -1679,6 +1681,83 @@ public partial class MainWindow : Window
         }
 
         wrap.Children.Add(Margined(FGroup(rows), 22));
+
+        if (PasswordHistoryGroup(item, id) is { } history)
+            wrap.Children.Add(Margined(history, 14));
+    }
+
+    /// <summary>
+    /// Previous passwords, folded away by default. Earns its place exactly when a site claims
+    /// to have accepted a change and quietly did not — without this the old one is simply gone.
+    /// </summary>
+    private Control? PasswordHistoryGroup(VaultItem item, string id)
+    {
+        if (item.History.Count == 0) return null;
+
+        var rows = new List<Control>();
+        foreach (PasswordChange h in item.History)
+        {
+            string old = h.Password;
+            string Masked() => new string('•', Math.Clamp(old.Length, 6, 14));
+            var val = new TextBlock { Text = Masked(), FontFamily = MonoFont, Foreground = Text2, FontSize = 13.5 };
+            rows.Add(FRow(WhenLabel(h.ReplacedAt), val, Actions(EyeButton(val, old, Masked), CopyButton(old))));
+        }
+
+        var forget = new Button
+        {
+            Content = Tr("Забыть историю"), Padding = new Thickness(13, 6),
+            HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0),
+        };
+        forget.Click += (_, _) =>
+        {
+            _lastActivity = DateTimeOffset.UtcNow;
+            try
+            {
+                _vault!.ClearPasswordHistory(id);
+                Save();
+                ShowDetail(_vault.Get(id), id);
+            }
+            catch { /* ignore */ }
+        };
+
+        var body = new StackPanel { IsVisible = false };
+        body.Children.Add(Margined(FGroup(rows), 8));
+        body.Children.Add(forget);
+
+        var caret = new TextBlock { Text = "▸", Foreground = Text3, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+        var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
+        head.Children.Add(caret);
+        head.Children.Add(new TextBlock
+        {
+            Text = Tr("Прежние пароли") + " · " + item.History.Count,
+            Foreground = Text3, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        var toggle = new Button
+        {
+            Content = head, Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            Padding = new Thickness(2, 4), HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        toggle.Click += (_, _) =>
+        {
+            body.IsVisible = !body.IsVisible;
+            caret.Text = body.IsVisible ? "▾" : "▸";
+        };
+
+        var sp = new StackPanel();
+        sp.Children.Add(toggle);
+        sp.Children.Add(body);
+        return sp;
+    }
+
+    /// <summary>"12.03.2026" from an ISO stamp; the raw string if it will not parse.</summary>
+    private static string WhenLabel(string iso)
+    {
+        return DateTime.TryParse(iso, System.Globalization.CultureInfo.InvariantCulture,
+                   System.Globalization.DateTimeStyles.AdjustToUniversal
+                   | System.Globalization.DateTimeStyles.AssumeUniversal, out DateTime dt)
+            ? dt.ToLocalTime().ToString("dd.MM.yyyy")
+            : iso;
     }
 
     private void BuildCardDetail(StackPanel wrap, VaultItem item)
