@@ -151,17 +151,68 @@ public sealed class Vault
         return id;
     }
 
+    /// <summary>
+    /// Replace a record. If the password actually changed, the old one is kept in the item's
+    /// history first — losing the previous password on a change is how people get locked out
+    /// of sites that did not really accept the new one.
+    /// </summary>
     public void Update(string id, VaultItem item)
     {
         for (int i = 0; i < _records.Count; i++)
         {
             if (_records[i].Id == id && !_records[i].Deleted)
             {
+                _records[i] = EncryptRecord(id, CarryHistory(DecryptRecord(_records[i]), item));
+                return;
+            }
+        }
+        throw new KeyNotFoundException(id);
+    }
+
+    /// <summary>Field name the history logic watches. Matches the convention used by Import and the browser bridge.</summary>
+    public const string PasswordField = "password";
+
+    /// <summary>How many superseded passwords a record keeps. Old enough ones stop being useful and are just more secrets at rest.</summary>
+    public const int MaxPasswordHistory = 20;
+
+    /// <summary>Forget every previous password of one record. The current password is untouched.</summary>
+    public void ClearPasswordHistory(string id)
+    {
+        for (int i = 0; i < _records.Count; i++)
+        {
+            if (_records[i].Id == id && !_records[i].Deleted)
+            {
+                VaultItem item = DecryptRecord(_records[i]);
+                if (item.History.Count == 0) return;
+                item.History.Clear();
                 _records[i] = EncryptRecord(id, item);
                 return;
             }
         }
         throw new KeyNotFoundException(id);
+    }
+
+    private static VaultItem CarryHistory(VaultItem previous, VaultItem next)
+    {
+        // The caller rebuilds the item from a form and has no reason to know about history,
+        // so it arrives empty. Carry the old list forward instead of letting an ordinary edit
+        // erase it — clearing is a deliberate act, see ClearPasswordHistory.
+        if (next.History.Count == 0 && previous.History.Count > 0)
+            next.History = new List<PasswordChange>(previous.History);
+
+        previous.Fields.TryGetValue(PasswordField, out string? was);
+        next.Fields.TryGetValue(PasswordField, out string? now);
+
+        // Only a genuine replacement counts. Filling in a password for the first time, or
+        // clearing the field, must not push a blank entry into the list.
+        if (!string.IsNullOrEmpty(was) && !string.IsNullOrEmpty(now)
+            && !string.Equals(was, now, StringComparison.Ordinal))
+        {
+            next.History.Insert(0, new PasswordChange { Password = was, ReplacedAt = NowIso() });
+            if (next.History.Count > MaxPasswordHistory)
+                next.History.RemoveRange(MaxPasswordHistory, next.History.Count - MaxPasswordHistory);
+        }
+        return next;
     }
 
     /// <summary>Insert-or-replace a record at a caller-chosen, stable id. Used for app-managed

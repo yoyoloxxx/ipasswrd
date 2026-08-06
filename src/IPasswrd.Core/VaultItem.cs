@@ -19,6 +19,21 @@ public sealed class VaultItem
     [JsonPropertyName("notes")] public string Notes { get; set; } = "";
 
     [JsonPropertyName("favorite")] public bool Favorite { get; set; }
+
+    /// <summary>
+    /// Passwords this record used to have, newest first. Maintained by <see cref="Vault.Update"/> —
+    /// callers build items from a form and leave this alone.
+    /// </summary>
+    [JsonPropertyName("history")] public List<PasswordChange> History { get; set; } = new();
+}
+
+/// <summary>One superseded password and the moment it stopped being the current one.</summary>
+public sealed class PasswordChange
+{
+    [JsonPropertyName("password")] public string Password { get; set; } = "";
+
+    /// <summary>ISO-8601 UTC.</summary>
+    [JsonPropertyName("replacedAt")] public string ReplacedAt { get; set; } = "";
 }
 
 /// <summary>A decrypted record together with its stable id and last-modified stamp.</summary>
