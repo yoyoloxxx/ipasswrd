@@ -17,6 +17,10 @@ using ZXing;
 using CameraPreview = AndroidX.Camera.Core.Preview;
 using ZXingResult = ZXing.Result;
 using AndroidResult = Android.App.Result;
+using View = Android.Views.View;
+using Color = Android.Graphics.Color;
+using Button = Android.Widget.Button;
+using Orientation = Android.Widget.Orientation;
 
 namespace IPasswrd.Mobile.Platforms.Android.Services;
 

@@ -1,5 +1,7 @@
 using Android.Graphics;
 using IPasswrd.Mobile.Services;
+using Color = Android.Graphics.Color;
+using Canvas = Android.Graphics.Canvas;
 
 namespace IPasswrd.Mobile.Platforms.Android.Services;
 

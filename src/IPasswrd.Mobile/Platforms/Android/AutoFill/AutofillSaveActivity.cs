@@ -10,6 +10,10 @@ using Android.Views;
 using Android.Widget;
 using AndroidX.AppCompat.App;
 using IPasswrd.Mobile.Services;
+using View = Android.Views.View;
+using Color = Android.Graphics.Color;
+using Button = Android.Widget.Button;
+using Orientation = Android.Widget.Orientation;
 
 namespace IPasswrd.Mobile.Platforms.Android.AutoFill;
 
