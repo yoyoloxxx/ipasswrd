@@ -98,11 +98,18 @@ internal static class Updater
 
             // Arm the swap now: Update.exe sits waiting for this process to end, however it
             // ends. Nothing restarts on its own — the new build is simply what starts next time.
+            //
+            // The waiter is armed with null deliberately: null means "apply whatever is newest
+            // in the packages folder when the app exits". Arming it with THIS release pinned
+            // the first version the app happened to see, so a second release published while
+            // the app was still running downloaded, sat there and was never applied — the app
+            // came back on the older build. Over an evening of quick releases that looked for
+            // all the world like broken delta updates, and cost them: they were turned off.
             if (!_armed)
             {
                 try
                 {
-                    Manager.WaitExitThenApplyUpdates(info, silent: true, restart: false);
+                    Manager.WaitExitThenApplyUpdates(null, silent: true, restart: false);
                     _armed = true;
                 }
                 catch { /* stays staged; the next launch will try again */ }
