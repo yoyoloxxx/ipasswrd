@@ -18,7 +18,13 @@ namespace IPasswrd.Core;
 /// </summary>
 public sealed class Vault
 {
-    private const int Format = 1;
+    /// <summary>Baseline layout. Every build ever shipped can read it.</summary>
+    private const int FormatBase = 1;
+
+    /// <summary>Adds the recovery envelope. Older builds refuse it loudly instead of
+    /// silently dropping the field on their next save — losing a recovery code without
+    /// anyone noticing is exactly the failure this whole feature exists to prevent.</summary>
+    private const int FormatRecovery = 2;
 
     private KdfConfig _cfg;
     private byte[] _salt;
@@ -26,10 +32,13 @@ public sealed class Vault
     private BlobDto _wrapped;
     private readonly List<RecordDto> _records;
     private string _vaultId;
+    private RecoveryDto? _recovery;
+    private string _recoveryRevokedAt;
 
     private static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never };
 
-    private Vault(KdfConfig cfg, byte[] salt, byte[] dek, BlobDto wrapped, List<RecordDto> records, string vaultId)
+    private Vault(KdfConfig cfg, byte[] salt, byte[] dek, BlobDto wrapped, List<RecordDto> records,
+                  string vaultId, RecoveryDto? recovery = null, string recoveryRevokedAt = "")
     {
         _cfg = cfg;
         _salt = salt;
@@ -37,6 +46,18 @@ public sealed class Vault
         _wrapped = wrapped;
         _records = records;
         _vaultId = vaultId;
+        _recovery = recovery;
+        _recoveryRevokedAt = recoveryRevokedAt;
+    }
+
+    /// <summary>Deserialise and reject layouts this build does not understand.</summary>
+    private static VaultDocumentDto Parse(byte[] blob)
+    {
+        VaultDocumentDto doc = JsonSerializer.Deserialize<VaultDocumentDto>(blob, Json)
+                               ?? throw new FormatException("empty vault blob");
+        if (doc.Format is < FormatBase or > FormatRecovery)
+            throw new NotSupportedException($"unsupported vault format: {doc.Format}");
+        return doc;
     }
 
     /// <summary>Stable clear-text id of this vault's lineage (survives password changes; used to guard sync merges).</summary>
@@ -50,24 +71,21 @@ public sealed class Vault
         KdfConfig cfg = config ?? KdfConfig.Default;
         byte[] salt = Crypto.RandomBytes(Crypto.SaltLen);
         byte[] dek = Crypto.RandomBytes(Crypto.KeyLen);
-        BlobDto wrapped = Wrap(Crypto.DeriveKey(masterPassword, salt, cfg), dek);
+        BlobDto wrapped = Wrap(Crypto.DeriveKey(masterPassword, salt, cfg), dek, Crypto.AadVaultKey);
         return new Vault(cfg, salt, dek, wrapped, new List<RecordDto>(), Guid.NewGuid().ToString());
     }
 
     /// <summary>Unlock a serialised vault. Throws <see cref="WrongMasterPasswordException"/> on a bad password.</summary>
     public static Vault Unlock(byte[] blob, string masterPassword)
     {
-        VaultDocumentDto doc = JsonSerializer.Deserialize<VaultDocumentDto>(blob, Json)
-                               ?? throw new FormatException("empty vault blob");
-        if (doc.Format != Format)
-            throw new NotSupportedException($"unsupported vault format: {doc.Format}");
+        VaultDocumentDto doc = Parse(blob);
 
         var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism);
         byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
         byte[] kek = Crypto.DeriveKey(masterPassword, salt, cfg);
         byte[] dek = Unwrap(kek, doc.WrappedKey);   // throws WrongMasterPasswordException
         string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
-        return new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId);
+        return new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt);
     }
 
     /// <summary>Copy of the session key (DEK) for OS-protected quick unlock. Handle with care.</summary>
@@ -80,15 +98,12 @@ public sealed class Vault
     /// </summary>
     public static Vault UnlockWithSessionKey(byte[] blob, byte[] dek)
     {
-        VaultDocumentDto doc = JsonSerializer.Deserialize<VaultDocumentDto>(blob, Json)
-                               ?? throw new FormatException("empty vault blob");
-        if (doc.Format != Format)
-            throw new NotSupportedException($"unsupported vault format: {doc.Format}");
+        VaultDocumentDto doc = Parse(blob);
 
         var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism);
         byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
         string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
-        var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId);
+        var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt);
 
         foreach (RecordDto r in doc.Records)
         {
@@ -105,7 +120,9 @@ public sealed class Vault
     {
         var doc = new VaultDocumentDto
         {
-            Format = Format,
+            // stay on the baseline layout until a recovery code actually exists,
+            // so vaults that never use the feature keep opening in older builds
+            Format = (_recovery is null && _recoveryRevokedAt.Length == 0) ? FormatBase : FormatRecovery,
             VaultId = _vaultId,
             Kdf = new KdfDto
             {
@@ -116,6 +133,8 @@ public sealed class Vault
                 Salt = Convert.ToBase64String(_salt),
             },
             WrappedKey = _wrapped,
+            Recovery = _recovery,
+            RecoveryRevokedAt = _recoveryRevokedAt,
             // canonical order: identical content on two devices serialises to identical bytes,
             // so folder-sync (iCloud/Drive) converges instead of ping-ponging re-uploads
             Records = _records.OrderBy(r => r.Id, StringComparer.Ordinal).ToList(),
@@ -208,10 +227,7 @@ public sealed class Vault
     /// </summary>
     public int MergeFrom(byte[] otherBlob)
     {
-        VaultDocumentDto other = JsonSerializer.Deserialize<VaultDocumentDto>(otherBlob, Json)
-                                 ?? throw new FormatException("empty vault blob");
-        if (other.Format != Format)
-            throw new NotSupportedException($"unsupported vault format: {other.Format}");
+        VaultDocumentDto other = Parse(otherBlob);
         if (!string.IsNullOrEmpty(other.VaultId) && !string.IsNullOrEmpty(_vaultId)
             && !string.Equals(other.VaultId, _vaultId, StringComparison.Ordinal))
             throw new VaultIntegrityException("refusing to merge a different vault");
@@ -237,6 +253,17 @@ public sealed class Vault
             _records.Clear();
             _records.AddRange(byId.Values);
         }
+
+        // The recovery envelope is not a record, so it needs its own last-write-wins rule.
+        // Without one, a device that has never seen the code would quietly drop it on its
+        // next save and the user would find out only when they needed it.
+        if (string.CompareOrdinal(RecoveryStamp(other.Recovery, other.RecoveryRevokedAt),
+                                  RecoveryStamp(_recovery, _recoveryRevokedAt)) > 0)
+        {
+            _recovery = other.Recovery;
+            _recoveryRevokedAt = other.RecoveryRevokedAt;
+        }
+
         return changed;
     }
 
@@ -250,32 +277,144 @@ public sealed class Vault
     {
         _ = Unwrap(Crypto.DeriveKey(oldPassword, _salt, _cfg), _wrapped); // throws if wrong
         _salt = Crypto.RandomBytes(Crypto.SaltLen);
-        _wrapped = Wrap(Crypto.DeriveKey(newPassword, _salt, _cfg), _dek);
+        _wrapped = Wrap(Crypto.DeriveKey(newPassword, _salt, _cfg), _dek, Crypto.AadVaultKey);
+    }
+
+    /// <summary>
+    /// Set a new master password WITHOUT proving the old one. Only for the recovery flow.
+    /// It grants nothing new — reaching this method already requires an unlocked vault,
+    /// i.e. the DEK — but every other path should go through <see cref="ChangeMasterPassword"/>
+    /// so that a forgotten password cannot be replaced by someone who merely walked up to
+    /// an unlocked screen.
+    /// </summary>
+    public void ResetMasterPassword(string newPassword)
+    {
+        _salt = Crypto.RandomBytes(Crypto.SaltLen);
+        _wrapped = Wrap(Crypto.DeriveKey(newPassword, _salt, _cfg), _dek, Crypto.AadVaultKey);
+    }
+
+    // ---- recovery code ----
+
+    /// <summary>True when a recovery code has been issued and not revoked.</summary>
+    public bool HasRecoveryCode => _recovery is not null;
+
+    /// <summary>
+    /// Does this vault file carry a recovery envelope? Answerable without the password —
+    /// the unlock screen needs it to decide whether to offer "forgot master password",
+    /// and the envelope's presence is already visible in the file either way.
+    /// </summary>
+    public static bool IsRecoveryAvailable(byte[] blob)
+    {
+        try { return Parse(blob).Recovery is not null; }
+        catch { return false; }
+    }
+
+    /// <summary>When the current recovery code was issued (ISO-8601 UTC), or null if there is none.</summary>
+    public string? RecoveryCodeIssuedAt => _recovery?.CreatedAt;
+
+    /// <summary>
+    /// Issue a recovery code: a second, independent envelope around the SAME DEK, locked by
+    /// 125 random bits instead of the master password. Any previous code stops working.
+    ///
+    /// The returned string is the only copy that will ever exist — nothing derived from it is
+    /// kept in the clear, so if the user does not write it down it is gone. Note the trade-off
+    /// worth telling them about: from here on, the vault file has a second door, and whoever
+    /// holds this code plus the file can open it.
+    /// </summary>
+    public string EnableRecovery()
+    {
+        string display = RecoveryCode.Generate();
+        string canonical = RecoveryCode.Normalize(display)!;   // freshly generated: always valid
+
+        byte[] salt = Crypto.RandomBytes(Crypto.SaltLen);
+        byte[] rek = Crypto.DeriveKey(canonical, salt, _cfg);
+
+        _recovery = new RecoveryDto
+        {
+            Kdf = KdfDtoOf(_cfg, salt),
+            WrappedKey = Wrap(rek, _dek, Crypto.AadRecoveryKey),
+            CreatedAt = NowIso(),
+        };
+        _recoveryRevokedAt = "";
+        return display;
+    }
+
+    /// <summary>
+    /// Revoke the recovery code — the written-down copy stops opening this vault. The
+    /// revocation is stamped so that a device still carrying the old envelope does not
+    /// resurrect it on the next sync merge.
+    /// </summary>
+    public void DisableRecovery()
+    {
+        if (_recovery is null) return;
+        _recovery = null;
+        _recoveryRevokedAt = NowIso();
+    }
+
+    /// <summary>
+    /// Open a vault with its recovery code, for when the master password is lost.
+    ///
+    /// The vault comes back unlocked but still wrapped by the forgotten password: the caller
+    /// MUST follow with <see cref="ResetMasterPassword"/> before serialising, otherwise the
+    /// saved file still needs a password nobody knows.
+    /// </summary>
+    /// <exception cref="RecoveryNotEnabledException">No code was ever issued for this vault.</exception>
+    /// <exception cref="WrongRecoveryCodeException">The code is malformed or simply wrong.</exception>
+    public static Vault UnlockWithRecoveryCode(byte[] blob, string recoveryCode)
+    {
+        VaultDocumentDto doc = Parse(blob);
+        RecoveryDto rec = doc.Recovery ?? throw new RecoveryNotEnabledException();
+
+        string canonical = RecoveryCode.Normalize(recoveryCode) ?? throw new WrongRecoveryCodeException();
+
+        var rcfg = new KdfConfig(rec.Kdf.MemoryKiB, rec.Kdf.Iterations, rec.Kdf.Parallelism);
+        byte[] rek = Crypto.DeriveKey(canonical, Convert.FromBase64String(rec.Kdf.Salt), rcfg);
+        byte[] dek = TryUnwrap(rek, rec.WrappedKey, Crypto.AadRecoveryKey)
+                     ?? throw new WrongRecoveryCodeException();
+
+        var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism);
+        byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
+        string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
+        return new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt);
     }
 
     // ---- key wrapping ----
 
-    private static BlobDto Wrap(byte[] kek, byte[] dek)
+    private static BlobDto Wrap(byte[] kek, byte[] dek, byte[] aad)
     {
         byte[] nonce = Crypto.RandomBytes(Crypto.NonceLen);
-        byte[] ct = Crypto.Seal(kek, nonce, dek, Crypto.AadVaultKey);
+        byte[] ct = Crypto.Seal(kek, nonce, dek, aad);
         return new BlobDto { Nonce = Convert.ToBase64String(nonce), Ciphertext = Convert.ToBase64String(ct) };
     }
 
-    private static byte[] Unwrap(byte[] kek, BlobDto wrapped)
+    /// <summary>Unwrap, or null on a wrong key / mangled blob. Callers name the failure.</summary>
+    private static byte[]? TryUnwrap(byte[] kek, BlobDto wrapped, byte[] aad)
     {
         try
         {
             return Crypto.Open(kek,
                 Convert.FromBase64String(wrapped.Nonce),
                 Convert.FromBase64String(wrapped.Ciphertext),
-                Crypto.AadVaultKey);
+                aad);
         }
-        catch (CryptographicException)
-        {
-            throw new WrongMasterPasswordException();
-        }
+        catch (CryptographicException) { return null; }
+        catch (FormatException) { return null; }   // base64 damaged by a bad sync/edit
     }
+
+    private static byte[] Unwrap(byte[] kek, BlobDto wrapped) =>
+        TryUnwrap(kek, wrapped, Crypto.AadVaultKey) ?? throw new WrongMasterPasswordException();
+
+    private static string RecoveryStamp(RecoveryDto? rec, string revokedAt) =>
+        rec is not null ? rec.CreatedAt : revokedAt;
+
+    private static KdfDto KdfDtoOf(KdfConfig cfg, byte[] salt) => new()
+    {
+        Algorithm = "argon2id",
+        MemoryKiB = cfg.MemoryKiB,
+        Iterations = cfg.Iterations,
+        Parallelism = cfg.Parallelism,
+        Salt = Convert.ToBase64String(salt),
+    };
 
     // ---- record encryption ----
 
