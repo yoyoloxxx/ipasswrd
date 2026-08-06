@@ -327,6 +327,22 @@ public partial class MainWindow
 
     /// <summary>Write the native-messaging manifest next to the host exe and register it for all
     /// Chromium-family browsers on this account (HKCU). Idempotent. Returns the manifest path.</summary>
+    /// <summary>
+    /// Re-write the native-messaging manifest on every launch. It used to be written only when
+    /// someone pressed "Install extension", which meant anyone who merely UPDATED the app kept a
+    /// manifest listing yesterday's extension ids — and the published extension would be turned
+    /// away by Chrome. Cheap, idempotent, and it silently repairs installs we will never see.
+    /// </summary>
+    private void RefreshNativeHostRegistration()
+    {
+        try
+        {
+            string? hostExe = ResolveHostExe();
+            if (hostExe is not null) RegisterNativeHost(hostExe);
+        }
+        catch { /* best effort: the extension still has the loopback bridge */ }
+    }
+
     private string RegisterNativeHost(string hostExe)
     {
         string dir = Path.GetDirectoryName(hostExe)!;

@@ -354,6 +354,7 @@ public partial class MainWindow : Window
         ApplyTheme();
         SetupTray();
         StartBrowserBridge();   // named-pipe server for the browser extension (see BrowserBridge.cs)
+        RefreshNativeHostRegistration();   // keep Chrome's allow-list in step with the ids this build trusts
         PointerMoved += (_, _) => _lastActivity = DateTimeOffset.UtcNow;
         KeyDown += (_, _) => _lastActivity = DateTimeOffset.UtcNow;
         SetupUnlock();
