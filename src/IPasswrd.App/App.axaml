@@ -85,6 +85,18 @@
       <Setter Property="Foreground" Value="{DynamicResource IpOnAccent}" />
     </Style>
 
+    <!-- Кнопка согласия в вопросах вроде «Удалить папку?»: выглядеть как обычное
+         подтверждение она не должна — цвет здесь часть вопроса. -->
+    <Style Selector="Button.danger">
+      <Setter Property="Background" Value="{DynamicResource IpBadWash}" />
+      <Setter Property="Foreground" Value="{DynamicResource IpBad}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.danger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IpBad}" />
+      <Setter Property="Foreground" Value="{DynamicResource IpOnAccent}" />
+    </Style>
+
     <Style Selector="Button.icon">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />

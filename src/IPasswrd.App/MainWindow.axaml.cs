@@ -78,7 +78,7 @@ public partial class MainWindow : Window
         // sidebar / sections / tools
         ["Все записи"] = "All items", ["Аккаунты"] = "Accounts", ["Ключи доступа"] = "Passkeys",
         ["Карты"] = "Cards", ["Документы"] = "Documents", ["Заметки"] = "Notes", ["ИНСТРУМЕНТЫ"] = "TOOLS", ["ПАПКИ"] = "FOLDERS", ["Папка"] = "Folder",
-        ["Новая папка"] = "New folder", ["Новая папка…"] = "New folder…", ["Название папки"] = "Folder name", ["Создать"] = "Create", ["Введите название"] = "Enter a name",  ["Добавить в папку"] = "Add to folder", ["Копировать пароль"] = "Copy password", ["Копировать логин"] = "Copy login", ["Убрать из папки"] = "Remove from folder", ["Без папки"] = "Unfiled",
+        ["Новая папка"] = "New folder", ["Переименовать…"] = "Rename…", ["Переименовать папку"] = "Rename folder", ["Переименовать"] = "Rename", ["Удалить папку"] = "Delete folder", ["Удалить папку?"] = "Delete folder?", ["Записи из «{0}» останутся в сейфе — они просто перестанут лежать в папке."] = "The records in \u00ab{0}\u00bb stay in the vault — they simply stop living in a folder.",  ["Новая папка…"] = "New folder…", ["Название папки"] = "Folder name", ["Создать"] = "Create", ["Введите название"] = "Enter a name",  ["Добавить в папку"] = "Add to folder", ["Копировать пароль"] = "Copy password", ["Копировать логин"] = "Copy login", ["Убрать из папки"] = "Remove from folder", ["Без папки"] = "Unfiled",
         ["Необязательно — например: "] = "Optional — e.g.: ", ["Необязательно — например: Работа"] = "Optional — e.g.: Work",
         ["Аутентификатор"] = "Authenticator", ["Генератор"] = "Generator", ["Проверка"] = "Security", ["Настройки"] = "Settings",
         ["Локальный сейф"] = "Local storage", ["без синхронизации"] = "no sync",
@@ -1180,7 +1180,7 @@ public partial class MainWindow : Window
                 string folder = g.Key;
                 string key = FolderPrefix + folder;
                 bool active = _toolMode is null && _section == key;
-                SectionHost.Children.Add(SideButton(folder, "folder", g.Count(), active, () =>
+                Control btn = SideButton(folder, "folder", g.Count(), active, () =>
                 {
                     _toolMode = null;
                     _authAdding = false;
@@ -1190,7 +1190,9 @@ public partial class MainWindow : Window
                     ToolPane.IsVisible = false;
                     LoadEntries();
                     RenderSidebar();
-                }));
+                });
+                AttachFolderMenu(btn, folder);
+                SectionHost.Children.Add(btn);
             }
         }
 
@@ -1545,15 +1547,65 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    /// <summary>Name a new folder in a card over the window — a TextBox inside a menu never receives the click.</summary>
-    private void PromptNewFolder(IReadOnlyList<string> ids)
-    {
-        if (this.Content is not Grid root) return;
+    /// <summary>Спросить имя новой папки и переложить туда записи.</summary>
+    private void PromptNewFolder(IReadOnlyList<string> ids) =>
+        PromptText(Tr("Новая папка"), Tr("Название папки"), "", Tr("Создать"), name => MoveToFolder(ids, name));
 
-        var box = new TextBox { Watermark = Tr("Название папки"), Width = 300 };
+    /// <summary>
+    /// Однострочный вопрос карточкой поверх окна. Поле ввода внутри меню не ловит клики,
+    /// а заводить отдельное окно ради одной строки — слишком тяжёлый ответ на вопрос
+    /// «как назовём?».
+    /// </summary>
+    private void PromptText(string title, string watermark, string initial, string okLabel, Action<string> apply)
+    {
+        var box = new TextBox { Watermark = watermark, Text = initial, Width = 300 };
         var error = new TextBlock { Foreground = Bad, IsVisible = false, TextWrapping = TextWrapping.Wrap };
-        var ok = new Button { Content = Tr("Создать"), IsDefault = true };
-        ok.Classes.Add("primary");
+
+        if (ShowCard(title, new Control[] { box, error }, okLabel, danger: false) is not { } card) return;
+
+        card.Ok.Click += (_, _) =>
+        {
+            string name = (box.Text ?? "").Trim();
+            if (name.Length == 0)
+            {
+                error.Text = Tr("Введите название");
+                error.IsVisible = true;
+                box.Focus();
+                return;
+            }
+            CloseCard(card.Dim);
+            apply(name);
+        };
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            box.Focus();
+            box.SelectAll();
+        }, DispatcherPriority.Input);
+    }
+
+    /// <summary>Тот же вопрос, но без поля: «точно?» с одной кнопкой согласия.</summary>
+    private void PromptConfirm(string title, string message, string okLabel, bool danger, Action apply)
+    {
+        var text = new TextBlock { Text = message, Foreground = Text2, TextWrapping = TextWrapping.Wrap, MaxWidth = 340 };
+        if (ShowCard(title, new Control[] { text }, okLabel, danger) is not { } card) return;
+        card.Ok.Click += (_, _) =>
+        {
+            CloseCard(card.Dim);
+            apply();
+        };
+    }
+
+    /// <summary>
+    /// Общая обвязка для маленьких вопросов: затемнение, карточка, «Отмена» и Esc.
+    /// Согласие вешает вызывающий — только он знает, что считать правильным ответом.
+    /// </summary>
+    private (Border Dim, Button Ok)? ShowCard(string title, IEnumerable<Control> body, string okLabel, bool danger)
+    {
+        if (this.Content is not Grid root) return null;
+
+        var ok = new Button { Content = okLabel, IsDefault = true };
+        ok.Classes.Add(danger ? "danger" : "primary");
         var cancel = new Button { Content = Tr("Отмена"), IsCancel = true };
 
         var buttons = new StackPanel
@@ -1568,13 +1620,12 @@ public partial class MainWindow : Window
         var stack = new StackPanel { Spacing = 14 };
         stack.Children.Add(new TextBlock
         {
-            Text = Tr("Новая папка"),
+            Text = title,
             FontSize = 17,
             FontWeight = FontWeight.Bold,
             Foreground = Text,
         });
-        stack.Children.Add(box);
-        stack.Children.Add(error);
+        foreach (Control c in body) stack.Children.Add(c);
         stack.Children.Add(buttons);
 
         var card = new Border
@@ -1594,30 +1645,81 @@ public partial class MainWindow : Window
         Grid.SetRowSpan(dim, root.RowDefinitions.Count > 0 ? root.RowDefinitions.Count : 1);
         root.Children.Add(dim);
 
-        void Close() => root.Children.Remove(dim);
-
-        cancel.Click += (_, _) => Close();
-        ok.Click += (_, _) =>
-        {
-            string name = (box.Text ?? "").Trim();
-            if (name.Length == 0)
-            {
-                error.Text = Tr("Введите название");
-                error.IsVisible = true;
-                box.Focus();
-                return;
-            }
-            Close();
-            MoveToFolder(ids, name);
-        };
+        cancel.Click += (_, _) => CloseCard(dim);
         dim.KeyDown += (_, ke) =>
         {
             if (ke.Key != Key.Escape) return;
             ke.Handled = true;
-            Close();
+            CloseCard(dim);
         };
 
-        Dispatcher.UIThread.Post(() => box.Focus(), DispatcherPriority.Input);
+        return (dim, ok);
+    }
+
+    private void CloseCard(Border dim)
+    {
+        if (this.Content is Grid root) root.Children.Remove(dim);
+    }
+
+    /// <summary>Правая кнопка по папке в боковой панели: переименовать или распустить.</summary>
+    private void AttachFolderMenu(Control button, string folder)
+    {
+        var rename = new MenuItem { Header = Tr("Переименовать…"), Icon = MakeIcon(IconData("edit"), 15, Text2, 1.6) };
+        rename.Click += (_, _) => PromptText(
+            Tr("Переименовать папку"), Tr("Название папки"), folder, Tr("Переименовать"),
+            name => RenameFolder(folder, name));
+
+        var drop = new MenuItem { Header = Tr("Удалить папку"), Icon = MakeIcon(IconData("trash"), 15, Bad, 1.6) };
+        drop.Click += (_, _) => PromptConfirm(
+            Tr("Удалить папку?"),
+            string.Format(Tr("Записи из «{0}» останутся в сейфе — они просто перестанут лежать в папке."), folder),
+            Tr("Удалить папку"), danger: true,
+            () => RenameFolder(folder, ""));
+
+        button.ContextFlyout = new MenuFlyout { ItemsSource = new List<Control> { rename, drop } };
+    }
+
+    /// <summary>
+    /// Папка — это значение поля в записях, а не отдельная сущность, поэтому переименование
+    /// и есть массовая правка этого поля; пустое имя означает «распустить папку».
+    ///
+    /// Переименование в имя уже существующей папки не запрещено: человек, назвавший папку
+    /// именем соседней, почти наверняка хотел их слить, а не получить отказ.
+    /// </summary>
+    private void RenameFolder(string from, string to)
+    {
+        if (_vault is null) return;
+        to = to.Trim();
+        if (string.Equals(from, to, StringComparison.Ordinal)) return;
+
+        bool touched = false;
+        foreach (VaultEntry e in _vault.Items())
+        {
+            if (!string.Equals(e.Item.Folder, from, StringComparison.Ordinal)) continue;
+            e.Item.Folder = to;
+            try { _vault.Update(e.Id, e.Item); touched = true; }
+            catch (Exception) { /* запись могла исчезнуть с другого устройства */ }
+        }
+        if (!touched) return;
+
+        Save();
+
+        if (_section == FolderPrefix + from)
+        {
+            if (to.Length > 0)
+            {
+                _section = FolderPrefix + to;
+                ListTitle.Text = to;
+            }
+            else
+            {
+                _section = "all";
+                ListTitle.Text = Tr("Все записи");
+            }
+        }
+
+        LoadEntries();
+        RenderSidebar();
     }
 
     /// <summary>Put every login of the clicked tile in the same folder — a site group moves together.</summary>
