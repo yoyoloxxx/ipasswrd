@@ -28,6 +28,62 @@ public partial class ItemEditPage : ContentPage
 
         LoadExisting();
         RenderAttachments();
+        UpdateFolderRow();
+    }
+
+    // ================= папка =================
+
+    private void UpdateFolderRow() =>
+        FolderValue.Text = _item.Folder.Length > 0 ? _item.Folder : "Без папки";
+
+    /// <summary>
+    /// Выбор папки — из тех, что уже есть в сейфе, плюс «Новая…». Список существующих
+    /// предлагается не для красоты: набранная руками «работа» рядом с «Работа» даёт две
+    /// папки вместо одной, и заметно это становится только на другом устройстве.
+    ///
+    /// Папка меняется в _item сразу, но в сейф попадает только с кнопкой «Сохранить» —
+    /// как и всё остальное в этой форме.
+    /// </summary>
+    private async void OnPickFolder(object? sender, EventArgs e)
+    {
+        var known = new List<string>();
+        try
+        {
+            Vault? v = Svc.State.Vault;
+            if (v is not null)
+                known = v.Items()
+                    .Where(x => x.Item.Folder.Length > 0)
+                    .Select(x => x.Item.Folder)
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)
+                    .ToList();
+        }
+        catch (Exception) { }
+
+        const string fresh = "Новая папка…";
+        string? none = _item.Folder.Length > 0 ? "Убрать из папки" : null;
+        var options = new List<string> { fresh };
+        options.AddRange(known.Where(k => k != _item.Folder));
+
+        string choice = await DisplayActionSheet("Папка", "Отмена", none, options.ToArray());
+        if (string.IsNullOrEmpty(choice) || choice == "Отмена") return;
+
+        if (choice == none)
+        {
+            _item.Folder = "";
+        }
+        else if (choice == fresh)
+        {
+            string? name = await DisplayPromptAsync("Новая папка", "Название", "Готово", "Отмена", maxLength: 40);
+            name = (name ?? "").Trim();
+            if (name.Length == 0) return;
+            _item.Folder = name;
+        }
+        else
+        {
+            _item.Folder = choice;
+        }
+        UpdateFolderRow();
     }
 
     // ================= вложения =================

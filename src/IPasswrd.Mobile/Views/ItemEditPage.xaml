@@ -107,6 +107,21 @@
                 <Editor x:Name="NotesBox" Placeholder="Заметки" AutoSize="TextChanges" MinimumHeightRequest="80" />
             </Border>
 
+            <!-- Папка — та же плоская папка, что на ПК. Выбор из существующих или новая — по кнопке:
+                 набирать имя руками каждый раз — путь к трём написаниям одной папки. -->
+            <Border Style="{StaticResource Card}" Padding="14,10">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <VerticalStackLayout Spacing="2" VerticalOptions="Center">
+                        <Label Text="Папка" FontSize="13" Style="{StaticResource Muted}" />
+                        <Label x:Name="FolderValue" FontSize="15" />
+                    </VerticalStackLayout>
+                    <Button Grid.Column="1" Text="Выбрать" FontSize="14" Padding="10,4" BackgroundColor="Transparent"
+                            VerticalOptions="Center"
+                            TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}"
+                            Clicked="OnPickFolder" />
+                </Grid>
+            </Border>
+
             <!-- Вложения добавляются прямо здесь и уезжают в сейф вместе с записью:
                  фотографию паспорта человек делает тогда же, когда заводит документ, а не потом. -->
             <Border Style="{StaticResource Card}" Padding="14,10">

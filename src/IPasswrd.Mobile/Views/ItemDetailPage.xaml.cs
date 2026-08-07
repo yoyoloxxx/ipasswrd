@@ -193,6 +193,11 @@ public partial class ItemDetailPage : ContentPage
 
         AddAttachments();
 
+        // Где лежит запись — видно из карточки, без похода в редактор. Меняется папка там же,
+        // где и остальные поля, — через «Изменить».
+        if (_item.Folder.Length > 0)
+            AddInfo($"📁 Папка: {_item.Folder}");
+
         var del = new Button { Text = "Удалить", Style = (Style)Application.Current!.Resources["Danger"], Margin = new Thickness(0, 24, 0, 0) };
         del.Clicked += OnDelete;
         Rows.Children.Add(del);

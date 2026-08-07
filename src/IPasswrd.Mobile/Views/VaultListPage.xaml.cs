@@ -27,7 +27,33 @@ public partial class VaultListPage : ContentPage
         ("doc", "Документы"), ("identity", "Личные данные"), ("note", "Заметки"), ("passkey", "Ключи доступа"),
     };
 
+    /// <summary>
+    /// Текущий раздел: ключ типа из ChipDefs либо папка с префиксом «f:» — тот же приём,
+    /// что в сайдбаре на ПК: папки живут в том же меню, что и типы, а не в отдельном экране,
+    /// потому что отвечают на тот же вопрос: «что показывать в списке».
+    /// </summary>
     private string _filter = "all";
+
+    private const string FolderPrefix = "f:";
+
+    /// <summary>Папки, которые сейчас есть в сейфе, с количеством записей в каждой.
+    /// Список нигде не хранится — папка существует, пока в ней лежит хотя бы одна запись,
+    /// ровно как на ПК. Поэтому же папки с двух устройств не надо сливать — они и так одни.</summary>
+    private static List<(string Name, int Count)> FolderCounts()
+    {
+        Vault? v = Svc.State.Vault;
+        if (v is null) return new();
+        try
+        {
+            return v.Items()
+                .Where(e => e.Item.Type is not ("totp" or "meta") && e.Item.Folder.Length > 0)
+                .GroupBy(e => e.Item.Folder, StringComparer.Ordinal)
+                .OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
+                .Select(g => (g.Key, g.Count()))
+                .ToList();
+        }
+        catch (Exception) { return new(); }
+    }
 
     public VaultListPage()
     {
@@ -75,6 +101,23 @@ public partial class VaultListPage : ContentPage
 
     private void UpdateSectionButton()
     {
+        if (_filter.StartsWith(FolderPrefix, StringComparison.Ordinal))
+        {
+            string name = _filter[FolderPrefix.Length..];
+            var folders = FolderCounts();
+            var hit = folders.FirstOrDefault(f => f.Name == name);
+            if (hit.Name is null)
+            {
+                // Папка опустела (последнюю запись переложили или удалили) — молча показать
+                // пустой список было бы похоже на потерю данных, возвращаемся ко «Всем».
+                _filter = "all";
+            }
+            else
+            {
+                SectionLabel.Text = $"📁 {name} ({hit.Count})";
+                return;
+            }
+        }
         var counts = SectionCounts();
         var (_, label) = ChipDefs.First(d => d.Key == _filter);
         SectionLabel.Text = LabelFor(_filter, label, counts);
@@ -99,12 +142,11 @@ public partial class VaultListPage : ContentPage
         Color accent = GetColor(dark ? "IpAccent" : "IpAccentL");
         Color hair = GetColor(dark ? "IpText3" : "IpText3L");
 
-        for (int i = 0; i < ChipDefs.Length; i++)
+        void AddRow(string key, string shown, bool first)
         {
-            var (key, label) = ChipDefs[i];
             bool on = key == _filter;
 
-            if (i > 0)
+            if (!first)
                 SectionMenuItems.Children.Add(new BoxView { HeightRequest = 0.7, Color = hair, Opacity = 0.35, Margin = new Thickness(14, 0) });
 
             var row = new Grid { Padding = new Thickness(16, 12) };
@@ -112,11 +154,12 @@ public partial class VaultListPage : ContentPage
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.Children.Add(new Label
             {
-                Text = LabelFor(key, label, counts),
+                Text = shown,
                 FontSize = 15,
                 TextColor = on ? accent : text,
                 FontAttributes = on ? FontAttributes.Bold : FontAttributes.None,
                 VerticalOptions = LayoutOptions.Center,
+                LineBreakMode = LineBreakMode.TailTruncation,
             });
             var check = new Label { Text = on ? "✓" : "", FontSize = 15, TextColor = accent, VerticalOptions = LayoutOptions.Center };
             Grid.SetColumn((BindableObject)check, 1);
@@ -134,6 +177,29 @@ public partial class VaultListPage : ContentPage
             };
             row.GestureRecognizers.Add(tap);
             SectionMenuItems.Children.Add(row);
+        }
+
+        for (int i = 0; i < ChipDefs.Length; i++)
+        {
+            var (key, label) = ChipDefs[i];
+            AddRow(key, LabelFor(key, label, counts), first: i == 0);
+        }
+
+        // Папки — под типами, как в сайдбаре на ПК. Заголовок не нажимается и появляется,
+        // только когда папки вообще есть: пустой раздел — это шум.
+        var folders = FolderCounts();
+        if (folders.Count > 0)
+        {
+            SectionMenuItems.Children.Add(new Label
+            {
+                Text = "ПАПКИ",
+                FontSize = 11,
+                FontAttributes = FontAttributes.Bold,
+                TextColor = hair,
+                Padding = new Thickness(16, 10, 16, 2),
+            });
+            for (int fi = 0; fi < folders.Count; fi++)
+                AddRow(FolderPrefix + folders[fi].Name, $"📁 {folders[fi].Name} ({folders[fi].Count})", first: fi == 0);
         }
     }
 
@@ -158,7 +224,10 @@ public partial class VaultListPage : ContentPage
 
         IEnumerable<VaultEntry> visible = all
             .Where(x => x.Item.Type != "totp" && x.Item.Type != "meta")
-            .Where(x => _filter == "all" || x.Item.Type == _filter);
+            .Where(x => _filter == "all"
+                || (_filter.StartsWith(FolderPrefix, StringComparison.Ordinal)
+                    ? string.Equals(x.Item.Folder, _filter[FolderPrefix.Length..], StringComparison.Ordinal)
+                    : x.Item.Type == _filter));
 
         // Правило поиска общее с ПК и живёт в ядре: запись, которая находится на ноутбуке и не
         // находится с телефона, выглядит как потерянная. Название карточки сайта в самой
