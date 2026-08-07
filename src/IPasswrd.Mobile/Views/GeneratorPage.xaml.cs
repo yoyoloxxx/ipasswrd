@@ -41,11 +41,24 @@ public partial class GeneratorPage : ContentPage
         StrengthLabel.Text = $"{o.Length} символов · ~{(int)bits} бит · {verdict}";
     }
 
+    // Пока палец на ползунке, пароль не перегенерируем: карточка с паролем стоит НАД
+    // ползунком, от смены текста меняется её высота, экран сдвигается — и ползунок
+    // «прыгает» из-под пальца. Во время перетаскивания живёт только цифра длины.
+    private bool _dragging;
+
+    private void OnLengthDragStarted(object? sender, EventArgs e) => _dragging = true;
+
+    private void OnLengthDragCompleted(object? sender, EventArgs e)
+    {
+        _dragging = false;
+        Regenerate();
+    }
+
     private void OnLengthChanged(object? sender, ValueChangedEventArgs e)
     {
         int len = (int)Math.Round(e.NewValue);
         LengthLabel.Text = len.ToString();
-        Regenerate();
+        if (!_dragging) Regenerate();
     }
 
     private void OnOptionToggled(object? sender, ToggledEventArgs e) => Regenerate();

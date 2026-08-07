@@ -43,7 +43,7 @@
             <CollectionView.EmptyView>
                 <VerticalStackLayout Padding="40" Spacing="8" VerticalOptions="Center">
                     <Label Text="Кодов пока нет" HorizontalOptions="Center" Style="{StaticResource Muted}" />
-                    <Label Text="Нажмите «＋» и отсканируйте QR-код с сайта — код проверки будет считаться прямо на iPhone и синхронизируется с Windows."
+                    <Label Text="Нажмите «＋» и отсканируйте QR-код с сайта — код проверки будет считаться прямо на телефоне и синхронизируется с Windows."
                            HorizontalOptions="Center" HorizontalTextAlignment="Center" Style="{StaticResource Muted}" FontSize="13" />
                 </VerticalStackLayout>
             </CollectionView.EmptyView>
