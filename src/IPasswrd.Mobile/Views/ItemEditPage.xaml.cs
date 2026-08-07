@@ -16,12 +16,15 @@ public partial class ItemEditPage : ContentPage
         _type = type;
 
         Title = _id is null
-            ? _type switch { "card" => "Новая карта", "doc" => "Новый документ", "note" => "Новая заметка", _ => "Новый аккаунт" }
+            ? _type switch { "card" => "Новая карта", "doc" => "Новый документ", "note" => "Новая заметка", "identity" => "Личные данные", _ => "Новый аккаунт" }
             : "Изменение";
 
         AccountForm.IsVisible = _type is "account" or "passkey";
         CardForm.IsVisible = _type == "card";
         DocumentForm.IsVisible = _type == "doc";
+        IdentityForm.IsVisible = _type == "identity";
+        // Имя записи соберётся из ФИО — подсказка не должна требовать его вводить.
+        if (_type == "identity") TitleBox.Placeholder = "Название — необязательно";
 
         LoadExisting();
     }
@@ -53,6 +56,17 @@ public partial class ItemEditPage : ContentPage
             case "doc":
                 DocNumberBox.Text = _item.Fields.GetValueOrDefault("number", "");
                 IssuedBox.Text = _item.Fields.GetValueOrDefault("issued", "");
+                break;
+            case "identity":
+                LastNameBox.Text = _item.Fields.GetValueOrDefault("lastName", "");
+                FirstNameBox.Text = _item.Fields.GetValueOrDefault("firstName", "");
+                MiddleNameBox.Text = _item.Fields.GetValueOrDefault("middleName", "");
+                PhoneBox.Text = _item.Fields.GetValueOrDefault("phone", "");
+                EmailBox.Text = _item.Fields.GetValueOrDefault("email", "");
+                ZipBox.Text = _item.Fields.GetValueOrDefault("zip", "");
+                CountryBox.Text = _item.Fields.GetValueOrDefault("country", "");
+                CityBox.Text = _item.Fields.GetValueOrDefault("city", "");
+                StreetBox.Text = _item.Fields.GetValueOrDefault("street", "");
                 break;
         }
     }
@@ -155,6 +169,22 @@ public partial class ItemEditPage : ContentPage
             case "doc":
                 SetField("number", DocNumberBox.Text);
                 SetField("issued", IssuedBox.Text);
+                break;
+
+            case "identity":
+                SetField("lastName", LastNameBox.Text);
+                SetField("firstName", FirstNameBox.Text);
+                SetField("middleName", MiddleNameBox.Text);
+                SetField("phone", PhoneBox.Text);
+                SetField("email", EmailBox.Text);
+                SetField("zip", ZipBox.Text);
+                SetField("country", CountryBox.Text);
+                SetField("city", CityBox.Text);
+                SetField("street", StreetBox.Text);
+                // Заполняют ведь себя, а не «запись» — название собираем из ФИО, если его не задали.
+                if (_item.Title.Length == 0)
+                    _item.Title = string.Join(" ", new[] { LastNameBox.Text, FirstNameBox.Text, MiddleNameBox.Text }
+                        .Select(x => (x ?? "").Trim()).Where(x => x.Length > 0));
                 break;
         }
 

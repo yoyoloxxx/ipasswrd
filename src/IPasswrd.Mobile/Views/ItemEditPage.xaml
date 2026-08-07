@@ -70,6 +70,39 @@
                 </Border>
             </VerticalStackLayout>
 
+            <!-- ======== личные данные ======== -->
+            <VerticalStackLayout x:Name="IdentityForm" Spacing="10" IsVisible="False">
+                <Border Style="{StaticResource Card}" Padding="14,4">
+                    <Entry x:Name="LastNameBox" Placeholder="Фамилия" />
+                </Border>
+                <Border Style="{StaticResource Card}" Padding="14,4">
+                    <Entry x:Name="FirstNameBox" Placeholder="Имя" />
+                </Border>
+                <Border Style="{StaticResource Card}" Padding="14,4">
+                    <Entry x:Name="MiddleNameBox" Placeholder="Отчество" />
+                </Border>
+                <Border Style="{StaticResource Card}" Padding="14,4">
+                    <Entry x:Name="PhoneBox" Placeholder="Телефон" Keyboard="Telephone" />
+                </Border>
+                <Border Style="{StaticResource Card}" Padding="14,4">
+                    <Entry x:Name="EmailBox" Placeholder="Почта" Keyboard="Email" />
+                </Border>
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                    <Border Style="{StaticResource Card}" Padding="14,4">
+                        <Entry x:Name="ZipBox" Placeholder="Индекс" Keyboard="Numeric" />
+                    </Border>
+                    <Border Grid.Column="1" Style="{StaticResource Card}" Padding="14,4">
+                        <Entry x:Name="CountryBox" Placeholder="Страна" />
+                    </Border>
+                </Grid>
+                <Border Style="{StaticResource Card}" Padding="14,4">
+                    <Entry x:Name="CityBox" Placeholder="Город" />
+                </Border>
+                <Border Style="{StaticResource Card}" Padding="14,4">
+                    <Entry x:Name="StreetBox" Placeholder="Улица, дом, квартира" />
+                </Border>
+            </VerticalStackLayout>
+
             <Border Style="{StaticResource Card}">
                 <Editor x:Name="NotesBox" Placeholder="Заметки" AutoSize="TextChanges" MinimumHeightRequest="80" />
             </Border>
