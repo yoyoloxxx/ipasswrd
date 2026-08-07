@@ -413,6 +413,14 @@ public partial class MainWindow
         catch { /* Firefox может быть не установлен — это не повод ломать остальное */ }
     }
 
+    /// <summary>
+    /// Просьба раскрыть настройку расширения сразу, не дожидаясь нажатия «Установить».
+    ///
+    /// Ставится с панели пустого сейфа: человек только что нажал «Настроить расширение», и требовать
+    /// от него второго нажатия на ту же кнопку, уже в другом месте, незачем.
+    /// </summary>
+    private bool _openExtensionSetup;
+
     private Control InstallExtensionRow()
     {
         var sp = new StackPanel();
@@ -507,6 +515,12 @@ public partial class MainWindow
             panel.IsVisible = true;
             toggle.Content = Tr("Скрыть");
         };
+
+        if (_openExtensionSetup)
+        {
+            _openExtensionSetup = false;
+            toggle.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        }
 
         return sp;
     }
