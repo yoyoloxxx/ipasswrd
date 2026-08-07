@@ -157,6 +157,21 @@ public partial class ItemDetailPage : ContentPage
                 AddCopyRow("Выдан", _item.Fields.GetValueOrDefault("issued", ""));
                 AddExtraFields("number", "issued");
                 break;
+            case "identity":
+                // Порядок — как в форме доставки: кто, как связаться, куда везти.
+                AddCopyRow("ФИО", string.Join(" ", new[] { "lastName", "firstName", "middleName" }
+                    .Select(k => _item.Fields.GetValueOrDefault(k, "")).Where(x => x.Length > 0)));
+                AddCopyRow("Телефон", _item.Fields.GetValueOrDefault("phone", ""));
+                AddCopyRow("Почта", _item.Fields.GetValueOrDefault("email", ""));
+                AddCopyRow("Индекс", _item.Fields.GetValueOrDefault("zip", ""));
+                AddCopyRow("Страна", _item.Fields.GetValueOrDefault("country", ""));
+                AddCopyRow("Город", _item.Fields.GetValueOrDefault("city", ""));
+                AddCopyRow("Адрес", _item.Fields.GetValueOrDefault("street", ""));
+                // Чаще всего нужно именно это — вставить адрес целиком в одно поле.
+                AddCopyRow("Адрес одной строкой", string.Join(", ", new[] { "zip", "country", "city", "street" }
+                    .Select(k => _item.Fields.GetValueOrDefault(k, "")).Where(x => x.Length > 0)));
+                AddExtraFields("lastName", "firstName", "middleName", "phone", "email", "zip", "country", "city", "street");
+                break;
             case "passkey":
                 AddCopyRow("Сайт", _item.Fields.GetValueOrDefault("url", ""));
                 AddCopyRow("Логин", _item.Fields.GetValueOrDefault("username", ""));

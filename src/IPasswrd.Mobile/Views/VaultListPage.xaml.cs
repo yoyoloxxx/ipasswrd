@@ -24,7 +24,7 @@ public partial class VaultListPage : ContentPage
     private static readonly (string Key, string Label)[] ChipDefs =
     {
         ("all", "Все"), ("account", "Аккаунты"), ("card", "Карты"),
-        ("doc", "Документы"), ("note", "Заметки"), ("passkey", "Ключи доступа"),
+        ("doc", "Документы"), ("identity", "Личные данные"), ("note", "Заметки"), ("passkey", "Ключи доступа"),
     };
 
     private string _filter = "all";
@@ -203,6 +203,13 @@ public partial class VaultListPage : ContentPage
         AddSingles(rows, entries, "card", "💳",
             it => $"{Fmt.CardBrand(it.Fields.GetValueOrDefault("number", ""))} {Fmt.MaskCard(it.Fields.GetValueOrDefault("number", ""))}".Trim());
         AddSingles(rows, entries, "doc", "📄", it => it.Fields.GetValueOrDefault("number", ""));
+        AddSingles(rows, entries, "identity", "👤", it =>
+        {
+            string phone = it.Fields.GetValueOrDefault("phone", "");
+            if (phone.Length > 0) return phone;
+            string email = it.Fields.GetValueOrDefault("email", "");
+            return email.Length > 0 ? email : it.Fields.GetValueOrDefault("city", "");
+        });
         AddSingles(rows, entries, "note", "🗒", it => it.Notes.Split('\n').FirstOrDefault() ?? "");
 
         var passkeyCards = entries
@@ -258,7 +265,7 @@ public partial class VaultListPage : ContentPage
         };
     }
 
-    private static readonly HashSet<string> KnownTypes = new() { "account", "card", "doc", "note", "passkey" };
+    private static readonly HashSet<string> KnownTypes = new() { "account", "card", "doc", "identity", "note", "passkey" };
 
     private static void AddSingles(List<VaultRow> rows, List<VaultEntry> entries, string? type, string badge, Func<VaultItem, string> subtitleOf)
     {
@@ -305,12 +312,13 @@ public partial class VaultListPage : ContentPage
     private async void OnAdd(object? sender, EventArgs e)
     {
         string? choice = await DisplayActionSheet("Добавить", "Отмена", null,
-            "Аккаунт", "Банковскую карту", "Документ", "Заметку");
+            "Аккаунт", "Банковскую карту", "Документ", "Личные данные", "Заметку");
         string? type = choice switch
         {
             "Аккаунт" => "account",
             "Банковскую карту" => "card",
             "Документ" => "doc",
+            "Личные данные" => "identity",
             "Заметку" => "note",
             _ => null,
         };
