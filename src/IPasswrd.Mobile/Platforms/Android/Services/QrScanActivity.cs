@@ -258,10 +258,23 @@ public class QrScanActivity : AppCompatActivity
                 // Y-плоскость YUV_420_888 — готовый источник яркости для ZXing.
                 // Ширина строки в буфере — rowStride, а не width (бывает выравнивание).
                 int dataWidth = rowStride > 0 ? rowStride : width;
-                if (dataWidth < width || (long)dataWidth * height > bytes.Length) return;
+                if (dataWidth < width || height <= 0) return;
+
+                // ⚠ В буфере последняя строка обрезана: его длина ровно
+                // rowStride*(height-1)+width, а не rowStride*height. Проверять
+                // «>= dataWidth*height» нельзя — так отсеивались бы ВСЕ кадры
+                // и сканер молча ничего не находил. Дополняем нулями до полного
+                // прямоугольника, которого ждёт ZXing.
+                int needed = dataWidth * height;
+                byte[] luminance = bytes;
+                if (bytes.Length < needed)
+                {
+                    luminance = new byte[needed];
+                    Buffer.BlockCopy(bytes, 0, luminance, 0, bytes.Length);
+                }
 
                 var source = new global::ZXing.PlanarYUVLuminanceSource(
-                    bytes, dataWidth, height, 0, 0, width, height, false);
+                    luminance, dataWidth, height, 0, 0, width, height, false);
 
                 ZXingResult? result = _reader.Decode(source);
                 if (result is not null && !string.IsNullOrEmpty(result.Text))

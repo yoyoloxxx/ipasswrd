@@ -62,21 +62,33 @@ internal static class AutofillParser
             PackageName = structure.ActivityComponent?.PackageName,
         };
 
-        var users = new List<AutofillId>();
-        var passwords = new List<AutofillId>();
-        var otps = new List<AutofillId>();
+        // Порядок важен: поля собираем так, как они идут по экрану.
+        var found = new List<(Kind Kind, AutofillId Id)>();
 
         int windows = structure.WindowNodeCount;
         for (int i = 0; i < windows; i++)
         {
             AssistStructure.ViewNode? root = structure.GetWindowNodeAt(i)?.RootViewNode;
-            if (root is not null) Walk(root, f, users, passwords, otps);
+            if (root is not null) Walk(root, f, found);
         }
 
-        // Берём первое поле пароля и ближайший к нему логин (первый из найденных).
-        f.Password = passwords.FirstOrDefault();
-        f.Username = users.FirstOrDefault();
-        f.Otp = otps.FirstOrDefault();
+        int passIndex = found.FindIndex(x => x.Kind == Kind.Password);
+        f.Password = passIndex >= 0 ? found[passIndex].Id : null;
+
+        // Логин — ПОСЛЕДНЕЕ подходящее поле ПЕРЕД паролем. Просто «первое на экране»
+        // не годится: сверху часто висит строка поиска или подписка на рассылку,
+        // и пароль уехал бы не к тому логину.
+        AutofillId? user = null;
+        for (int i = 0; i < found.Count; i++)
+        {
+            if (passIndex >= 0 && i >= passIndex) break;
+            if (found[i].Kind == Kind.Username) user = found[i].Id;
+        }
+        // Пароля на экране нет (или он выше всех логинов) — берём первый логин.
+        user ??= found.FirstOrDefault(x => x.Kind == Kind.Username).Id;
+        f.Username = user;
+
+        f.Otp = found.FirstOrDefault(x => x.Kind == Kind.Otp).Id;
 
         // Форма только с кодом (второй шаг входа) — логин туда подставлять не надо.
         if (f.Password is null && f.Otp is not null) f.Username = null;
@@ -122,7 +134,7 @@ internal static class AutofillParser
     }
 
     private static void Walk(AssistStructure.ViewNode node, AutofillFields f,
-        List<AutofillId> users, List<AutofillId> passwords, List<AutofillId> otps)
+        List<(Kind Kind, AutofillId Id)> found)
     {
         try
         {
@@ -133,12 +145,7 @@ internal static class AutofillParser
             if (id is not null && node.AutofillType == AutofillType.Text)
             {
                 Kind kind = Classify(node);
-                switch (kind)
-                {
-                    case Kind.Password: passwords.Add(id); break;
-                    case Kind.Username: users.Add(id); break;
-                    case Kind.Otp: otps.Add(id); break;
-                }
+                if (kind != Kind.None) found.Add((kind, id));
             }
         }
         catch (Exception) { /* один битый узел не должен ронять разбор */ }
@@ -147,7 +154,7 @@ internal static class AutofillParser
         for (int i = 0; i < count; i++)
         {
             AssistStructure.ViewNode? child = node.GetChildAt(i);
-            if (child is not null) Walk(child, f, users, passwords, otps);
+            if (child is not null) Walk(child, f, found);
         }
     }
 

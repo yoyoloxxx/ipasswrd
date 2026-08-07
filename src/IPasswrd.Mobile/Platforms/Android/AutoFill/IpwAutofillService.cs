@@ -112,10 +112,12 @@ public class IpwAutofillService : AutofillService
         if (fields.Otp is not null && !string.IsNullOrEmpty(code)) subtitle += " · код " + code;
 
         var ds = new Dataset.Builder(Presentation(c.Title, subtitle));
-        // Пустые значения тоже проставляем — иначе система оставит поле нетронутым,
-        // но хотя бы одно значение обязано быть непустым (проверено выше).
-        if (fields.Username is not null) ds.SetValue(fields.Username, AutofillValue.ForText(login));
-        if (fields.Password is not null) ds.SetValue(fields.Password, AutofillValue.ForText(password));
+        // Пустые значения НЕ проставляем: иначе запись без логина стёрла бы то,
+        // что человек уже набрал руками. Что хотя бы одно значение непустое — проверено выше.
+        if (fields.Username is not null && login.Length > 0)
+            ds.SetValue(fields.Username, AutofillValue.ForText(login));
+        if (fields.Password is not null && password.Length > 0)
+            ds.SetValue(fields.Password, AutofillValue.ForText(password));
         if (fields.Otp is not null && !string.IsNullOrEmpty(code))
             ds.SetValue(fields.Otp, AutofillValue.ForText(code));
 
