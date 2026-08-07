@@ -285,6 +285,12 @@ public partial class MainWindow
     private const string NativeHostName = "com.yoyoloxxx.ipasswrd";
 
     /// <summary>
+    /// Постоянный id расширения в Firefox. Там манифест нативного хоста перечисляет расширения
+    /// по id (allowed_extensions), а не по origin, и ключа в манифесте расширения у него нет.
+    /// </summary>
+    private const string FirefoxExtensionId = "ipasswrd@yoyoloxxx.dev";
+
+    /// <summary>
     /// Every extension identity this app answers to. The settings override exists so a build
     /// can be pointed at a freshly uploaded draft without waiting for a new release.
     /// </summary>
@@ -375,7 +381,36 @@ public partial class MainWindow
             }
             catch { /* a browser family that isn't installed still gets its key attempted; ignore failures */ }
         }
+
+        RegisterFirefoxHost(hostExe, dir);
         return manifestPath;
+    }
+
+    /// <summary>
+    /// Тот же хост, но по-лисичьи. Firefox читает свою ветку реестра и ждёт в манифесте
+    /// allowed_extensions со своими id вида name@domain — chrome-extension://… там не понимают, и общий
+    /// файл на два браузера не сделать. Пишется всегда: лишний файл рядом с приложением дешевле,
+    /// чем угадывание, установлен ли Firefox.
+    /// </summary>
+    private static void RegisterFirefoxHost(string hostExe, string dir)
+    {
+        try
+        {
+            string path = Path.Combine(dir, NativeHostName + ".firefox.json");
+            var manifest = new Dictionary<string, object>
+            {
+                ["name"] = NativeHostName,
+                ["description"] = "IPasswrd browser bridge",
+                ["path"] = hostExe,
+                ["type"] = "stdio",
+                ["allowed_extensions"] = new[] { FirefoxExtensionId },
+            };
+            File.WriteAllText(path, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+
+            using var key = Registry.CurrentUser.CreateSubKey(@"Software\Mozilla\NativeMessagingHosts\" + NativeHostName);
+            key?.SetValue(null, path);
+        }
+        catch { /* Firefox может быть не установлен — это не повод ломать остальное */ }
     }
 
     private Control InstallExtensionRow()

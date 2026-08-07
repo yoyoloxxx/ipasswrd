@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "IPasswrd",
+  "version": "1.0.1",
+  "description": "Автозаполнение, ключи доступа (passkey) и сохранение паролей из сейфа IPasswrd",
+
+  "_comment_background": "Firefox в MV3 не поддерживает service_worker — фоновая часть остаётся страницей событий. Код bg.js один и тот же: он не пользуется ничем, что есть только у воркера.",
+  "_comment_min_version": "128 — версия, с которой Firefox умеет world: MAIN для content-скриптов. Без неё inject.js не увидит страницу так, как ему нужно для ключей доступа.",
+  "_comment_id": "Постоянный id нужен нативному хосту: в Firefox манифест хоста перечисляет расширения по id, а не по origin.",
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ipasswrd@yoyoloxxx.dev",
+      "strict_min_version": "128.0"
+    }
+  },
+
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_title": "IPasswrd",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png"
+    }
+  },
+  "background": {
+    "scripts": ["bg.js"]
+  },
+  "permissions": [
+    "nativeMessaging",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "inject.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
