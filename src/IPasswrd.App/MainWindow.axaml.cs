@@ -575,7 +575,15 @@ public partial class MainWindow : Window
         if (_vault is null) return;
         try
         {
-            var item = new VaultItem { Type = "meta", Title = "prefs" };
+            // Запись настроек переписывается при каждом чихе — смена темы, переименование сайта, любая
+            // настройка. Если собирать её с нуля, то старая версия программы будет стирать настройки,
+            // заведённые новой, при первом же переключении темы — и разошлёт потерю по всем
+            // устройствам. Поэтому берём ту, что лежит, и меняем в ней только своё.
+            VaultItem item;
+            try { item = _vault.Get(PrefsRecordId); }
+            catch { item = new VaultItem(); }
+            item.Type = "meta";
+            item.Title = "prefs";
             item.Fields["siteNames"] = JsonSerializer.Serialize(_siteNames);
             item.Fields["keepAsIs"] = JsonSerializer.Serialize(_keepAsIs.ToList());
             _vault.Put(PrefsRecordId, item);
@@ -1947,8 +1955,15 @@ public partial class MainWindow : Window
         if (item.Favorite) star.Content = MakeIcon(IconData("star"), 16, Accent, 1.5, fill: Accent);   // filled star when favorited
         star.Click += (_, _) =>
         {
-            item.Favorite = !item.Favorite;
-            _vault!.Update(id, item);
+            // Берём запись заново, а не ту, что была на экране при отрисовке. Между открытием
+            // карточки и нажатием звёздочки запись может обновиться — синхронизацией или расширением
+            // браузера, сохранившим новый пароль. Запись целиком из старого снимка вернула бы
+            // старый пароль — из-за нажатия на звёздочку.
+            VaultItem fresh;
+            try { fresh = _vault!.Get(id); }
+            catch { return; }
+            fresh.Favorite = !fresh.Favorite;
+            _vault!.Update(id, fresh);
             Save();
             LoadEntries(selectFirst: false);
             var again = (EntryList.ItemsSource as IEnumerable<EntryRow>)?.FirstOrDefault(r => r.Id == id);
@@ -1957,7 +1972,9 @@ public partial class MainWindow : Window
         };
 
         var edit = IconButton("edit", Text2, "Изменить", 16);
-        edit.Click += (_, _) => OpenEditor(item, id);
+        // Запись берётся заново: именно из неё FormEdit.Carry потом достанет вложения и звёздочку,
+        // и старый снимок перенёс бы старое поверх нового.
+        edit.Click += (_, _) => { try { OpenEditor(_vault!.Get(id), id); } catch { /* запись могла исчезнуть */ } };
 
         var trash = IconButton("trash", Text2, "Удалить", 16);
         bool confirm = false;
@@ -2850,9 +2867,14 @@ public partial class MainWindow : Window
             int at = url.IndexOf("://");
             string scheme = at >= 0 ? url[..(at + 3)] : "";
             string newUrl = scheme + reg;
-            item.Fields["url"] = newUrl;
-            item.Title = DeriveTitle(newUrl, item.Fields.GetValueOrDefault("username", ""));   // the record's own site title follows the new 2nd-level domain
-            _vault!.Update(id, item);
+            // Тот же случай, что со звёздочкой: пишем поверх нынешней записи, а не поверх той,
+            // которую нарисовали несколько минут назад.
+            VaultItem fresh;
+            try { fresh = _vault!.Get(id); }
+            catch { return; }
+            fresh.Fields["url"] = newUrl;
+            fresh.Title = DeriveTitle(newUrl, fresh.Fields.GetValueOrDefault("username", ""));   // the record's own site title follows the new 2nd-level domain
+            _vault!.Update(id, fresh);
             Save();
             LoadEntries(selectFirst: false);   // regroup: the record moves to the 2nd-level-domain tile, name updates to the new site
             var again = (EntryList.ItemsSource as IEnumerable<EntryRow>)?.FirstOrDefault(r => r.Ids.Contains(id) || r.Id == id);
@@ -3514,9 +3536,22 @@ public partial class MainWindow : Window
                  : !string.IsNullOrWhiteSpace(cfg.Account) ? cfg.Account : "Код проверки";
         if (string.IsNullOrWhiteSpace(account)) account = cfg.Account;
 
-        var item = new VaultItem { Type = "totp", Title = name };
+        // Форма кода знает три поля, а запись может знать больше — хотя бы поля, записанные более
+        // новой версией программы. Собирать её заново — тот же тихий снос, что был в редакторе
+        // записей; на телефоне аутентификатор давно делает правильно — берёт запись и правит её.
+        VaultItem item;
+        if (_authEditId is not null)
+        {
+            try { item = _vault.Get(_authEditId); }
+            catch { item = new VaultItem { Type = "totp" }; }   // запись могла исчезнуть во время правки
+        }
+        else item = new VaultItem { Type = "totp" };
+
+        item.Type = "totp";
+        item.Title = name;
         item.Fields["totp"] = secret;
         if (!string.IsNullOrWhiteSpace(account)) item.Fields["username"] = account;
+        else item.Fields.Remove("username");   // очищенное поле значит «убрать», а не «оставить как было»
         try
         {
             if (_authEditId is not null) _vault.Update(_authEditId, item);   // editing an existing code
