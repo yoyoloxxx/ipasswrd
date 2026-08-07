@@ -16,12 +16,15 @@ public sealed class BiometricAndroid : IBiometricAuth
     // BIOMETRIC_WEAK, а не STRONG: на многих телефонах разблокировка лицом проходит только
     // как «weak». Ключ быстрой разблокировки всё равно лежит в Keystore, а не за биометрией.
     private static readonly int Weak = BiometricManager.Authenticators.BiometricWeak;
+    private static readonly int Strong = BiometricManager.Authenticators.BiometricStrong;
     private static readonly int DeviceCredential = BiometricManager.Authenticators.DeviceCredential;
 
     private static int AllowedAuthenticators =>
         // Android 11+ умеет комбинацию «биометрия ИЛИ код устройства».
-        // На 8.0-10 такая комбинация не поддерживается в canAuthenticate — только биометрия.
-        Build.VERSION.SdkInt >= BuildVersionCodes.R ? Weak | DeviceCredential : Weak;
+        // ⚠ На 8.0-10 (API 26-29) androidx.biometric на запрос WEAK отвечает
+        // BIOMETRIC_ERROR_UNSUPPORTED — из-за этого кнопка отпечатка вообще не
+        // появлялась. Там спрашиваем STRONG (отпечаток и есть strong).
+        Build.VERSION.SdkInt >= BuildVersionCodes.R ? Weak | DeviceCredential : Strong;
 
     public bool IsAvailable
     {

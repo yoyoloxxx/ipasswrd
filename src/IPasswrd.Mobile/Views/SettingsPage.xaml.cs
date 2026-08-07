@@ -43,7 +43,14 @@ public partial class SettingsPage : ContentPage
         bool google = IPasswrd.Mobile.Services.GoogleDrive.IsConnected;
         bool icloud = Svc.External.IsConnected;
         bool connected = google || icloud;
-        SyncTitle.Text = google ? "Google Drive" : icloud ? "iCloud Drive" : "Локальный сейф";
+        bool iosDevice = DeviceInfo.Platform == DevicePlatform.iOS;
+        SyncTitle.Text = google ? "Google Диск"
+            : icloud ? (iosDevice ? "iCloud Drive" : (Svc.External.DisplayName ?? "Внешний файл"))
+            : "Локальный сейф";
+        SyncConnectButton.Text = iosDevice ? "Выбрать файл сейфа в iCloud…" : "Выбрать файл сейфа…";
+        SyncHint.Text = iosDevice
+            ? "Вход через Google — тот же Google Диск, что на Windows. Либо выберите файл в iCloud Drive. Изменения объединяются поэлементно."
+            : "Вход через Google — тот же Google Диск, что на Windows (папка IPasswrd, файл vault.ipvault). Изменения объединяются поэлементно.";
         SyncSub.Text = google
             ? (Svc.State.LastSyncStatus ?? IPasswrd.Mobile.Services.GoogleDrive.Email ?? "вход выполнен")
             : icloud
@@ -133,7 +140,7 @@ public partial class SettingsPage : ContentPage
                 {
                     Svc.External.Disconnect();
                     await DisplayAlert("Это другой сейф",
-                        "В iCloud уже лежит другой сейф. Сначала решите, какой оставить: экспортируйте нужный и подключите его на обоих устройствах.", "Ок");
+                        "В выбранном файле — другой сейф. Сначала решите, какой оставить: экспортируйте нужный и подключите его на обоих устройствах.", "Ок");
                     Refresh();
                     return;
                 }
@@ -173,6 +180,7 @@ public partial class SettingsPage : ContentPage
         }
         catch (Exception ex)
         {
+            Console.WriteLine("[IPW] google connect failed: " + ex);
             Svc.State.DisconnectGoogle();
             string msg = ex.Message.Contains("client_not_configured")
                 ? "Google-вход ещё не настроен в этой сборке."
@@ -206,7 +214,9 @@ public partial class SettingsPage : ContentPage
         bool ok = await Svc.External.ExportCopyAsync(v.Serialize(), AppState.VaultFileName);
         if (ok)
             await DisplayAlert("Готово",
-                "Копия сейфа выгружена. Чтобы Windows видел её, положите файл в iCloud Drive → IPasswrd с именем vault.ipvault.", "Ок");
+                DeviceInfo.Platform == DevicePlatform.iOS
+                    ? "Копия сейфа выгружена. Чтобы Windows видел её, положите файл в iCloud Drive → IPasswrd с именем vault.ipvault."
+                    : "Копия сейфа выгружена. Это просто запасная копия: для синхронизации с Windows используйте вход через Google.", "Ок");
     }
 
     // ================= сейф =================

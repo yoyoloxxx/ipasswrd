@@ -138,8 +138,9 @@ public partial class UnlockPage : ContentPage
                           "Если сейф уже есть на ПК, включите там: Настройки → Синхронизация → Google Диск.");
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.WriteLine("[IPW] google sign-in failed: " + ex);
             ShowError("Вход в Google не удался или был отменён. Попробуйте ещё раз.");
         }
         finally { SetBusy(false); }
