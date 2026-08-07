@@ -261,10 +261,11 @@ public partial class MainWindow
         catch { return ""; }
     }
 
-    // Cards and documents for the in-field picker (not site-specific). Only while unlocked.
+    // Cards, documents and personal details for the in-field picker (not site-specific).
+    // Only while unlocked.
     private string BridgeList()
     {
-        if (_vault is null) return Resp(new { ok = true, unlocked = false, cards = Array.Empty<object>(), docs = Array.Empty<object>() });
+        if (_vault is null) return Resp(new { ok = true, unlocked = false, cards = Array.Empty<object>(), docs = Array.Empty<object>(), ids = Array.Empty<object>() });
         var cards = _vault.Items().Where(x => x.Item.Type == "card").Select(x => new
         {
             id = x.Id,
@@ -281,7 +282,21 @@ public partial class MainWindow
             number = x.Item.Fields.GetValueOrDefault("number", ""),
             issued = x.Item.Fields.GetValueOrDefault("issued", ""),
         }).ToList();
-        return Resp(new { ok = true, unlocked = true, cards, docs });
+        var ids = _vault.Items().Where(x => x.Item.Type == "identity").Select(x => new
+        {
+            id = x.Id,
+            title = x.Item.Title,
+            lastName = x.Item.Fields.GetValueOrDefault("lastName", ""),
+            firstName = x.Item.Fields.GetValueOrDefault("firstName", ""),
+            middleName = x.Item.Fields.GetValueOrDefault("middleName", ""),
+            phone = x.Item.Fields.GetValueOrDefault("phone", ""),
+            email = x.Item.Fields.GetValueOrDefault("email", ""),
+            zip = x.Item.Fields.GetValueOrDefault("zip", ""),
+            country = x.Item.Fields.GetValueOrDefault("country", ""),
+            city = x.Item.Fields.GetValueOrDefault("city", ""),
+            street = x.Item.Fields.GetValueOrDefault("street", ""),
+        }).ToList();
+        return Resp(new { ok = true, unlocked = true, cards, docs, ids });
     }
 
     // Unlock the vault with the master password typed in the BROWSER (extension popup /

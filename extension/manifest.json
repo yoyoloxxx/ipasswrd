@@ -2,7 +2,7 @@
   "commands": { "reload-ext": { "suggested_key": { "default": "Ctrl+Shift+9" }, "description": "IPasswrd: reload extension (dev)" } },
   "manifest_version": 3,
   "name": "IPasswrd",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Автозаполнение, ключи доступа (passkey) и сохранение паролей из сейфа IPasswrd",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjUtLDbYUs8h2gNE07oM/H00G+mrABFPVOuI7jKoH1e764fXNfsExNybugHk+Fedj38TESJOvn5o6Wyp44x0P1wDoZFaN4hdSUwiUy6UkAgcf/qvVqCtYY504Km5OFtWfqJ/xotjYMSOPiLhifrWVP0uo3YfM4wF5C27jjn7wXzKMdhT7LIZ5xKVitH4+awE4uN8lGKyLIdpthqCWLDaPipGKHDJt4vtstOi6lExA+JlqlZTF2dvDyPVzIbmTxIA8FFzE80kDKwpAvy9glWfFNNOYrPHOnlSNrTCBD3gzNrDCWHhcpxh7GPzlZNkitgD5xTpK2/+GatFFMXuRUGASEwIDAQAB",
   "icons": {

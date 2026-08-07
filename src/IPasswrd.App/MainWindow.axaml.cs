@@ -83,6 +83,13 @@ public partial class MainWindow : Window
         ["Аутентификатор"] = "Authenticator", ["Генератор"] = "Generator", ["Проверка"] = "Security", ["Настройки"] = "Settings",
         ["Локальный сейф"] = "Local storage", ["без синхронизации"] = "no sync",
         ["Импорт из файла"] = "Import from file", ["Заблокировать"] = "Lock",
+        ["Личные данные"] = "Personal details", ["ФИО"] = "Full name", ["Фамилия"] = "Last name",
+        ["Имя"] = "First name", ["Отчество"] = "Middle name", ["Телефон"] = "Phone", ["Почта"] = "Email",
+        ["Индекс"] = "Postcode", ["Страна"] = "Country", ["Город"] = "City", ["Адрес"] = "Address",
+        ["Адрес одной строкой"] = "Address in one line",
+        ["Необязательно — иначе соберём из имени"] = "Optional — otherwise built from the name",
+        ["Улица, дом, квартира — одной строкой, как в форме доставки"]
+            = "Street, building, flat — one line, the way a delivery form asks",
         ["Выгрузить"] = "Export", ["Резервная копия сейфа или CSV для переезда в другой менеджер"]
             = "An encrypted vault backup, or a CSV for moving to another manager",
         ["Сохранить…"] = "Save…", ["Резервная копия сейфа"] = "Encrypted vault backup",
@@ -366,6 +373,7 @@ public partial class MainWindow : Window
         ("Карты",             "card",    "card"),
         ("Документы",         "doc",     "doc"),
         ("Заметки",           "note",    "note"),
+        ("Личные данные",     "identity", "user"),
         ("Ключи доступа",     "passkey", "passkey"),
     };
 
@@ -1877,6 +1885,7 @@ public partial class MainWindow : Window
         {
             case "card":    BuildCardDetail(wrap, item); break;
             case "doc":     BuildDocDetail(wrap, item); break;
+            case "identity": BuildIdentityDetail(wrap, item); break;
             case "note":    BuildNoteDetail(wrap, item); break;
             case "passkey": BuildPasskeyDetail(wrap, item); break;
             default:        BuildAccountDetail(wrap, item, id); break;
@@ -2465,6 +2474,57 @@ public partial class MainWindow : Window
 
         wrap.Children.Add(Margined(FGroup(rows), 22));
     }
+
+    /// <summary>
+    /// Порядок полей — как в форме доставки, а не как в паспорте: ФИО, связь, потом адрес.
+    /// Ничего не прячется под точками: имя и город не секрет, а прятать их значило бы делать
+    /// вид, что запись опаснее, чем она есть.
+    /// </summary>
+    private void BuildIdentityDetail(StackPanel wrap, VaultItem item)
+    {
+        var rows = new List<Control>();
+
+        void Row(string label, string key)
+        {
+            string v = item.Fields.GetValueOrDefault(key, "");
+            if (v.Length == 0) return;
+            rows.Add(FRow(label,
+                new TextBlock { Text = v, Foreground = Text, FontSize = 13.5, TextWrapping = TextWrapping.Wrap },
+                Actions(CopyButton(v))));
+        }
+
+        string fio = string.Join(" ", new[] { "lastName", "firstName", "middleName" }
+            .Select(k => item.Fields.GetValueOrDefault(k, ""))
+            .Where(x => x.Length > 0));
+        if (fio.Length > 0)
+            rows.Add(FRow(Tr("ФИО"),
+                new TextBlock { Text = fio, Foreground = Text, FontSize = 13.5, TextWrapping = TextWrapping.Wrap },
+                Actions(CopyButton(fio))));
+
+        Row(Tr("Телефон"), "phone");
+        Row(Tr("Почта"), "email");
+        Row(Tr("Индекс"), "zip");
+        Row(Tr("Страна"), "country");
+        Row(Tr("Город"), "city");
+        Row(Tr("Адрес"), "street");
+
+        // Целиком одной строкой — то, что чаще всего нужно вставить в поле «адрес доставки».
+        string full = string.Join(", ", new[] { "zip", "country", "city", "street" }
+            .Select(k => item.Fields.GetValueOrDefault(k, ""))
+            .Where(x => x.Length > 0));
+        if (full.Length > 0)
+            rows.Add(FRow(Tr("Адрес одной строкой"),
+                new TextBlock { Text = full, Foreground = Text2, FontSize = 13, TextWrapping = TextWrapping.Wrap },
+                Actions(CopyButton(full))));
+
+        if (rows.Count > 0) wrap.Children.Add(Margined(FGroup(rows), 22));
+    }
+
+    /// <summary>Поля личных данных в том порядке, в каком их спрашивает форма доставки.</summary>
+    private static readonly string[] IdentityFields =
+    {
+        "lastName", "firstName", "middleName", "phone", "email", "zip", "country", "city", "street",
+    };
 
     private void BuildNoteDetail(StackPanel wrap, VaultItem item)
     {
@@ -4092,7 +4152,7 @@ public partial class MainWindow : Window
     {
         // On a specific section tab the "+" creates that type directly;
         // only "Все записи" offers the pick-a-type menu.
-        if (_toolMode is null && _section is "account" or "passkey" or "card" or "doc" or "note")
+        if (_toolMode is null && _section is "account" or "passkey" or "card" or "doc" or "note" or "identity")
         {
             OpenEditor(null, null, _section);
             return;
@@ -4104,6 +4164,7 @@ public partial class MainWindow : Window
             ("Аккаунт", "account", "key"),
             ("Карта", "card", "card"),
             ("Документ", "doc", "doc"),
+            ("Личные данные", "identity", "user"),
             ("Заметка", "note", "note"),
         })
         {
@@ -4158,6 +4219,20 @@ public partial class MainWindow : Window
                 AddField("title", "Название", existing?.Title ?? titleText);
                 AddField("number", "Серия и номер", existing?.Fields.GetValueOrDefault("number"));
                 AddField("issued", "Кем выдан", existing?.Fields.GetValueOrDefault("issued"));
+                break;
+            case "identity":
+                AddField("title", "Название", existing?.Title ?? titleText,
+                    watermark: "Необязательно — иначе соберём из имени");
+                AddField("lastName", "Фамилия", existing?.Fields.GetValueOrDefault("lastName"));
+                AddField("firstName", "Имя", existing?.Fields.GetValueOrDefault("firstName"));
+                AddField("middleName", "Отчество", existing?.Fields.GetValueOrDefault("middleName"));
+                AddField("phone", "Телефон", existing?.Fields.GetValueOrDefault("phone"));
+                AddField("email", "Почта", existing?.Fields.GetValueOrDefault("email"));
+                AddField("zip", "Индекс", existing?.Fields.GetValueOrDefault("zip"));
+                AddField("country", "Страна", existing?.Fields.GetValueOrDefault("country"));
+                AddField("city", "Город", existing?.Fields.GetValueOrDefault("city"));
+                AddField("street", "Адрес", existing?.Fields.GetValueOrDefault("street"),
+                    watermark: "Улица, дом, квартира — одной строкой, как в форме доставки");
                 break;
             case "note":
                 AddField("title", "Название", existing?.Title ?? titleText);
@@ -4313,7 +4388,7 @@ public partial class MainWindow : Window
     private Control SegType(VaultItem? existing)
     {
         var row = new WrapPanel { Orientation = Orientation.Horizontal };
-        foreach (var (label, type) in new[] { ("Аккаунт", "account"), ("Карта", "card"), ("Документ", "doc"), ("Заметка", "note") })
+        foreach (var (label, type) in new[] { ("Аккаунт", "account"), ("Карта", "card"), ("Документ", "doc"), ("Личные данные", "identity"), ("Заметка", "note") })
         {
             bool active = _editType == type;
             var b = new Button
@@ -4378,6 +4453,14 @@ public partial class MainWindow : Window
                 break;
             case "doc":
                 SetIf(item, "number", Get("number")); SetIf(item, "issued", Get("issued"));
+                break;
+            case "identity":
+                foreach (string k in IdentityFields)
+                    SetIf(item, k, Get(k));
+                // Человек заполняет ФИО, а не «название записи» — соберём его сами, если поле пустое.
+                string fio = string.Join(" ", new[] { Get("lastName"), Get("firstName"), Get("middleName") }
+                    .Where(x => x.Length > 0));
+                if (Get("title").Length == 0 && fio.Length > 0) item.Title = fio;
                 break;
             case "note":
                 break;
@@ -4561,9 +4644,13 @@ public partial class MainWindow : Window
     private static string Subtitle(VaultItem it) => it.Type switch
     {
         "account" => it.Fields.TryGetValue("username", out var u) ? u : "",
+        "user"    => "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20.4c1-4 4.3-6.4 8-6.4s7 2.4 8 6.4",
         "passkey" => it.Fields.TryGetValue("username", out var pu) ? pu : "",
         "card" => it.Fields.TryGetValue("number", out var n) && n.Length >= 4 ? "•••• " + LastDigits(n, 4) : "карта",
         "doc" => it.Fields.TryGetValue("number", out var d) ? d : "документ",
+        "identity" => it.Fields.TryGetValue("phone", out var ph) && ph.Length > 0 ? ph
+            : it.Fields.TryGetValue("email", out var em) && em.Length > 0 ? em
+            : it.Fields.GetValueOrDefault("city", ""),
         "note" => (it.Notes ?? "").Split('\n')[0],
         _ => "",
     };
@@ -4571,7 +4658,7 @@ public partial class MainWindow : Window
     private static string TypeLabel(string t) => t switch
     {
         "account" => "Аккаунт", "passkey" => "Ключ доступа", "card" => "Карта",
-        "doc" => "Документ", "note" => "Заметка", _ => t,
+        "doc" => "Документ", "note" => "Заметка", "identity" => "Личные данные", _ => t,
     };
 
     /// <summary>Name an account/passkey after its site (host only), falling back to the username.</summary>
