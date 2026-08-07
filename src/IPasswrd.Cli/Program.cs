@@ -36,6 +36,7 @@ internal static class Program
                 "init" => CmdInit(args),
                 "add" => CmdAdd(args),
                 "list" or "ls" => CmdList(),
+                "find" or "search" => CmdFind(args),
                 "get" or "show" => CmdGet(args),
                 "del" or "delete" or "rm" => CmdDel(args),
                 "edit" or "set" => CmdEdit(args),
@@ -190,6 +191,35 @@ internal static class Program
             Console.WriteLine($"  {Short(e.Id)}  {Pad(e.Item.Title, 24)}  {user}");
         }
         Console.WriteLine($"\n{items.Count} {Plural(items.Count)}.");
+        return 0;
+    }
+
+    /// <summary>
+    /// Поиск тем же правилом, что в окне на компьютере и в списке на телефоне, — <see cref="ItemSearch"/>.
+    ///
+    /// Расширен только «найди». get, del и edit по-прежнему разбирают запрос через FindOne — по
+    /// началу id или по названию. То, что молча берёт первую подходящую запись и удаляет её, расширять
+    /// нельзя: «del иванов» не должно вдруг начать попадать в карту, где Иванов — держатель.
+    /// </summary>
+    private static int CmdFind(string[] args)
+    {
+        if (args.Length < 2) { Console.Error.WriteLine("Использование: ipasswrd find <запрос>"); return 1; }
+        string q = string.Join(' ', args.Skip(1));
+
+        Vault v = Unlock();
+        var hits = v.Items()
+            .Where(e => ItemSearch.Matches(e.Item, q))
+            .OrderBy(e => e.Item.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (hits.Count == 0) { Console.WriteLine("Ничего не найдено."); return 1; }
+
+        Console.WriteLine();
+        foreach (var e in hits)
+        {
+            string user = e.Item.Fields.TryGetValue("username", out var u) ? u : "";
+            Console.WriteLine($"  {Short(e.Id)}  {Pad(e.Item.Title, 24)}  {user}");
+        }
+        Console.WriteLine($"\n{hits.Count} {Plural(hits.Count)}.");
         return 0;
     }
 
@@ -456,6 +486,7 @@ IPasswrd — консольный доступ к зашифрованному �
   ipasswrd init                создать новый сейф (спросит мастер-пароль)
   ipasswrd add [card|note|doc] добавить запись (по умолчанию аккаунт)
   ipasswrd list                показать все записи
+  ipasswrd find <запрос>       найти записи по любому полю (кроме пароля и CVC)
   ipasswrd get  <id|название>  показать запись (--show раскрывает пароль)
   ipasswrd del  <id|название>  удалить запись
   ipasswrd edit <id|название> <поле> <значение>   изменить поле записи
