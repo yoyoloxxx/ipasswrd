@@ -123,7 +123,11 @@ public static class GoogleDrive
         var root = doc.RootElement;
         _accessToken = root.GetProperty("access_token").GetString() ?? "";
         _accessExpiry = DateTimeOffset.UtcNow.AddSeconds(root.TryGetProperty("expires_in", out var ex) ? ex.GetInt32() : 3000);
-        if (root.TryGetProperty("refresh_token", out var rt)) StoreRefresh(rt.GetString());
+        bool gotRefresh = root.TryGetProperty("refresh_token", out var rt);
+        Console.WriteLine("[IPW] token response: access=" + (_accessToken.Length > 0)
+            + " refresh_present=" + gotRefresh);
+        if (gotRefresh) StoreRefresh(rt.GetString());
+        Console.WriteLine("[IPW] refresh stored, load-back bytes=" + (LoadRefresh()?.Length ?? -1));
         if (!IsConnected) throw new InvalidOperationException("no_refresh_token");
 
         try { Email = await FetchEmailAsync(); } catch { /* только для показа */ }

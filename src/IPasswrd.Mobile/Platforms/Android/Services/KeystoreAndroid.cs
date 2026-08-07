@@ -62,8 +62,9 @@ public sealed class KeystoreAndroid : ISecureKeyStore
             gen.Init(spec);
             return gen.GenerateKey();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.WriteLine("[IPW] keystore EnsureKey failed: " + ex);
             return null;
         }
     }
@@ -94,10 +95,13 @@ public sealed class KeystoreAndroid : ISecureKeyStore
                 ISharedPreferencesEditor? ed = prefs.Edit();
                 if (ed is null) return false;
                 ed.PutString(Key(name), Convert.ToBase64String(blob));
-                return ed.Commit();
+                bool ok = ed.Commit();
+                if (!ok) Console.WriteLine("[IPW] keystore Save: prefs commit=false for " + name);
+                return ok;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine("[IPW] keystore Save failed for " + name + ": " + ex);
                 return false;
             }
         }
@@ -130,10 +134,11 @@ public sealed class KeystoreAndroid : ISecureKeyStore
                 cipher.Init(CipherMode.DecryptMode, key, new GCMParameterSpec(GcmTagBits, iv));
                 return cipher.DoFinal(ct);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // ключ Keystore мог быть сброшен (смена блокировки экрана, сброс биометрии) —
                 // тогда быстрая разблокировка просто перестаёт работать и просит мастер-пароль
+                Console.WriteLine("[IPW] keystore Load failed for " + name + ": " + ex);
                 return null;
             }
         }
