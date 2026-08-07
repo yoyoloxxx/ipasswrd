@@ -45,6 +45,7 @@ public partial class UnlockPage : ContentPage
 
         BiometricButton.Text = Svc.Biometric.Kind;
         BiometricButton.IsVisible = !_creating && Svc.State.QuickUnlockAvailable;
+        ForgotButton.IsVisible = !_creating && Svc.State.RecoveryAvailableForLocalVault;
 
         StorageHint.Text = GoogleDrive.IsConnected
             ? $"Сейф: Google Диск{(GoogleDrive.Email is { Length: > 0 } em ? $" ({em})" : "")} — общий с Windows"
@@ -84,7 +85,12 @@ public partial class UnlockPage : ContentPage
             if (pw != (ConfirmBox.Text ?? "")) { ShowError("Пароли не совпадают."); return; }
 
             SetBusy(true);
-            try { await Svc.State.CreateAsync(pw); }
+            try
+            {
+                await Svc.State.CreateVaultCoreAsync(pw);   // сейф создан, экран пока не переключаем
+                await OfferRecoveryOnCreateAsync();         // предложить код восстановления
+                Svc.State.ActivateAfterCreate();            // теперь перейти в сейф
+            }
             catch (Exception) { ShowError("Не удалось создать сейф."); }
             finally { SetBusy(false); }
             return;
@@ -144,6 +150,39 @@ public partial class UnlockPage : ContentPage
             ShowError("Вход в Google не удался или был отменён. Попробуйте ещё раз.");
         }
         finally { SetBusy(false); }
+    }
+
+    private async Task OfferRecoveryOnCreateAsync()
+    {
+        bool make = await DisplayAlert("Код восстановления",
+            "Создать код восстановления? Он откроет сейф, если вы забудете мастер-пароль. " +
+            "Без него забытый пароль означает потерю сейфа.", "Создать", "Позже");
+        if (!make) return;
+
+        string? code = await Svc.State.EnableRecoveryAsync();
+        if (!string.IsNullOrEmpty(code)) await ShowRecoveryCodeAsync(code!);
+    }
+
+    private async Task ShowRecoveryCodeAsync(string code)
+    {
+        string pretty = IPasswrd.Core.RecoveryCode.Format(IPasswrd.Core.RecoveryCode.Normalize(code) ?? code);
+        while (true)
+        {
+            string action = await DisplayActionSheet(
+                "Ваш код восстановления:\n\n" + pretty + "\n\nЗапишите его — второй раз он не покажется.",
+                "Я записал(а)", null, "Скопировать");
+            if (action == "Скопировать")
+            {
+                await Clipboard.Default.SetTextAsync(pretty);
+                continue;
+            }
+            return;
+        }
+    }
+
+    private async void OnForgotPassword(object? sender, EventArgs e)
+    {
+        await Navigation.PushAsync(new RecoverPage());
     }
 
     private async void OnConnectExisting(object? sender, EventArgs e)

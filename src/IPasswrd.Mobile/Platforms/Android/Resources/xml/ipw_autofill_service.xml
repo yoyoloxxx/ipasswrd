@@ -1,4 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Описание службы автозаполнения. Пустой элемент допустим: экран настроек службы
-     открывается самим приложением (Настройки → Автозаполнение). -->
-<autofill-service xmlns:android="http://schemas.android.com/apk/res/android" />
+<!-- Служба автозаполнения IPasswrd.
+     Экран настроек службы открывается самим приложением (Настройки → Автозаполнение).
+
+     compatibility-package — режим совместимости для браузеров, которые НЕ отдают
+     веб-формы системному автозаполнению напрямую (Chrome это умеет и здесь не нужен,
+     а Яндекс.Браузер, Firefox, Opera, Huawei-браузер — нет). В этом режиме система
+     сама достаёт адрес из строки браузера и передаёт нам виртуальную структуру,
+     так что подсказки появляются и там. maxLongVersionCode большой — на все версии. -->
+<autofill-service xmlns:android="http://schemas.android.com/apk/res/android">
+    <compatibility-package android:name="com.yandex.browser" android:maxLongVersionCode="2147483647" />
+    <compatibility-package android:name="com.yandex.browser.beta" android:maxLongVersionCode="2147483647" />
+    <compatibility-package android:name="com.yandex.browser.alpha" android:maxLongVersionCode="2147483647" />
+    <compatibility-package android:name="com.yandex.browser.canary" android:maxLongVersionCode="2147483647" />
+    <compatibility-package android:name="org.mozilla.firefox" android:maxLongVersionCode="2147483647" />
+    <compatibility-package android:name="org.mozilla.firefox_beta" android:maxLongVersionCode="2147483647" />
+    <compatibility-package android:name="com.opera.browser" android:maxLongVersionCode="2147483647" />
+    <compatibility-package android:name="com.opera.mini.native" android:maxLongVersionCode="2147483647" />
+    <compatibility-package android:name="com.huawei.browser" android:maxLongVersionCode="2147483647" />
+    <compatibility-package android:name="com.microsoft.emmx" android:maxLongVersionCode="2147483647" />
+    <compatibility-package android:name="com.brave.browser" android:maxLongVersionCode="2147483647" />
+    <compatibility-package android:name="com.duckduckgo.mobile.android" android:maxLongVersionCode="2147483647" />
+</autofill-service>

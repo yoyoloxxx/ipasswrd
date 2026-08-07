@@ -63,6 +63,8 @@ public partial class SettingsPage : ContentPage
         SyncNowButton.IsVisible = connected;
         SyncDisconnectButton.IsVisible = connected;
 
+        RefreshRecovery();
+
         VersionLabel.Text = $"Версия {AppInfo.Current.VersionString} · формат сейфа v1";
 
         _initializing = false;
@@ -225,6 +227,107 @@ public partial class SettingsPage : ContentPage
 
     private async void OnChangePassword(object? sender, EventArgs e) =>
         await Navigation.PushAsync(new ChangePasswordPage());
+
+    // ================= код восстановления =================
+
+    private void RefreshRecovery()
+    {
+        bool has = Svc.State.HasRecoveryCode;
+        RecoveryDeleteButton.IsVisible = has;
+        RecoveryCreateButton.Text = has ? "Пересоздать код" : "Создать код восстановления";
+
+        if (has)
+        {
+            string when = "";
+            string? iso = Svc.State.RecoveryIssuedAt;
+            if (!string.IsNullOrEmpty(iso) && DateTimeOffset.TryParse(iso, out var dt))
+                when = " от " + dt.ToLocalTime().ToString("dd.MM.yyyy");
+            RecoveryStatus.Text = "Код создан" + when + ". Храните бумажку в надёжном месте.";
+        }
+        else
+        {
+            RecoveryStatus.Text = "Код не создан. Без него забытый мастер-пароль означает потерю сейфа.";
+        }
+    }
+
+    private async void OnCreateRecovery(object? sender, EventArgs e)
+    {
+        if (Svc.State.HasRecoveryCode)
+        {
+            bool go = await DisplayAlert("Пересоздать код?",
+                "Прежний код перестанет открывать сейф. Новый код нужно будет записать заново.", "Пересоздать", "Отмена");
+            if (!go) return;
+        }
+
+        string? code = await Svc.State.EnableRecoveryAsync();
+        if (string.IsNullOrEmpty(code)) { await DisplayAlert("Не получилось", "Сейф закрыт.", "Ок"); return; }
+
+        RefreshRecovery();
+        await ShowRecoveryCodeAsync(code);
+    }
+
+    private async Task ShowRecoveryCodeAsync(string code)
+    {
+        string pretty = IPasswrd.Core.RecoveryCode.Format(IPasswrd.Core.RecoveryCode.Normalize(code) ?? code);
+        while (true)
+        {
+            string action = await DisplayActionSheet(
+                "Ваш код восстановления:\n\n" + pretty,
+                "Я записал(а)", null, "Скопировать", "Сохранить в файл…");
+            if (action == "Скопировать")
+            {
+                await Clipboard.Default.SetTextAsync(pretty);
+                await ShowToastAsync("Код скопирован — вставьте в надёжное место");
+            }
+            else if (action == "Сохранить в файл…")
+            {
+                await SaveRecoveryFileAsync(pretty);
+            }
+            else return;   // «Я записал(а)» или закрытие
+        }
+    }
+
+    private async Task SaveRecoveryFileAsync(string pretty)
+    {
+        string text =
+            "IPasswrd — памятка восстановления\r\n\r\n" +
+            "Код восстановления:\r\n" + pretty + "\r\n\r\n" +
+            "Если мастер-пароль забыт: на экране входа нажмите «Забыли мастер-пароль?»,\r\n" +
+            "введите этот код и придумайте новый мастер-пароль.\r\n\r\n" +
+            "Храните эту памятку отдельно от устройства. Кто знает код и имеет файл сейфа — откроет сейф.\r\n";
+        try
+        {
+            bool ok = await Svc.External.ExportCopyAsync(
+                System.Text.Encoding.UTF8.GetBytes(text), "IPasswrd-памятка-восстановления.txt");
+            if (ok) await ShowToastAsync("Памятка сохранена");
+        }
+        catch (Exception) { await DisplayAlert("Не получилось", "Не удалось сохранить файл.", "Ок"); }
+    }
+
+    private async void OnDeleteRecovery(object? sender, EventArgs e)
+    {
+        bool go = await DisplayAlert("Удалить код восстановления?",
+            "Записанная бумажка перестанет открывать сейф. Восстановить доступ можно будет только мастер-паролем.", "Удалить", "Отмена");
+        if (!go) return;
+        await Svc.State.DisableRecoveryAsync();
+        RefreshRecovery();
+        await ShowToastAsync("Код удалён");
+    }
+
+    private CancellationTokenSource? _toastCts;
+
+    private async Task ShowToastAsync(string text)
+    {
+        _toastCts?.Cancel();
+        var cts = _toastCts = new CancellationTokenSource();
+        ToastLabel.Text = text;
+        Toast.IsVisible = true;
+        Toast.Opacity = 0;
+        await Toast.FadeTo(1, 120);
+        try { await Task.Delay(1600, cts.Token); } catch (TaskCanceledException) { return; }
+        await Toast.FadeTo(0, 250);
+        if (!cts.IsCancellationRequested) Toast.IsVisible = false;
+    }
 
     private void OnLock(object? sender, EventArgs e) => Svc.State.Lock();
 }

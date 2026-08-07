@@ -31,6 +31,10 @@
 
             <Button x:Name="BiometricButton" Text="Биометрия" IsVisible="False" Clicked="OnBiometric" />
 
+            <Button x:Name="ForgotButton" Text="Забыли мастер-пароль?" IsVisible="False"
+                    Clicked="OnForgotPassword" BackgroundColor="Transparent"
+                    TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+
             <ActivityIndicator x:Name="Busy" IsRunning="False" IsVisible="False" HorizontalOptions="Center" />
             <Label x:Name="BusyHint" Text="Проверяю мастер-пароль…" IsVisible="False"
                    HorizontalOptions="Center" Style="{StaticResource Muted}" />
