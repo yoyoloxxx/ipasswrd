@@ -24,7 +24,7 @@ public partial class VaultListPage : ContentPage
     private static readonly (string Key, string Label)[] ChipDefs =
     {
         ("all", "Все"), ("account", "Аккаунты"), ("card", "Карты"),
-        ("document", "Документы"), ("note", "Заметки"), ("passkey", "Ключи доступа"),
+        ("doc", "Документы"), ("note", "Заметки"), ("passkey", "Ключи доступа"),
     };
 
     private string _filter = "all";
@@ -202,7 +202,7 @@ public partial class VaultListPage : ContentPage
 
         AddSingles(rows, entries, "card", "💳",
             it => $"{Fmt.CardBrand(it.Fields.GetValueOrDefault("number", ""))} {Fmt.MaskCard(it.Fields.GetValueOrDefault("number", ""))}".Trim());
-        AddSingles(rows, entries, "document", "📄", it => it.Fields.GetValueOrDefault("number", ""));
+        AddSingles(rows, entries, "doc", "📄", it => it.Fields.GetValueOrDefault("number", ""));
         AddSingles(rows, entries, "note", "🗒", it => it.Notes.Split('\n').FirstOrDefault() ?? "");
 
         var passkeyCards = entries
@@ -258,7 +258,7 @@ public partial class VaultListPage : ContentPage
         };
     }
 
-    private static readonly HashSet<string> KnownTypes = new() { "account", "card", "document", "note", "passkey" };
+    private static readonly HashSet<string> KnownTypes = new() { "account", "card", "doc", "note", "passkey" };
 
     private static void AddSingles(List<VaultRow> rows, List<VaultEntry> entries, string? type, string badge, Func<VaultItem, string> subtitleOf)
     {
@@ -310,7 +310,7 @@ public partial class VaultListPage : ContentPage
         {
             "Аккаунт" => "account",
             "Банковскую карту" => "card",
-            "Документ" => "document",
+            "Документ" => "doc",
             "Заметку" => "note",
             _ => null,
         };

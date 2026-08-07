@@ -123,7 +123,7 @@ public partial class MainWindow
         string q = query.Trim();
 
         var rows = _vault.Items()
-            .Where(x => x.Item.Type is "account" or "card" or "note" or "document" or "doc")
+            .Where(x => x.Item.Type is "account" or "card" or "note" or "doc" or "identity")
             .Select(x => (
                 Id: x.Id,
                 Title: HeaderName(x.Item),
