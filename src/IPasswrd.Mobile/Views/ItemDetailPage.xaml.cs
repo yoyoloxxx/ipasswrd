@@ -143,6 +143,7 @@ public partial class ItemDetailPage : ContentPage
                     }
                 }
                 AddExtraFields("url", "username", "password", "totp");
+                AddPasswordHistory();
                 break;
             case "card":
                 string number = _item.Fields.GetValueOrDefault("number", "");
@@ -392,6 +393,47 @@ public partial class ItemDetailPage : ContentPage
 
     private static Style CardStyle() => (Style)Application.Current!.Resources["Card"];
     private static Style MutedStyle() => (Style)Application.Current!.Resources["Muted"];
+
+    private void AddPasswordHistory()
+    {
+        if (_item is null || _item.History.Count == 0) return;
+
+        AddSection("Прежние пароли");
+        // от новых к старым
+        foreach (PasswordChange h in _item.History.AsEnumerable().Reverse())
+        {
+            string when = "";
+            if (!string.IsNullOrEmpty(h.ReplacedAt) && DateTimeOffset.TryParse(h.ReplacedAt, out var dt))
+                when = dt.ToLocalTime().ToString("dd.MM.yyyy");
+            AddCopyRow(when.Length > 0 ? "Заменён " + when : "Прежний пароль", h.Password, secret: true);
+        }
+
+        var forget = new Button
+        {
+            Text = "Забыть историю",
+            BackgroundColor = Colors.Transparent,
+            TextColor = BadColor(),
+            HorizontalOptions = LayoutOptions.Start,
+        };
+        forget.Clicked += async (_, _) =>
+        {
+            bool ok = await DisplayAlert("Забыть историю паролей?",
+                "Список прежних паролей этой записи будет удалён без возможности восстановления.", "Забыть", "Отмена");
+            if (!ok) return;
+            Vault? v = Svc.State.Vault;
+            if (v is null || _item is null) return;
+            try { v.ClearPasswordHistory(_id); } catch (Exception) { return; }
+            await Svc.State.SaveAsync();
+            Load();
+        };
+        Rows.Children.Add(forget);
+    }
+
+    private static Color BadColor()
+    {
+        if (Application.Current?.Resources.TryGetValue("IpBad", out var c) == true && c is Color color) return color;
+        return Color.FromArgb("#EB6E6E");
+    }
 
     private void AddSection(string text) =>
         Rows.Children.Add(new Label { Text = text, Style = (Style)Application.Current!.Resources["Section"] });

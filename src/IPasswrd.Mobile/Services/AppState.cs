@@ -87,11 +87,21 @@ public sealed class AppState
 
     public async Task CreateAsync(string masterPassword)
     {
+        await CreateVaultCoreAsync(masterPassword);
+        AfterUnlock();
+    }
+
+    /// <summary>Создать сейф и сохранить, но НЕ активировать (корень экрана не переключается).
+    /// Нужно, чтобы на экране создания успеть показать код восстановления до перехода в сейф.</summary>
+    public async Task CreateVaultCoreAsync(string masterPassword)
+    {
         Vault v = await Task.Run(() => IPasswrd.Core.Vault.Create(masterPassword));
         _vault = v;
         await SaveAsync();
-        AfterUnlock();
     }
+
+    /// <summary>Завершить создание — перейти в открытый сейф (после показа кода восстановления).</summary>
+    public void ActivateAfterCreate() => AfterUnlock();
 
     /// <summary>null — успех; иначе текст ошибки для пользователя.</summary>
     public async Task<string?> UnlockAsync(string masterPassword)
@@ -416,6 +426,94 @@ public sealed class AppState
             return "Текущий мастер-пароль указан неверно.";
         }
         await SaveAsync();
+        return null;
+    }
+
+    // ================= код восстановления =================
+
+    /// <summary>Есть ли у открытого сейфа код восстановления.</summary>
+    public bool HasRecoveryCode => _vault?.HasRecoveryCode == true;
+
+    /// <summary>Когда выдан текущий код (ISO-8601 UTC) или null.</summary>
+    public string? RecoveryIssuedAt => _vault?.RecoveryCodeIssuedAt;
+
+    /// <summary>Есть ли конверт восстановления в локальном файле — можно узнать без мастер-пароля
+    /// (для ссылки «Забыли мастер-пароль?» на экране входа).</summary>
+    public bool RecoveryAvailableForLocalVault
+    {
+        get
+        {
+            try { return HasLocalVault && IPasswrd.Core.Vault.IsRecoveryAvailable(File.ReadAllBytes(LocalVaultPath)); }
+            catch (Exception) { return false; }
+        }
+    }
+
+    /// <summary>Создать/пересоздать код восстановления. Возвращает код для показа (единственная копия);
+    /// старый код перестаёт работать. Сейф должен быть открыт.</summary>
+    public async Task<string?> EnableRecoveryAsync()
+    {
+        if (_vault is null) return null;
+        string code = _vault.EnableRecovery();
+        await SaveAsync();
+        return code;
+    }
+
+    /// <summary>Удалить код восстановления (записанная бумажка перестаёт открывать сейф).</summary>
+    public async Task DisableRecoveryAsync()
+    {
+        if (_vault is null) return;
+        _vault.DisableRecovery();
+        await SaveAsync();
+    }
+
+    /// <summary>Открыть сейф кодом восстановления и сразу задать новый мастер-пароль.
+    /// null — успех; иначе текст ошибки. Учитывает тот же локаут, что и обычный вход.</summary>
+    public async Task<string?> RecoverWithCodeAsync(string recoveryCode, string newMasterPassword)
+    {
+        if (LockoutRemaining > TimeSpan.Zero)
+            return $"Слишком много попыток. Подождите {Fmt.Duration(LockoutRemaining)}.";
+
+        byte[] blob;
+        try { blob = await PullLatestAsync() ?? throw new FileNotFoundException(); }
+        catch { return "Файл сейфа не найден."; }
+
+        Vault restored;
+        try
+        {
+            restored = await Task.Run(() => IPasswrd.Core.Vault.UnlockWithRecoveryCode(blob, recoveryCode));
+        }
+        catch (RecoveryNotEnabledException)
+        {
+            return "Для этого сейфа код восстановления не создавался.";
+        }
+        catch (WrongRecoveryCodeException)
+        {
+            Fails++;
+            TimeSpan pen = Lockout.PenaltyFor(Fails);
+            if (pen > TimeSpan.Zero)
+            {
+                LockedUntil = DateTimeOffset.UtcNow + pen;
+                return $"Неверный код восстановления. Вход закрыт на {Fmt.Duration(pen)}.";
+            }
+            int left = Lockout.AttemptsLeft(Fails);
+            return left > 0
+                ? $"Неверный код восстановления. Осталось попыток без блокировки: {left}."
+                : "Неверный код восстановления.";
+        }
+        catch (Exception)
+        {
+            return "Файл сейфа повреждён или имеет неизвестный формат.";
+        }
+
+        // Сейф открыт, но всё ещё завёрнут забытым паролем — ОБЯЗАТЕЛЬНО задаём новый.
+        try { await Task.Run(() => restored.ResetMasterPassword(newMasterPassword)); }
+        catch (Exception) { return "Не удалось задать новый мастер-пароль."; }
+
+        _vault = restored;
+        Fails = 0;
+        LockedUntil = DateTimeOffset.MinValue;
+        await SaveAsync();      // запишет уже с новым паролем + синк
+        AfterUnlock();
         return null;
     }
 
