@@ -68,8 +68,9 @@ public sealed class ExternalVaultFileIos : IExternalVaultFile
                 Preferences.Set(BookmarkPref, Convert.ToBase64String(bookmark.ToArray()));
                 Preferences.Set(NamePref, url.LastPathComponent ?? "vault.ipvault");
 
-                byte[]? bytes = CoordinatedRead(url);
-                return bytes ?? Array.Empty<byte>();
+                // ⚠ null — файл не докачался из iCloud: НЕ выдаём пустой массив за успех,
+                // иначе пустой «сейф» затрёт настоящий при первой же синхронизации.
+                return CoordinatedRead(url);
             }
             finally
             {

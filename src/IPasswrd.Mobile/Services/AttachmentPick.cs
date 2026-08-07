@@ -50,7 +50,9 @@ public static class AttachmentPick
         catch (Exception)
         {
             await page.DisplayAlert("Не получилось",
-                "Нет доступа к камере или фотографиям. Разрешение выдаётся в Настройках iPhone → IPasswrd.", "Ок");
+                DeviceInfo.Platform == DevicePlatform.iOS
+                    ? "Нет доступа к камере или фотографиям. Разрешение выдаётся в Настройках iPhone → IPasswrd."
+                    : "Нет доступа к камере или фотографиям. Разрешение выдаётся в Настройках → Приложения → IPasswrd → Разрешения.", "Ок");
             return null;
         }
 

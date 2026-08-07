@@ -282,12 +282,25 @@ public sealed class AppState
     {
         if (_vault is null) return;
         byte[] data = _vault.Serialize();
-        Directory.CreateDirectory(Path.GetDirectoryName(LocalVaultPath)!);
-        File.WriteAllBytes(LocalVaultPath, data);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(LocalVaultPath)!);
+            File.WriteAllBytes(LocalVaultPath, data);
+        }
+        catch (Exception ex)
+        {
+            // Нет места / отозван доступ к хранилищу — сообщаем, но НЕ роняем экран
+            // (все вызовы идут из async void-обработчиков).
+            Console.WriteLine("[IPW] SaveAsync local write failed: " + ex);
+            LastSyncStatus = "Не удалось сохранить сейф на устройстве.";
+            SyncProblem?.Invoke(LastSyncStatus);
+            return;
+        }
         VaultChanged?.Invoke();
         if (BiometricUnlockEnabled) SaveQuickUnlock();
         ShareForAutoFill();
-        await SyncAsync();
+        try { await SyncAsync(); }
+        catch (Exception ex) { Console.WriteLine("[IPW] SaveAsync sync failed: " + ex); }
     }
 
     private int _syncBusy;
