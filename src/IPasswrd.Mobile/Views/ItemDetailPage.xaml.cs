@@ -152,7 +152,7 @@ public partial class ItemDetailPage : ContentPage
                 AddCopyRow("Держатель", _item.Fields.GetValueOrDefault("holder", ""));
                 AddExtraFields("number", "expiry", "cvc", "holder");
                 break;
-            case "document":
+            case "doc":
                 AddCopyRow("Номер", _item.Fields.GetValueOrDefault("number", ""));
                 AddCopyRow("Выдан", _item.Fields.GetValueOrDefault("issued", ""));
                 AddExtraFields("number", "issued");

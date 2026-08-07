@@ -16,12 +16,12 @@ public partial class ItemEditPage : ContentPage
         _type = type;
 
         Title = _id is null
-            ? _type switch { "card" => "Новая карта", "document" => "Новый документ", "note" => "Новая заметка", _ => "Новый аккаунт" }
+            ? _type switch { "card" => "Новая карта", "doc" => "Новый документ", "note" => "Новая заметка", _ => "Новый аккаунт" }
             : "Изменение";
 
         AccountForm.IsVisible = _type is "account" or "passkey";
         CardForm.IsVisible = _type == "card";
-        DocumentForm.IsVisible = _type == "document";
+        DocumentForm.IsVisible = _type == "doc";
 
         LoadExisting();
     }
@@ -50,7 +50,7 @@ public partial class ItemEditPage : ContentPage
                 CvcBox.Text = _item.Fields.GetValueOrDefault("cvc", "");
                 HolderBox.Text = _item.Fields.GetValueOrDefault("holder", "");
                 break;
-            case "document":
+            case "doc":
                 DocNumberBox.Text = _item.Fields.GetValueOrDefault("number", "");
                 IssuedBox.Text = _item.Fields.GetValueOrDefault("issued", "");
                 break;
@@ -152,7 +152,7 @@ public partial class ItemEditPage : ContentPage
                     _item.Title = ($"{Fmt.CardBrand(number)} {Fmt.MaskCard(number)}").Trim();
                 break;
 
-            case "document":
+            case "doc":
                 SetField("number", DocNumberBox.Text);
                 SetField("issued", IssuedBox.Text);
                 break;
