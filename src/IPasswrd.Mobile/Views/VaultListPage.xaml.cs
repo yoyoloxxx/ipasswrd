@@ -160,14 +160,14 @@ public partial class VaultListPage : ContentPage
             .Where(x => x.Item.Type != "totp" && x.Item.Type != "meta")
             .Where(x => _filter == "all" || x.Item.Type == _filter);
 
+        // Правило поиска общее с ПК и живёт в ядре: запись, которая находится на ноутбуке и не
+        // находится с телефона, выглядит как потерянная. Название карточки сайта в самой
+        // записи не хранится, поэтому передаётся отдельно — ищут по тому, что видно в списке.
         if (q.Length > 0)
-            visible = visible.Where(x =>
-                x.Item.Title.ToLowerInvariant().Contains(q)
-                || x.Item.Fields.GetValueOrDefault("username", "").ToLowerInvariant().Contains(q)
-                || x.Item.Fields.GetValueOrDefault("url", "").ToLowerInvariant().Contains(q)
-                || x.Item.Notes.ToLowerInvariant().Contains(q)
-                || (x.Item.Type is "account" or "passkey"
-                    && SiteGroups.DisplayName(SiteGroups.KeyFor(x.Item), siteNames).ToLowerInvariant().Contains(q)));
+            visible = visible.Where(x => ItemSearch.Matches(x.Item, q,
+                x.Item.Type is "account" or "passkey"
+                    ? SiteGroups.DisplayName(SiteGroups.KeyFor(x.Item), siteNames)
+                    : null));
 
         var list = visible.ToList();
 
