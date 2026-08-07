@@ -186,8 +186,10 @@ public class AutofillPickerActivity : AppCompatActivity
         {
             Orientation = Orientation.Vertical,
             Visibility = ViewStates.Gone,
+            // 0 + вес: в вертикальном LinearLayout это «занять весь остаток»,
+            // MatchParent без веса ведёт себя непредсказуемо
             LayoutParameters = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent),
+                ViewGroup.LayoutParams.MatchParent, 0, 1f),
         };
 
         _search = new EditText(this)
@@ -205,7 +207,7 @@ public class AutofillPickerActivity : AppCompatActivity
         _list = new ListView(this)
         {
             LayoutParameters = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent) { TopMargin = Dp(12) },
+                ViewGroup.LayoutParams.MatchParent, 0, 1f) { TopMargin = Dp(12) },
         };
         _list.SetBackgroundColor(Bg);
         _list.Divider = null;
@@ -327,8 +329,10 @@ public class AutofillPickerActivity : AppCompatActivity
 
             string subtitle = login.Length > 0 ? login : "без логина";
             var ds = new Dataset.Builder(IpwAutofillService.Presentation(c.Title, subtitle));
-            if (_userId is not null) ds.SetValue(_userId, AutofillValue.ForText(login));
-            if (_passId is not null) ds.SetValue(_passId, AutofillValue.ForText(password));
+            if (_userId is not null && login.Length > 0)
+                ds.SetValue(_userId, AutofillValue.ForText(login));
+            if (_passId is not null && password.Length > 0)
+                ds.SetValue(_passId, AutofillValue.ForText(password));
             if (_otpId is not null && !string.IsNullOrEmpty(code))
                 ds.SetValue(_otpId, AutofillValue.ForText(code));
 
