@@ -552,6 +552,7 @@ public sealed class Vault
         GuardAttachments(item);
         _hasAttachments = null;   // contents changed: the format decision has to be made again
         item.Type = ItemTypes.Normalize(item.Type);   // одно написание типа на все устройства
+        ItemFolders.Normalize(item);                  // список папок — истина, старый ключ — зеркало первой
 
         byte[] nonce = Crypto.RandomBytes(Crypto.NonceLen);
         byte[] plaintext = JsonSerializer.SerializeToUtf8Bytes(item, Json);
@@ -578,6 +579,7 @@ public sealed class Vault
                              ?? throw new VaultIntegrityException("record decoded to null");
             // Запись могла приехать с устройства, которое называло тип по-своему — см. ItemTypes.
             item.Type = ItemTypes.Normalize(item.Type);
+            ItemFolders.Normalize(item);   // и со старым одиночным ключом папки — см. ItemFolders
             return item;
         }
         catch (CryptographicException)

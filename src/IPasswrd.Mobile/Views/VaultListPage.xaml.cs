@@ -46,8 +46,9 @@ public partial class VaultListPage : ContentPage
         try
         {
             return v.Items()
-                .Where(e => e.Item.Type is not ("totp" or "meta") && e.Item.Folder.Length > 0)
-                .GroupBy(e => e.Item.Folder, StringComparer.Ordinal)
+                .Where(e => e.Item.Type is not ("totp" or "meta"))
+                .SelectMany(e => ItemFolders.Of(e.Item))   // запись в двух папках считается в обеих
+                .GroupBy(f => f, StringComparer.Ordinal)
                 .OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
                 .Select(g => (g.Key, g.Count()))
                 .ToList();
@@ -226,7 +227,7 @@ public partial class VaultListPage : ContentPage
             .Where(x => x.Item.Type != "totp" && x.Item.Type != "meta")
             .Where(x => _filter == "all"
                 || (_filter.StartsWith(FolderPrefix, StringComparison.Ordinal)
-                    ? string.Equals(x.Item.Folder, _filter[FolderPrefix.Length..], StringComparison.Ordinal)
+                    ? ItemFolders.In(x.Item, _filter[FolderPrefix.Length..])
                     : x.Item.Type == _filter));
 
         // Правило поиска общее с ПК и живёт в ядре: запись, которая находится на ноутбуке и не

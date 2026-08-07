@@ -80,6 +80,9 @@ public partial class MainWindow : Window
         ["Карты"] = "Cards", ["Документы"] = "Documents", ["Заметки"] = "Notes", ["ИНСТРУМЕНТЫ"] = "TOOLS", ["ПАПКИ"] = "FOLDERS", ["Папка"] = "Folder",
         ["Новая папка"] = "New folder", ["Переименовать…"] = "Rename…", ["Переименовать папку"] = "Rename folder", ["Переименовать"] = "Rename", ["Удалить папку"] = "Delete folder", ["Удалить папку?"] = "Delete folder?", ["Записи из «{0}» останутся в сейфе — они просто перестанут лежать в папке."] = "The records in \u00ab{0}\u00bb stay in the vault — they simply stop living in a folder.",  ["Новая папка…"] = "New folder…", ["Название папки"] = "Folder name", ["Создать"] = "Create", ["Введите название"] = "Enter a name",  ["Добавить в папку"] = "Add to folder", ["Копировать пароль"] = "Copy password", ["Копировать логин"] = "Copy login", ["Убрать из папки"] = "Remove from folder", ["Без папки"] = "Unfiled",
         ["Необязательно — например: "] = "Optional — e.g.: ", ["Необязательно — например: Работа"] = "Optional — e.g.: Work",
+        ["Папки"] = "Folders",
+        ["Необязательно, через запятую — например: "] = "Optional, comma-separated — e.g.: ",
+        ["Необязательно, через запятую — например: Работа, Финансы"] = "Optional, comma-separated — e.g.: Work, Finance",
         ["Аутентификатор"] = "Authenticator", ["Генератор"] = "Generator", ["Проверка"] = "Security", ["Настройки"] = "Settings",
         ["Локальный сейф"] = "Local storage", ["без синхронизации"] = "no sync",
         ["Импорт из файла"] = "Import from file", ["Заблокировать"] = "Lock",
@@ -1362,7 +1365,7 @@ public partial class MainWindow : Window
         if (_section.StartsWith(FolderPrefix, StringComparison.Ordinal))
         {
             string folder = _section[FolderPrefix.Length..];
-            items = items.Where(x => string.Equals(x.Item.Folder, folder, StringComparison.Ordinal));
+            items = items.Where(x => ItemFolders.In(x.Item, folder));   // запись может лежать в нескольких папках
         }
         else if (_section != "all")
             items = items.Where(x => x.Item.Type == _section);   // a type section (incl. «Ключи доступа») lists every record of that type
@@ -1547,17 +1550,19 @@ public partial class MainWindow : Window
         IReadOnlyList<string> ids = row.Ids.Count > 0 ? row.Ids : new[] { row.Id };
         VaultItem? item = null;
         try { item = _vault.Get(ids[0]); } catch { return; }
-        string current = item.Folder;
 
-        // ---- вложенное меню папок ----
+        // ---- вложенное меню папок: пункт-переключатель на каждую папку ----
+        // Запись может лежать в нескольких папках сразу, поэтому клик не перекладывает,
+        // а добавляет или убирает: галочка показывает «уже там», повторный клик — «вынуть».
         var folderItems = new List<Control>();
         foreach (string folder in KnownFolders())
         {
+            bool inIt = ItemFolders.In(item, folder);
             var mi = new MenuItem { Header = folder };
-            if (string.Equals(folder, current, StringComparison.Ordinal))
-                mi.Icon = MakeIcon(IconData("check"), 14, Ok, 1.8);
+            if (inIt) mi.Icon = MakeIcon(IconData("check"), 14, Ok, 1.8);
             string target = folder;
-            mi.Click += (_, _) => MoveToFolder(ids, target);
+            if (inIt) mi.Click += (_, _) => RemoveFromFolder(ids, target);
+            else mi.Click += (_, _) => AddToFolder(ids, target);
             folderItems.Add(mi);
         }
         if (folderItems.Count > 0) folderItems.Add(new Separator());
@@ -1578,14 +1583,15 @@ public partial class MainWindow : Window
 
         // «Убрать из папки» — только когда открыта та самая папка. В общем списке пункт
         // значил бы «убрать неизвестно откуда»: человек не видит, какую полку трогает.
+        // Из остальных папок запись при этом не уходит.
         string openFolder = _section.StartsWith(FolderPrefix, StringComparison.Ordinal)
             ? _section[FolderPrefix.Length..]
             : "";
-        if (openFolder.Length > 0 && string.Equals(current, openFolder, StringComparison.Ordinal))
+        if (openFolder.Length > 0 && ItemFolders.In(item, openFolder))
         {
             top.Add(new Separator());
             var clear = new MenuItem { Header = Tr("Убрать из папки") };
-            clear.Click += (_, _) => MoveToFolder(ids, "");
+            clear.Click += (_, _) => RemoveFromFolder(ids, openFolder);
             top.Add(clear);
         }
 
@@ -1595,9 +1601,9 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    /// <summary>Спросить имя новой папки и переложить туда записи.</summary>
+    /// <summary>Спросить имя новой папки и положить туда записи (из своих папок они не уходят).</summary>
     private void PromptNewFolder(IReadOnlyList<string> ids) =>
-        PromptText(Tr("Новая папка"), Tr("Название папки"), "", Tr("Создать"), name => MoveToFolder(ids, name));
+        PromptText(Tr("Новая папка"), Tr("Название папки"), "", Tr("Создать"), name => AddToFolder(ids, name));
 
     /// <summary>
     /// Однострочный вопрос карточкой поверх окна. Поле ввода внутри меню не ловит клики,
@@ -1790,8 +1796,14 @@ public partial class MainWindow : Window
         bool touched = false;
         foreach (VaultEntry e in _vault.Items())
         {
-            if (!string.Equals(e.Item.Folder, from, StringComparison.Ordinal)) continue;
-            e.Item.Folder = to;
+            if (!ItemFolders.In(e.Item, from)) continue;
+            // Переименование — это замена одного имени в списке, остальные папки записи не трогаются.
+            // Пустое новое имя = распустить папку; если запись уже лежит и в целевой — папки сливаются,
+            // дубля в списке не остаётся (Set чистит повторы).
+            var updated = ItemFolders.Of(e.Item)
+                .Select(f => string.Equals(f, from, StringComparison.Ordinal) ? to : f)
+                .Where(f => f.Length > 0);
+            ItemFolders.Set(e.Item, updated);
             try { _vault.Update(e.Id, e.Item); touched = true; }
             catch (Exception) { /* запись могла исчезнуть с другого устройства */ }
         }
@@ -1817,8 +1829,16 @@ public partial class MainWindow : Window
         RenderSidebar();
     }
 
-    /// <summary>Put every login of the clicked tile in the same folder — a site group moves together.</summary>
-    private void MoveToFolder(IReadOnlyList<string> ids, string folder)
+    /// <summary>Put every login of the clicked tile into a folder — a site group is filed together.
+    /// Additive: the records stay in whatever other folders they already live in.</summary>
+    private void AddToFolder(IReadOnlyList<string> ids, string folder) =>
+        ForEachItem(ids, item => ItemFolders.Add(item, folder));
+
+    /// <summary>Take the tile's records out of ONE folder; their other folders are untouched.</summary>
+    private void RemoveFromFolder(IReadOnlyList<string> ids, string folder) =>
+        ForEachItem(ids, item => ItemFolders.Remove(item, folder));
+
+    private void ForEachItem(IReadOnlyList<string> ids, Action<VaultItem> mutate)
     {
         if (_vault is null) return;
         _lastActivity = DateTimeOffset.UtcNow;
@@ -1827,8 +1847,7 @@ public partial class MainWindow : Window
             foreach (string id in ids)
             {
                 VaultItem item = _vault.Get(id);
-                if (string.Equals(item.Folder, folder, StringComparison.Ordinal)) continue;
-                item.Folder = folder;
+                mutate(item);
                 _vault.Update(id, item);
             }
             Save();
@@ -4468,10 +4487,13 @@ public partial class MainWindow : Window
             AddField("notes", "Заметка", existing?.Notes, multiline: true);
 
         // Suggest folders that already exist so the same one does not end up spelled three ways.
-        AddField("folder", "Папка", existing?.Folder,
+        // Папок может быть несколько — в одном поле через запятую. Запятая тем самым занята и в
+        // ИМЕНИ папки жить не может; для названий вроде «Работа» и «Семья» это честная цена
+        // за то, чтобы не городить отдельный выборщик внутри редактора.
+        AddField("folder", "Папки", string.Join(", ", existing is null ? new List<string>() : ItemFolders.Of(existing)),
             watermark: KnownFolders() is { Count: > 0 } known
-                ? Tr("Необязательно — например: ") + string.Join(", ", known.Take(3))
-                : Tr("Необязательно — например: Работа"));
+                ? Tr("Необязательно, через запятую — например: ") + string.Join(", ", known.Take(2))
+                : Tr("Необязательно, через запятую — например: Работа, Финансы"));
 
         EditorForm.Children.Add(Labeled(Tr("Вложения"), EditorAttachments()));
 
@@ -4717,8 +4739,8 @@ public partial class MainWindow : Window
         try
         {
             return _vault.Items()
-                .Where(x => x.Item.Folder.Length > 0)
-                .GroupBy(x => x.Item.Folder, StringComparer.Ordinal)
+                .SelectMany(x => ItemFolders.Of(x.Item))
+                .GroupBy(f => f, StringComparer.Ordinal)
                 .OrderByDescending(g => g.Count())
                 .Select(g => g.Key)
                 .ToList();
@@ -4736,7 +4758,7 @@ public partial class MainWindow : Window
         if (_editType == "account" || _editType == "passkey")
             item.Title = DeriveTitle(Get("url"), Get("username"));   // record keeps its own site title; the group name lives in _siteNames
         if (string.IsNullOrWhiteSpace(item.Title)) item.Title = TypeLabel(_editType);
-        item.Folder = Get("folder");
+        ItemFolders.Set(item, Get("folder").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
         switch (_editType)
         {

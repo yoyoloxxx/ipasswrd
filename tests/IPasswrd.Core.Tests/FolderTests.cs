@@ -56,11 +56,14 @@ public class FolderTests
         changed.Fields["password"] = "новый-пароль-1";
         v.Update(id, changed);
 
+        // Перенос идёт через ItemFolders: с появлением нескольких папок список — истина,
+        // а старое поле Folder — только зеркало первой для старых сборок, писать в него напрямую нельзя.
         VaultItem moved = v.Get(id);
-        moved.Folder = "Банки";
+        ItemFolders.Set(moved, new[] { "Банки" });
         v.Update(id, moved);
 
         Assert.Equal("Банки", v.Get(id).Folder);
+        Assert.Equal(new[] { "Банки" }, v.Get(id).Folders);
         Assert.Single(v.Get(id).History);   // перенос не считается сменой пароля
     }
 

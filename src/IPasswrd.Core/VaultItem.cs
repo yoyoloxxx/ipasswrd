@@ -21,10 +21,18 @@ public sealed class VaultItem
     [JsonPropertyName("favorite")] public bool Favorite { get; set; }
 
     /// <summary>
-    /// Optional grouping, empty means ungrouped. Flat on purpose: a tree looks tidier in a
-    /// screenshot and turns into busywork the moment you have to decide where something lives.
+    /// Legacy single-folder key, kept as a mirror of <see cref="Folders"/>[0] so builds that
+    /// predate multi-folder still show the record in its first folder. <see cref="ItemFolders"/>
+    /// keeps the two in step on every read and write — do not assign this directly.
     /// </summary>
     [JsonPropertyName("folder")] public string Folder { get; set; } = "";
+
+    /// <summary>
+    /// Folders this record lives in — all of them, order = the order the user filed it. Empty
+    /// means unfiled. Flat on purpose: a tree looks tidier in a screenshot and turns into
+    /// busywork the moment you have to decide where something lives.
+    /// </summary>
+    [JsonPropertyName("folders")] public List<string> Folders { get; set; } = new();
 
     /// <summary>
     /// Passwords this record used to have, newest first. Maintained by <see cref="Vault.Update"/> —
