@@ -83,9 +83,52 @@ public partial class SecurityPage : ContentPage
             Container.Children.Add(FindingsCard(rep.Reused, C("IpBad", "IpBadL"), "повтор"));
         }
 
+        // ----- срок действия карт -----
+        if (BuildCardExpiryCard(v) is { } cards)
+        {
+            Container.Children.Add(new Label { Text = "СРОК ДЕЙСТВИЯ КАРТ", Style = Section });
+            Container.Children.Add(cards);
+        }
+
         // ----- HIBP -----
         Container.Children.Add(new Label { Text = "ПРОВЕРКА ПО БАЗЕ УТЕЧЕК", Style = Section });
         Container.Children.Add(BuildBreachCard());
+    }
+
+    /// <summary>
+    /// Карты, у которых срок истёк или истечёт в ближайшие два месяца — тот же разбор,
+    /// что и на ПК: правила живут в ядре, а не в двух экранах порознь.
+    /// </summary>
+    private Border? BuildCardExpiryCard(Vault v)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var rows = new List<(string Id, string Title, string When, bool Expired)>();
+        try
+        {
+            foreach (VaultEntry e in v.Items())
+            {
+                if (e.Item.Type != ItemTypes.Card) continue;
+                string exp = e.Item.Fields.GetValueOrDefault("expiry", "");
+                CardExpiry.Status st = CardExpiry.Check(exp, today);
+                if (st is CardExpiry.Status.Expired or CardExpiry.Status.Soon)
+                    rows.Add((e.Id, e.Item.Title.Length > 0 ? e.Item.Title : "(без названия)",
+                        CardExpiry.Format(exp), st == CardExpiry.Status.Expired));
+            }
+        }
+        catch (Exception) { return null; }
+
+        if (rows.Count == 0) return null;
+
+        var stack = new VerticalStackLayout { Spacing = 0 };
+        bool first = true;
+        foreach (var r in rows.OrderByDescending(r => r.Expired).ThenBy(r => r.When, StringComparer.Ordinal))
+        {
+            if (!first) stack.Children.Add(Hair());
+            first = false;
+            Color accent = r.Expired ? C("IpBad", "IpBadL") : C("IpWarn", "IpWarnL");
+            stack.Children.Add(FindingRow(r.Id, r.Title, (r.Expired ? "истекла " : "до ") + r.When, accent));
+        }
+        return new Border { Style = CardStyle, Padding = new Thickness(6, 2), Content = stack };
     }
 
     private static int DistinctReused(IReadOnlyList<AuditFinding> reused) => reused.Count;
