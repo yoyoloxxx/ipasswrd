@@ -79,10 +79,11 @@ public static class Exporter
             sb.Append(Labels.GetValueOrDefault(kv.Key, kv.Key)).Append(": ").Append(kv.Value);
         }
 
-        if (item.Folder.Length > 0)
+        var folders = ItemFolders.Of(item);
+        if (folders.Count > 0)
         {
             if (sb.Length > 0) sb.Append('\n');
-            sb.Append("Папка: ").Append(item.Folder);
+            sb.Append(folders.Count == 1 ? "Папка: " : "Папки: ").Append(string.Join(", ", folders));
         }
 
         if (item.Attachments.Count > 0)

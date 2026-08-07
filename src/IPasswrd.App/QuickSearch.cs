@@ -131,7 +131,7 @@ public partial class MainWindow
                 Password: x.Item.Fields.GetValueOrDefault("password", ""),
                 Username: x.Item.Fields.GetValueOrDefault("username", ""),
                 Url: x.Item.Fields.GetValueOrDefault("url", ""),
-                Folder: x.Item.Folder))
+                Folder: string.Join(", ", ItemFolders.Of(x.Item))))
             .Where(r => r.Password.Length > 0 || r.Username.Length > 0);
 
         if (q.Length > 0)

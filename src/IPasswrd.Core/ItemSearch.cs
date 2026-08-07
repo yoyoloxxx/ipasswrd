@@ -44,7 +44,8 @@ public static class ItemSearch
         var sb = new StringBuilder();
         Add(sb, it.Title);
         Add(sb, it.Notes);
-        Add(sb, it.Folder);
+        foreach (string folder in ItemFolders.Of(it))
+            Add(sb, folder);
         foreach (var kv in it.Fields)
             if (IsSearchable(kv.Key)) Add(sb, kv.Value);
         return sb.ToString();
