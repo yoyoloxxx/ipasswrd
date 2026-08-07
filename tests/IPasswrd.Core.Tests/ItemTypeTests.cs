@@ -29,7 +29,7 @@ public class ItemTypeTests
         var reopened = Vault.Unlock(v.Serialize(), Pw);
 
         // Именно этот запрос делает раздел «Документы» — он и не находил запись с телефона.
-        Assert.Single(reopened.Items().Where(x => x.Item.Type == ItemTypes.Document));
+        Assert.Single(reopened.Items(), x => x.Item.Type == ItemTypes.Document);
     }
 
     [Fact] // 3
