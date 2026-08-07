@@ -1369,9 +1369,10 @@ public partial class MainWindow : Window
             string label = GroupLabel(g);
             if (q.Length > 0)
             {
-                bool hit = label.ToLowerInvariant().Contains(q)
-                    || g.Any(e => (e.Item.Title + " " + Subtitle(e.Item) + " " + e.Item.Fields.GetValueOrDefault("url", "")).ToLowerInvariant().Contains(q));
-                if (!hit) continue;
+                // Название карточки передаётся отдельно: оно собрано из группы и в самих записях
+                // его нет, а человек ищет по тому, что видит в списке. ItemSearch.Matches — общее
+                // с телефоном правило: что попадает в поиск, решается в ядре.
+                if (!g.Any(e => ItemSearch.Matches(e.Item, q, label))) continue;
             }
             rows.Add(MakeGroupRow(g, label));
         }
