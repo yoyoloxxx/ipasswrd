@@ -1,5 +1,5 @@
-using System.Security.Cryptography;
 using Android.Content;
+using Android.Runtime;
 using Android.Security.Keystore;
 using IPasswrd.Mobile.Services;
 using Java.Security;
@@ -26,7 +26,6 @@ public sealed class KeystoreAndroid : ISecureKeyStore
     private const string PrefsName = "ipw.secure";
     private const string Transformation = "AES/GCM/NoPadding";
     private const int GcmTagBits = 128;
-    private const int IvBytes = 12;
 
     private static readonly object Gate = new();
 
@@ -44,7 +43,13 @@ public sealed class KeystoreAndroid : ISecureKeyStore
 
             if (ks.IsKeyEntry(KeyAlias))
             {
-                if (ks.GetKey(KeyAlias, null) is ISecretKey existing) return existing;
+                // ⚠ Прямой as-каст к ISecretKey у обёртки биндинга не срабатывает — только JavaCast.
+                try
+                {
+                    if (ks.GetKey(KeyAlias, null) is Java.Lang.Object raw)
+                        return raw.JavaCast<ISecretKey>();
+                }
+                catch (Exception) { }
                 ks.DeleteEntry(KeyAlias);   // запись есть, но ключ не читается — пересоздаём
             }
 
@@ -54,9 +59,6 @@ public sealed class KeystoreAndroid : ISecureKeyStore
                 .SetBlockModes(KeyProperties.BlockModeGcm)!
                 .SetEncryptionPaddings(KeyProperties.EncryptionPaddingNone)!
                 .SetKeySize(256)!
-                // IV генерируем сами (RandomNumberGenerator, свежий на каждую запись) — иначе
-                // пришлось бы читать его у провайдера, а имя биндинга getIV() нестабильно.
-                .SetRandomizedEncryptionRequired(false)!
                 .SetUserAuthenticationRequired(false)!
                 .Build();
             gen.Init(spec);
@@ -81,11 +83,18 @@ public sealed class KeystoreAndroid : ISecureKeyStore
                 ISharedPreferences? prefs = Prefs;
                 if (key is null || prefs is null) return false;
 
-                byte[] iv = RandomNumberGenerator.GetBytes(IvBytes);
+                // ⚠ IV генерирует сам Keystore: свой подсовывать нельзя — часть прошивок
+                // (в т.ч. HiSilicon/EMUI) отвергает caller nonce, и Save молча падал,
+                // из-за чего не работали ни биометрия, ни вход Google.
                 Cipher cipher = Cipher.GetInstance(Transformation)!;
-                cipher.Init(CipherMode.EncryptMode, key, new GCMParameterSpec(GcmTagBits, iv));
+                cipher.Init(CipherMode.EncryptMode, key);
+                byte[]? iv = cipher.GetIV();
                 byte[]? ct = cipher.DoFinal(data);
-                if (ct is null) return false;
+                if (iv is null || iv.Length == 0 || iv.Length > 255 || ct is null)
+                {
+                    Console.WriteLine("[IPW] keystore Save: bad iv/ct (iv=" + (iv?.Length ?? -1) + ")");
+                    return false;
+                }
 
                 byte[] blob = new byte[1 + iv.Length + ct.Length];
                 blob[0] = (byte)iv.Length;
