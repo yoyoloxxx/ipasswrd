@@ -66,7 +66,7 @@
     return t.toLowerCase();
   }
 
-  // -> "password" | "login" | "card-number" | "card-cvc" | "card-exp" | "card-holder" | "otp" | "doc" | null
+  // -> "password" | "login" | "card-*" | "otp" | "doc" | "id-*" | null
   function classify(el) {
     if (!el || el.tagName !== "INPUT") return null;
     const type = (el.type || "text").toLowerCase();
@@ -91,6 +91,17 @@
       if (/\bcvc\b|\bcvv\b/.test(t)) return "card-cvc";
       return "password";
     }
+    // Личные данные. Идут ДО логина: поле "Имя получателя" в форме доставки — не логин,
+    // хотя по тексту похоже. Почта и телефон, наоборот, остаются логином: на странице входа
+    // это чаще именно он, а внутри заполнения личных данных они находятся своими правилами.
+    if (ac.includes("family-name") || ac.includes("given-name") || ac.includes("additional-name") ||
+        ac === "name" || /(^|[^а-яё])фамили|(^|[^а-яё])отчеств|\bфио\b|получател|recipient|full ?name|first ?name|last ?name/.test(t)) return "id-name";
+    if (ac.includes("postal-code") || /индекс|почтовый индекс|postal|zip/.test(t)) return "id-zip";
+    if (ac.includes("country") || /страна|country/.test(t)) return "id-country";
+    if (ac.includes("address-level2") || /(^|[^а-яё])город|населённ|населенн|\bcity\b|town/.test(t)) return "id-city";
+    if (ac.includes("street-address") || ac.includes("address-line") ||
+        /улиц|(^|[^а-яё])адрес|street|address/.test(t)) return "id-street";
+
     if (type === "email" || type === "tel" || ac.includes("username") || ac.includes("email") ||
         /\b(user(name)?|login|e[-\s]?mail|phone|tel|account|identifier)\b/.test(t) ||
         /(почт[аеы]|логин|телефон)/.test(t)) return "login";   // Cyrillic: no \b — JS word boundaries are Latin-only
@@ -185,6 +196,34 @@
       setVal(expFields[0], mm && yy ? mm + "/" + yy : exp);
     }
   }
+  // Личные данные заполняются целиком, как карта: человек выбирает, кем он представляется,
+  // а не по какому полю кликнул. Поиск ограничен той же формой — на странице с формой входа
+  // рядом ничего не должно перезаписаться.
+  function fillIdentity(anchor, idn) {
+    const scope = anchor.form || document;
+    const fio = [idn.lastName, idn.firstName, idn.middleName].filter(Boolean).join(" ");
+
+    for (const el of scope.querySelectorAll("input, textarea, select")) {
+      if (!visible(el) || el.disabled || el.readOnly) continue;
+      const ac = (el.getAttribute("autocomplete") || "").toLowerCase();
+      const t = fieldText(el);
+      const type = (el.type || "text").toLowerCase();
+
+      if (ac.includes("family-name") || /(^|[^а-яё])фамили|last ?name|surname/.test(t)) { if (idn.lastName) setVal(el, idn.lastName); continue; }
+      if (ac.includes("additional-name") || /отчеств|middle ?name|patronymic/.test(t)) { if (idn.middleName) setVal(el, idn.middleName); continue; }
+      // Собирательное поле — раньше «имени»: «Имя получателя» в русских магазинах ждёт ФИО целиком,
+      // а не одно имя, и проверка на given-name перехватила бы его по слову «имя».
+      if (ac === "name" || /\bфио\b|получател|recipient|full ?name/.test(t)) { if (fio) setVal(el, fio); continue; }
+      if (ac.includes("given-name") || /(^|[^а-яё])имя([^а-яё]|$)|first ?name/.test(t)) { if (idn.firstName) setVal(el, idn.firstName); continue; }
+      if (type === "tel" || ac.includes("tel") || /телефон|phone|mobile/.test(t)) { if (idn.phone) setVal(el, idn.phone); continue; }
+      if (type === "email" || ac.includes("email") || /почт|e[-\s]?mail/.test(t)) { if (idn.email) setVal(el, idn.email); continue; }
+      if (ac.includes("postal-code") || /индекс|postal|zip/.test(t)) { if (idn.zip) setVal(el, idn.zip); continue; }
+      if (ac.includes("country") || /страна|country/.test(t)) { if (idn.country) setVal(el, idn.country); continue; }
+      if (ac.includes("address-level2") || /(^|[^а-яё])город|\bcity\b|town/.test(t)) { if (idn.city) setVal(el, idn.city); continue; }
+      if (ac.includes("street-address") || ac.includes("address-line") || /улиц|(^|[^а-яё])адрес|street|address/.test(t)) { if (idn.street) setVal(el, idn.street); continue; }
+    }
+  }
+
   function fillDoc(anchor, doc) { setVal(anchor, doc.number); }
   function fillOtp(anchor, code) { setVal(anchor, code); }
 
@@ -288,7 +327,7 @@
   async function ensureList() {
     if (listCache) return listCache;
     const r = await send({ cmd: "list" });
-    listCache = (r && r.ok) ? r : { cards: [], docs: [] };
+    listCache = (r && r.ok) ? r : { cards: [], docs: [], ids: [] };
     return listCache;
   }
 
@@ -385,7 +424,8 @@
     const qr = await query();
 
     const group = (kind === "login" || kind === "password") ? "account"
-                : kind.startsWith("card") ? "card" : kind;   // account | card | otp | doc
+                : kind.startsWith("card") ? "card"
+                : kind.startsWith("id-") ? "identity" : kind;   // account | card | otp | doc | identity
 
     const p = document.createElement("div");
     p.className = "pick";
@@ -432,6 +472,17 @@
       if (docs.length) for (const dc of docs)
         add(`<div class="u">${esc(dc.title || "Документ")}</div><div class="t">${esc(dc.number || "")}</div>`, () => fillDoc(field, dc));
       else add(`<div class="t">Нет документов в сейфе</div>`, null);
+      openApp();
+    } else if (group === "identity") {
+      const L = await ensureList();
+      const ids = (L && L.ids) || [];
+      if (ids.length) for (const idn of ids) {
+        const fio = [idn.lastName, idn.firstName, idn.middleName].filter(Boolean).join(" ");
+        const where = [idn.city, idn.street].filter(Boolean).join(", ");
+        add(`<div class="u">${esc(idn.title || fio || "Личные данные")}</div><div class="t">${esc(where || idn.phone || idn.email || "")}</div>`,
+            () => fillIdentity(field, idn));
+      }
+      else add(`<div class="t">Нет личных данных в сейфе</div>`, null);
       openApp();
     } else if (group === "otp") {
       const withCode = items.filter((it) => it.totp).map((it) => ({ code: it.totp, name: it.username || it.title || "" }))
@@ -491,7 +542,8 @@
 
   // Card forms: the badge lives ONLY in the card-number field — one click fills the whole
   // form (number, expiry, CVC, holder); the small boxes stay clean.
-  const badgeless = (k) => k === "card-cvc" || k === "card-holder" || k.startsWith("card-exp");
+  const badgeless = (k) => k === "card-cvc" || k === "card-holder" || k.startsWith("card-exp") ||
+    k === "id-city" || k === "id-zip" || k === "id-country";
 
   function attachFieldHandlers() {
     const map = candidateFields();

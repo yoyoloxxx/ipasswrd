@@ -31,6 +31,15 @@ public static class Exporter
         ["cvc"] = "CVC/CVV",
         ["holder"] = "Держатель",
         ["issued"] = "Выдан",
+        ["lastName"] = "Фамилия",
+        ["firstName"] = "Имя",
+        ["middleName"] = "Отчество",
+        ["phone"] = "Телефон",
+        ["email"] = "Почта",
+        ["zip"] = "Индекс",
+        ["country"] = "Страна",
+        ["city"] = "Город",
+        ["street"] = "Адрес",
     };
 
     public static string ToCsv(IEnumerable<VaultEntry> entries)
