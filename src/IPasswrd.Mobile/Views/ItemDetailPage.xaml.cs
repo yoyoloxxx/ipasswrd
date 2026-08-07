@@ -175,7 +175,7 @@ public partial class ItemDetailPage : ContentPage
             case "passkey":
                 AddCopyRow("Сайт", _item.Fields.GetValueOrDefault("url", ""));
                 AddCopyRow("Логин", _item.Fields.GetValueOrDefault("username", ""));
-                AddInfo("Ключ доступа привязан к устройству, где был создан. Вход по нему на iPhone появится позже.");
+                AddInfo("Ключ доступа привязан к устройству, где был создан. Вход по нему на телефоне появится позже.");
                 AddExtraFields("url", "username");
                 break;
             default:

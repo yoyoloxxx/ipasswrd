@@ -29,7 +29,7 @@
 
             <Button x:Name="PrimaryButton" Text="Открыть" Style="{StaticResource Primary}" Clicked="OnPrimaryAction" />
 
-            <Button x:Name="BiometricButton" Text="Face ID" IsVisible="False" Clicked="OnBiometric" />
+            <Button x:Name="BiometricButton" Text="Биометрия" IsVisible="False" Clicked="OnBiometric" />
 
             <ActivityIndicator x:Name="Busy" IsRunning="False" IsVisible="False" HorizontalOptions="Center" />
             <Label x:Name="BusyHint" Text="Проверяю мастер-пароль…" IsVisible="False"

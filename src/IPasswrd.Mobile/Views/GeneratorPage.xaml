@@ -24,7 +24,9 @@
                 <Label Text="ДЛИНА" Style="{StaticResource Section}" />
                 <Border Style="{StaticResource Card}">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                        <Slider x:Name="LengthSlider" Minimum="8" Maximum="64" Value="20" ValueChanged="OnLengthChanged" />
+                        <Slider x:Name="LengthSlider" Minimum="8" Maximum="64" Value="20"
+                                ValueChanged="OnLengthChanged"
+                                DragStarted="OnLengthDragStarted" DragCompleted="OnLengthDragCompleted" />
                         <Label x:Name="LengthLabel" Grid.Column="1" Text="20" WidthRequest="34"
                                VerticalOptions="Center" HorizontalTextAlignment="End" FontFamily="Menlo" />
                     </Grid>

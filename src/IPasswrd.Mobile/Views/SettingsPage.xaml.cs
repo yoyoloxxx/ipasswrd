@@ -28,7 +28,9 @@ public partial class SettingsPage : ContentPage
     {
         _initializing = true;
 
-        BiometricLabel.Text = $"Разблокировка {Svc.Biometric.Kind}";
+        BiometricLabel.Text = $"Разблокировка: {Svc.Biometric.Kind}";
+        AccessHint.Text = $"После простоя сейф закрывается; {Svc.Biometric.Kind} открывает его без мастер-пароля. Мастер-пароль переспрашивается раз в 30 дней.";
+        AboutTitle.Text = DeviceInfo.Platform == DevicePlatform.iOS ? "IPasswrd для iPhone" : "IPasswrd для Android";
         BiometricSwitch.IsToggled = Svc.State.BiometricUnlockEnabled && Svc.Biometric.IsAvailable;
         BiometricSwitch.IsEnabled = Svc.Biometric.IsAvailable;
 
