@@ -40,12 +40,13 @@
                     <Label x:Name="SyncTitle" Text="Локальный сейф" FontSize="16" />
                     <Label x:Name="SyncSub" Text="без синхронизации" Style="{StaticResource Muted}" FontSize="13" />
                     <Button x:Name="SyncGoogleButton" Text="Войти через Google" Clicked="OnConnectGoogle" />
-                    <Button x:Name="SyncConnectButton" Text="Выбрать файл сейфа в iCloud…" BackgroundColor="Transparent" Clicked="OnConnectSync" />
+                    <Button x:Name="SyncConnectButton" Text="Выбрать файл сейфа…" BackgroundColor="Transparent" Clicked="OnConnectSync" />
                     <Button x:Name="SyncNowButton" Text="Синхронизировать сейчас" IsVisible="False" Clicked="OnSyncNow" />
                     <Button x:Name="SyncDisconnectButton" Text="Отключить" BackgroundColor="Transparent" IsVisible="False" Clicked="OnDisconnectSync" />
                 </VerticalStackLayout>
             </Border>
-            <Label Text="Вход через Google — тот же Google Drive, что на Windows (папка IPasswrd, файл vault.ipvault). Либо выберите файл в iCloud Drive. Изменения объединяются поэлементно."
+            <Label x:Name="SyncHint"
+                   Text="Вход через Google — тот же Google Диск, что на Windows (папка IPasswrd, файл vault.ipvault). Изменения объединяются поэлементно."
                    Style="{StaticResource Muted}" FontSize="12" Margin="4,0" />
 
             <Label Text="СЕЙФ" Style="{StaticResource Section}" />
@@ -68,7 +69,7 @@
                 <VerticalStackLayout Spacing="4">
                     <Label Text="IPasswrd для iPhone" FontSize="16" />
                     <Label x:Name="VersionLabel" Style="{StaticResource Muted}" FontSize="13" />
-                    <Label Text="Тот же зашифрованный сейф, что и на Windows: Argon2id + AES-256-GCM. Файл сейфа не покидает ваши устройства и iCloud."
+                    <Label Text="Тот же зашифрованный сейф, что и на Windows: Argon2id + AES-256-GCM. Файл сейфа не покидает ваши устройства и ваше облако."
                            Style="{StaticResource Muted}" FontSize="12" />
                 </VerticalStackLayout>
             </Border>

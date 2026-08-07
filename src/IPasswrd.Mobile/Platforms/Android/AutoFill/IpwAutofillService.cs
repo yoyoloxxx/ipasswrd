@@ -43,6 +43,10 @@ public class IpwAutofillService : AutofillService
             AutofillFields fields = AutofillParser.Parse(structure);
             if (!fields.HasAny) { callback.OnSuccess(null); return; }
 
+            // Свои же экраны (мастер-пароль!) не заполняем — это было бы абсурдно и небезопасно.
+            if (string.Equals(fields.PackageName, PackageName, StringComparison.Ordinal))
+            { callback.OnSuccess(null); return; }
+
             callback.OnSuccess(BuildResponse(fields));
         }
         catch (Exception ex)
@@ -160,6 +164,8 @@ public class IpwAutofillService : AutofillService
             if (structure is null) { callback.OnSuccess(); return; }
 
             AutofillFields fields = AutofillParser.Parse(structure);
+            if (string.Equals(fields.PackageName, PackageName, StringComparison.Ordinal))
+            { callback.OnSuccess(); return; }
             string user = AutofillParser.ValueOf(structure, fields.Username) ?? "";
             string pass = AutofillParser.ValueOf(structure, fields.Password) ?? "";
 

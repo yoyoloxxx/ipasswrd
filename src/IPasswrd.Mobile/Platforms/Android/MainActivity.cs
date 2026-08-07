@@ -25,6 +25,11 @@ public class MainActivity : MauiAppCompatActivity
         // Прямого аналога на iOS нет (там система сама размывает снимок), поэтому это
         // «android-специфика», без которой приложение было бы слабее iOS-версии.
         Window?.SetFlags(WindowManagerFlags.Secure, WindowManagerFlags.Secure);
+
+        // Менеджер паролей не должен предлагать автозаполнение самому себе
+        // (поле мастер-пароля — не место для подсказок).
+        if (Window?.DecorView is global::Android.Views.View dv)
+            dv.ImportantForAutofill = global::Android.Views.ImportantForAutofill.NoExcludeDescendants;
     }
 
     protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)

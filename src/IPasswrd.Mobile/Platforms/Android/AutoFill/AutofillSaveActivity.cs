@@ -62,6 +62,9 @@ public class AutofillSaveActivity : AppCompatActivity
 
         SetContentView(BuildUi());
 
+        if (Window?.DecorView is View dvNoFill)
+            dvNoFill.ImportantForAutofill = global::Android.Views.ImportantForAutofill.NoExcludeDescendants;
+
         if (Svc.State.IsUnlocked) _ = SaveAndFinishAsync();
         else if (Svc.State.QuickUnlockAvailable) _ = TryQuickUnlockAsync();
     }

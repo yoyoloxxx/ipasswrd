@@ -79,6 +79,9 @@ public class AutofillPickerActivity : AppCompatActivity
         SetResult(AndroidResult.Canceled);
         SetContentView(BuildUi());
 
+        if (Window?.DecorView is View dvNoFill)
+            dvNoFill.ImportantForAutofill = global::Android.Views.ImportantForAutofill.NoExcludeDescendants;
+
         if (Svc.State.IsUnlocked) ShowList();
         else
         {
