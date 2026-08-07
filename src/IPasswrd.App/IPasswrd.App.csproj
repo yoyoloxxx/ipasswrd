@@ -16,7 +16,7 @@
     <!-- Издатель. ⚠ Пока сборка не подписана сертификатом, это только сведения о файле:
          Windows всё равно скажет «неизвестный издатель». Настоящую подпись даёт
          Microsoft Store (бесплатно) либо сертификат. -->
-    <Version>1.0.26</Version>
+    <Version>1.0.27</Version>
     <Company>yoyoloxxx Dev</Company>
     <Authors>yoyoloxxx Dev</Authors>
     <Product>IPasswrd</Product>

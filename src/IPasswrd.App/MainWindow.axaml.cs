@@ -4652,6 +4652,11 @@ public partial class MainWindow : Window
         string notes = Get("notes");
         if (!string.IsNullOrEmpty(notes)) item.Notes = notes;
 
+        // Форма собрала запись с нуля — всё, чего в ней нет, надо перенести руками. Без этого правка
+        // названия тихо уносила приложенные фотографии, снимала звёздочку и выбрасывала поля,
+        // записанные более новой версией программы.
+        FormEdit.Carry(_editExisting, item);
+
         string id;
         if (_editId is null) id = _vault.Add(item);
         else { _vault.Update(_editId, item); id = _editId; }
