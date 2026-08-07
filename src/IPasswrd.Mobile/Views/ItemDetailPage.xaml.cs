@@ -272,69 +272,8 @@ public partial class ItemDetailPage : ContentPage
     {
         if (_item is null) return;
 
-        if (_item.Attachments.Count >= Vault.MaxAttachmentsPerItem)
-        {
-            await DisplayAlert("Больше не поместится",
-                $"В одной записи не больше {Vault.MaxAttachmentsPerItem} вложений.", "Ок");
-            return;
-        }
-
-        const string shoot = "Снять фото";
-        const string library = "Из фотоплёнки";
-        const string file = "Файл";
-        string choice = await DisplayActionSheet("Добавить вложение", "Отмена", null, shoot, library, file);
-
-        FileResult? picked;
-        try
-        {
-            if (choice == shoot)
-            {
-                if (!MediaPicker.Default.IsCaptureSupported)
-                {
-                    await DisplayAlert("Не получилось", "Камера недоступна.", "Ок");
-                    return;
-                }
-                picked = await MediaPicker.Default.CapturePhotoAsync();
-            }
-            else if (choice == library) picked = await MediaPicker.Default.PickPhotoAsync();
-            else if (choice == file) picked = await FilePicker.Default.PickAsync();
-            else return;
-        }
-        catch (Exception)
-        {
-            await DisplayAlert("Не получилось",
-                "Нет доступа к камере или фотографиям. Разрешение выдаётся в Настройках iPhone → IPasswrd.", "Ок");
-            return;
-        }
-
-        if (picked is null) return;
-
-        byte[] raw;
-        try
-        {
-            await using Stream src = await picked.OpenReadAsync();
-            using var ms = new MemoryStream();
-            await src.CopyToAsync(ms);
-            raw = ms.ToArray();
-        }
-        catch (Exception)
-        {
-            await DisplayAlert("Не получилось", "Файл не прочитался.", "Ок");
-            return;
-        }
-
-        Attachment att;
-        try { att = Attachments.Prepare(picked.FileName ?? "файл", raw); }
-        catch (AttachmentTooLargeException ex)
-        {
-            await DisplayAlert("Слишком большой файл", ex.Message, "Ок");
-            return;
-        }
-        catch (Exception)
-        {
-            await DisplayAlert("Не получилось", "Файл не подготовился.", "Ок");
-            return;
-        }
+        Attachment? att = await AttachmentPick.PickAsync(this, _item.Attachments.Count);
+        if (att is null) return;
 
         Vault? v = Svc.State.Vault;
         if (v is null) return;
