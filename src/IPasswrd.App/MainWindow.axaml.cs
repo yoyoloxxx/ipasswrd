@@ -298,6 +298,18 @@ public partial class MainWindow : Window
         ["подключено"] = "connected",
         ["Не найдена папка iCloud Drive. Я открыл окно iCloud — войдите в Apple ID, включите iCloud Drive и нажмите кнопку ещё раз. Если окно не открылось, установите «iCloud» из Microsoft Store."]
             = "iCloud Drive folder not found. I opened the iCloud window — sign in with your Apple ID, turn on iCloud Drive and press the button again. If no window appeared, install “iCloud” from the Microsoft Store.",
+
+        // пустой сейф — с чего начать
+        ["Сейф создан. Перенесите пароли"] = "Vault created. Bring your passwords over",
+        ["Kaspersky, Chrome, Edge, Яндекс.Браузер и другие умеют выгружать пароли в файл. Укажите его — карты, адреса и заметки разложатся по типам сами. Файл читается на этом компьютере и никуда не отправляется."]
+            = "Kaspersky, Chrome, Edge, Yandex Browser and others can export passwords to a file. Point at that file — cards, addresses and notes sort themselves into the right types. The file is read on this computer and goes nowhere.",
+        ["Выбрать файл экспорта"] = "Choose an export file",
+        ["Автозаполнение в браузере"] = "Autofill in the browser",
+        ["Без расширения пароли придётся копировать руками — ровно то, от чего вы уходите."]
+            = "Without the extension you are back to copying passwords by hand — the very thing you are leaving behind.",
+        ["Настроить расширение"] = "Set up the extension",
+        ["Переносить нечего? Нажмите + вверху списка и заведите первую запись руками."]
+            = "Nothing to bring over? Press + above the list and add your first record by hand.",
     };
 
     private static readonly Dictionary<string, string> RuMap = BuildReverse();
@@ -1390,6 +1402,10 @@ public partial class MainWindow : Window
                     "Ключи доступа (passkey) появятся здесь после импорта. Вручную их добавлять не нужно."));
             else if (q.Length > 0)
                 DetailPanel.Children.Add(EmptyState("Ничего не найдено", "Попробуйте другой запрос."));
+            // Пустой раздел и пустой сейф — разные вещи: в разделе «Карты» без карт звать переносить
+            // пароли незачем. Запись настроек (meta) лежит в сейфе с первого запуска и за содержимое не считается.
+            else if (_section == "all" && !_vault.Items().Any(x => x.Item.Type != "meta"))
+                DetailPanel.Children.Add(StartHere());
             else
                 DetailPanel.Children.Add(EmptyState("Пока пусто", "Нажмите + вверху списка, чтобы добавить запись."));
             Relocalize();
@@ -2876,6 +2892,64 @@ public partial class MainWindow : Window
             BorderBrush = bad ? Brush.Parse("#33E95048") : Brush.Parse("#33EA8E49"),
             BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(13, 11),
         };
+    }
+
+    /// <summary>
+    /// Что видно в пустом сейфе — то есть сразу после его создания.
+    ///
+    /// Раньше здесь было «Пока пусто. Нажмите + вверху списка» — правда, но не та, которая
+    /// нужна человеку, пришедшему из другого менеджера. У него уже есть сто паролей, и заводить их
+    /// заново он не станет — он закроет программу и останется там, где был. Первым на экране
+    /// должен быть перенос, вторым — автозаполнение; остальное подождёт.
+    ///
+    /// Это не мастер из нескольких шагов и не окно поверх всего: панель просто лежит в пустом
+    /// сейфе и исчезает сама, как только в нём появляется первая запись. Пропускать нечего,
+    /// поэтому и кнопки «пропустить» нет, и флага «онбординг показан» в настройках тоже: состояние
+    /// сейфа и есть всё условие.
+    /// </summary>
+    private Control StartHere()
+    {
+        var sp = new StackPanel { Spacing = 9, Margin = new Thickness(0, 32, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, MaxWidth = 380 };
+
+        sp.Children.Add(new TextBlock { Text = Tr("Сейф создан. Перенесите пароли"), Foreground = Text2, FontWeight = FontWeight.Bold, FontSize = 14 });
+        sp.Children.Add(new TextBlock
+        {
+            Text = Tr("Kaspersky, Chrome, Edge, Яндекс.Браузер и другие умеют выгружать пароли в файл. Укажите его — карты, адреса и заметки разложатся по типам сами. Файл читается на этом компьютере и никуда не отправляется."),
+            Foreground = Text3, FontSize = 12.5, TextWrapping = TextWrapping.Wrap,
+        });
+
+        var import = new Button { Content = Tr("Выбрать файл экспорта"), Padding = new Thickness(15, 8), Margin = new Thickness(0, 3, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        import.Classes.Add("primary");
+        import.Click += OnImportClick;
+        sp.Children.Add(import);
+
+        sp.Children.Add(new Border { Height = 1, Background = Hair, Margin = new Thickness(0, 14, 0, 8) });
+
+        sp.Children.Add(new TextBlock { Text = Tr("Автозаполнение в браузере"), Foreground = Text2, FontWeight = FontWeight.Bold, FontSize = 13.5 });
+        sp.Children.Add(new TextBlock
+        {
+            Text = Tr("Без расширения пароли придётся копировать руками — ровно то, от чего вы уходите."),
+            Foreground = Text3, FontSize = 12.5, TextWrapping = TextWrapping.Wrap,
+        });
+
+        var ext = new Button { Content = Tr("Настроить расширение"), Padding = new Thickness(15, 8), Margin = new Thickness(0, 3, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        ext.Click += (_, _) =>
+        {
+            _openExtensionSetup = true;
+            _toolMode = "settings";
+            ToolPane.IsVisible = true;
+            RenderSidebar();
+            ShowTool("settings");
+        };
+        sp.Children.Add(ext);
+
+        sp.Children.Add(new TextBlock
+        {
+            Text = Tr("Переносить нечего? Нажмите + вверху списка и заведите первую запись руками."),
+            Foreground = Text3, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 16, 0, 0),
+        });
+
+        return sp;
     }
 
     private Control EmptyState(string title, string sub)
