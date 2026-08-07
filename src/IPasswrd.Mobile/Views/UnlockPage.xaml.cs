@@ -29,17 +29,28 @@ public partial class UnlockPage : ContentPage
     {
         _creating = !Svc.State.HasLocalVault && !Svc.External.IsConnected;
 
+        bool ios = DeviceInfo.Platform == DevicePlatform.iOS;
+        string device = ios ? "этом iPhone" : "этом телефоне";
+
         Subtitle.Text = _creating ? "Создайте сейф и мастер-пароль" : "Сейф закрыт";
         ConfirmCard.IsVisible = _creating;
+        // Пути подключения готового сейфа: Google Диск (главный на Android — iCloud там нет)
+        // и файл через системный выбор (на iPhone это iCloud Drive, на Android — любой провайдер).
+        GoogleButton.IsVisible = _creating && GoogleDrive.IsConfigured;
         ConnectButton.IsVisible = _creating;
+        ConnectButton.Text = ios
+            ? "У меня уже есть сейф — подключить файл из iCloud"
+            : "Или подключить файл сейфа вручную";
         PrimaryButton.Text = _creating ? "Создать сейф" : "Открыть";
 
         BiometricButton.Text = Svc.Biometric.Kind;
         BiometricButton.IsVisible = !_creating && Svc.State.QuickUnlockAvailable;
 
-        StorageHint.Text = Svc.External.IsConnected
-            ? $"Сейф: {Svc.External.DisplayName ?? "iCloud Drive"} (общий с Windows)"
-            : _creating ? "Файл сейфа будет создан на этом iPhone" : "Локальная копия на этом iPhone";
+        StorageHint.Text = GoogleDrive.IsConnected
+            ? $"Сейф: Google Диск{(GoogleDrive.Email is { Length: > 0 } em ? $" ({em})" : "")} — общий с Windows"
+            : Svc.External.IsConnected
+                ? $"Сейф: {Svc.External.DisplayName ?? (ios ? "iCloud Drive" : "внешний файл")} (общий с Windows)"
+                : _creating ? $"Файл сейфа будет создан на {device}" : $"Локальная копия на {device}";
 
         TimeSpan left = Svc.State.LockoutRemaining;
         if (left > TimeSpan.Zero)
@@ -97,6 +108,41 @@ public partial class UnlockPage : ContentPage
         string? err = await Svc.State.TryQuickUnlockAsync();
         SetBusy(false);
         if (!string.IsNullOrEmpty(err)) ShowError(err);
+    }
+
+    /// <summary>Первый запуск: войти в Google и забрать сейф из папки IPasswrd на Google Диске —
+    /// тот же vault.ipvault, который туда кладёт Windows-приложение.</summary>
+    private async void OnConnectGoogle(object? sender, EventArgs e)
+    {
+        ShowError(null);
+        SetBusy(true);
+        try
+        {
+            string? email = await GoogleDrive.SignInAsync();
+            byte[]? remote = await GoogleDrive.PullAsync();
+            if (remote is { Length: > 0 })
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(Svc.State.LocalVaultPath)!);
+                File.WriteAllBytes(Svc.State.LocalVaultPath, remote);
+                Svc.External.Disconnect();   // Google — единственный канал синхронизации
+                Refresh();
+                Subtitle.Text = "Сейф с Google Диска — введите мастер-пароль";
+            }
+            else
+            {
+                // Вход удался, но сейфа на Диске нет. Остаёмся подключёнными:
+                // созданный сейчас сейф сам уедет на Диск при первом сохранении.
+                Refresh();
+                ShowError($"На Google Диске ({email ?? "этот аккаунт"}) сейфа ещё нет. " +
+                          "Создайте новый — он сам загрузится на Диск. " +
+                          "Если сейф уже есть на ПК, включите там: Настройки → Синхронизация → Google Диск.");
+            }
+        }
+        catch (Exception)
+        {
+            ShowError("Вход в Google не удался или был отменён. Попробуйте ещё раз.");
+        }
+        finally { SetBusy(false); }
     }
 
     private async void OnConnectExisting(object? sender, EventArgs e)

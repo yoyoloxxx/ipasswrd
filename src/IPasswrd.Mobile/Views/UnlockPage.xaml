@@ -35,7 +35,11 @@
             <Label x:Name="BusyHint" Text="Проверяю мастер-пароль…" IsVisible="False"
                    HorizontalOptions="Center" Style="{StaticResource Muted}" />
 
-            <Button x:Name="ConnectButton" Text="У меня уже есть сейф — подключить файл из iCloud"
+            <Button x:Name="GoogleButton" Text="У меня уже есть сейф — забрать с Google Диска"
+                    IsVisible="False" Clicked="OnConnectGoogle" BackgroundColor="Transparent"
+                    TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
+
+            <Button x:Name="ConnectButton" Text="Подключить файл сейфа"
                     IsVisible="False" Clicked="OnConnectExisting" BackgroundColor="Transparent"
                     TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
 
