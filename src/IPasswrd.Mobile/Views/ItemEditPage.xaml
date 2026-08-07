@@ -107,6 +107,19 @@
                 <Editor x:Name="NotesBox" Placeholder="Заметки" AutoSize="TextChanges" MinimumHeightRequest="80" />
             </Border>
 
+            <!-- Вложения добавляются прямо здесь и уезжают в сейф вместе с записью:
+                 фотографию паспорта человек делает тогда же, когда заводит документ, а не потом. -->
+            <Border Style="{StaticResource Card}" Padding="14,10">
+                <VerticalStackLayout Spacing="6">
+                    <Label Text="Вложения" FontSize="13" Style="{StaticResource Muted}" />
+                    <VerticalStackLayout x:Name="AttachRows" Spacing="6" />
+                    <Button x:Name="AttachAdd" FontSize="14" Padding="0,6" BackgroundColor="Transparent"
+                            HorizontalOptions="Start"
+                            TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}"
+                            Clicked="OnAddAttachment" />
+                </VerticalStackLayout>
+            </Border>
+
             <Label x:Name="ErrorLabel" IsVisible="False" FontSize="14"
                    TextColor="{AppThemeBinding Dark={StaticResource IpBad}, Light={StaticResource IpBadL}}" />
 

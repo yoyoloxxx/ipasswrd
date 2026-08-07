@@ -27,6 +27,71 @@ public partial class ItemEditPage : ContentPage
         if (_type == "identity") TitleBox.Placeholder = "Название — необязательно";
 
         LoadExisting();
+        RenderAttachments();
+    }
+
+    // ================= вложения =================
+
+    /// <summary>
+    /// Вложения набираются в самой записи и уходят в сейф одним сохранением.
+    ///
+    /// Раньше добавить файл можно было только в карточке уже сохранённой записи, а человек,
+    /// заводящий паспорт, упирался в форму, где фотографии просто нет. Подсказка «сначала
+    /// сохраните» тут не помогает: она объясняет неудобство, а не убирает его.
+    ///
+    /// Отдельного хранилища для «ещё не сохранённых» файлов не потребовалось: вложения лежат
+    /// внутри записи, и Add пишет их вместе со всем остальным. Пределы — десять штук, 2 МБ на
+    /// файл — проверяет сейф при сохранении, а не форма: правило должно быть одно, где бы
+    /// запись ни заводили.
+    /// </summary>
+    private void RenderAttachments()
+    {
+        AttachRows.Children.Clear();
+
+        foreach (Attachment a in _item.Attachments)
+        {
+            Attachment att = a;
+
+            var name = new Label { Text = att.Name, FontSize = 15, LineBreakMode = LineBreakMode.MiddleTruncation };
+            var meta = new Label { Text = Attachments.HumanSize(att.Bytes), FontSize = 12, Style = MutedStyle() };
+
+            var stack = new VerticalStackLayout { Spacing = 1 };
+            stack.Children.Add(name);
+            stack.Children.Add(meta);
+
+            var grid = new Grid { ColumnSpacing = 10 };
+            grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+            grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+            grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+            grid.Add(new Label
+            {
+                Text = Attachments.IsPicture(att) ? "🖼" : "📄",
+                FontSize = 20,
+                VerticalOptions = LayoutOptions.Center,
+            }, 0, 0);
+            grid.Add(stack, 1, 0);
+
+            var kill = new Button { Text = "✕", FontSize = 15, Padding = new Thickness(10, 4), BackgroundColor = Colors.Transparent };
+            // Запись ещё не сохранена, удалять нечего — поэтому без вопроса «точно?»: отмена —
+            // это просто добавить файл заново.
+            kill.Clicked += (_, _) => { _item.Attachments.Remove(att); RenderAttachments(); };
+            grid.Add(kill, 2, 0);
+
+            AttachRows.Children.Add(grid);
+        }
+
+        AttachAdd.Text = _item.Attachments.Count == 0 ? "＋ Добавить фото или файл" : "＋ Добавить ещё";
+    }
+
+    private static Style MutedStyle() => (Style)Application.Current!.Resources["Muted"];
+
+    private async void OnAddAttachment(object? sender, EventArgs e)
+    {
+        Attachment? att = await AttachmentPick.PickAsync(this, _item.Attachments.Count);
+        if (att is null) return;
+
+        _item.Attachments.Add(att);
+        RenderAttachments();
     }
 
     private void LoadExisting()
@@ -198,6 +263,13 @@ public partial class ItemEditPage : ContentPage
         {
             if (_id is null) v.Add(_item);
             else v.Update(_id, _item);
+        }
+        // Отказ из-за вложений объясняется словами сейфа: «Не удалось сохранить» на одиннадцатом
+        // файле оставляет человека гадать, что именно не так с записью.
+        catch (AttachmentTooLargeException ex)
+        {
+            ShowError(ex.Message);
+            return;
         }
         catch (Exception)
         {
