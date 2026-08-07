@@ -90,6 +90,10 @@ public partial class MainWindow : Window
         ["Необязательно — иначе соберём из имени"] = "Optional — otherwise built from the name",
         ["Улица, дом, квартира — одной строкой, как в форме доставки"]
             = "Street, building, flat — one line, the way a delivery form asks",
+        ["Срок действия карт"] = "Card expiry",
+        ["Эти карты уже не работают или вот-вот перестанут:"] = "These cards have stopped working, or are about to:",
+        ["Эти карты скоро истекают — перевыпуск занимает недели:"] = "These cards expire soon — a reissue takes weeks:",
+        ["истекла "] = "expired ", ["до "] = "until ",
         ["Выгрузить"] = "Export", ["Резервная копия сейфа или CSV для переезда в другой менеджер"]
             = "An encrypted vault backup, or a CSV for moving to another manager",
         ["Сохранить…"] = "Save…", ["Резервная копия сейфа"] = "Encrypted vault backup",
@@ -3056,7 +3060,7 @@ public partial class MainWindow : Window
 
     private void BuildSecurity()
     {
-        ToolHeader("Проверка безопасности", "Слабые и повторяющиеся пароли в вашем сейфе. Проверка идёт локально, без сети.");
+        ToolHeader("Проверка безопасности", "Слабые и повторяющиеся пароли, истекающие карты. Проверка идёт локально, без сети.");
         var report = Auditor.Audit(_vault!.Items());
         int total = report.AccountsChecked;
         int score = total == 0 ? 100 : (int)Math.Round(100.0 * report.Ok / total);
@@ -3096,7 +3100,100 @@ public partial class MainWindow : Window
         if (report.Weak.Count == 0 && report.Reused.Count == 0 && total > 0)
             ToolHost.Children.Add(new TextBlock { Text = "Проблем не найдено — все пароли надёжные и уникальные.", Foreground = Ok, FontSize = 13, Margin = new Thickness(2, 20, 0, 0) });
 
+        if (BuildCardExpirySection() is { } cards) ToolHost.Children.Add(cards);
         ToolHost.Children.Add(BuildBreachSection());   // online, opt-in HIBP check
+    }
+
+    /// <summary>
+    /// Карты, у которых истёк или вот-вот истечёт срок. Проверка безопасности до сих пор
+    /// смотрела только на пароли, а просроченная карта в сейфе выглядит ровно как рабочая —
+    /// и обнаруживается на кассе. Неразобранный срок молчит: человек его просто не заполнил.
+    /// </summary>
+    private Control? BuildCardExpirySection()
+    {
+        if (_vault is null) return null;
+        var today = DateOnly.FromDateTime(DateTime.Now);
+
+        var rows = new List<(string Id, string Title, string When, bool Expired)>();
+        try
+        {
+            foreach (VaultEntry e in _vault.Items())
+            {
+                if (e.Item.Type != ItemTypes.Card) continue;
+                string exp = e.Item.Fields.GetValueOrDefault("expiry", "");
+                CardExpiry.Status st = CardExpiry.Check(exp, today);
+                if (st is CardExpiry.Status.Expired or CardExpiry.Status.Soon)
+                    rows.Add((e.Id, e.Item.Title, CardExpiry.Format(exp), st == CardExpiry.Status.Expired));
+            }
+        }
+        catch (Exception) { return null; }
+
+        if (rows.Count == 0) return null;
+        rows = rows.OrderByDescending(r => r.Expired).ThenBy(r => r.When, StringComparer.Ordinal).ToList();
+
+        var sp = new StackPanel { Margin = new Thickness(0, 26, 0, 0) };
+        sp.Children.Add(new TextBlock
+        {
+            Text = Tr("Срок действия карт").ToUpperInvariant(),
+            FontSize = 11, FontWeight = FontWeight.Bold, Foreground = Text3, Margin = new Thickness(2, 0, 0, 8),
+        });
+
+        var card = new StackPanel();
+        card.Children.Add(new TextBlock
+        {
+            Text = rows.Any(r => r.Expired)
+                ? Tr("Эти карты уже не работают или вот-вот перестанут:")
+                : Tr("Эти карты скоро истекают — перевыпуск занимает недели:"),
+            Foreground = Text2, FontSize = 12.5, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(16, 14, 16, 8),
+        });
+
+        foreach (var r in rows) card.Children.Add(ExpiryRow(r.Title, r.Id, r.When, r.Expired));
+        card.Children.Add(new Control { Height = 6 });
+
+        sp.Children.Add(new Border
+        {
+            Background = Surface, BorderBrush = Hair, BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(14), Child = card, ClipToBounds = true,
+        });
+        return sp;
+    }
+
+    private Control ExpiryRow(string title, string id, string when, bool expired)
+    {
+        var tile = MonoTile(title, 30, 8, 12);
+        tile.Margin = new Thickness(0, 0, 11, 0);
+        Grid.SetColumn(tile, 0);
+
+        var name = new TextBlock
+        {
+            Text = title, Foreground = Text, FontWeight = FontWeight.SemiBold, FontSize = 13,
+            VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        Grid.SetColumn(name, 1);
+
+        var pill = new Border
+        {
+            Background = expired ? BadWash : WarnWash, CornerRadius = new CornerRadius(6), Padding = new Thickness(8, 3),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new TextBlock
+            {
+                Text = (expired ? Tr("истекла ") : Tr("до ")) + when,
+                Foreground = expired ? Bad : Warn, FontSize = 11, FontWeight = FontWeight.Bold,
+            },
+        };
+        Grid.SetColumn(pill, 2);
+
+        var g = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Margin = new Thickness(6, 8) };
+        g.Children.Add(tile); g.Children.Add(name); g.Children.Add(pill);
+        var btn = new Button
+        {
+            Content = g, Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            Padding = new Thickness(10, 2), CornerRadius = new CornerRadius(10),
+            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        };
+        btn.Click += (_, _) => OpenEntryFromTool(id);
+        return btn;
     }
 
     private Control SecChip(string text, IBrush color, IBrush wash)
