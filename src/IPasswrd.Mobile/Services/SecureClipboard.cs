@@ -22,7 +22,29 @@ public static class SecureClipboard
     public static async Task CopyAsync(string value)
     {
         await Clipboard.Default.SetTextAsync(value);
+        MarkSensitive();
         Schedule(value);
+    }
+
+    /// <summary>Android 13+: пометить буфер «конфиденциальным», чтобы система не показывала
+    /// его содержимое в всплывающем превью. На iOS у пароля-в-буфере такого превью нет.</summary>
+    private static void MarkSensitive()
+    {
+#if ANDROID
+        try
+        {
+            var ctx = global::Android.App.Application.Context;
+            var cm = (global::Android.Content.ClipboardManager?)ctx.GetSystemService(
+                global::Android.Content.Context.ClipboardService);
+            var clip = cm?.PrimaryClip;
+            if (clip is null) return;
+            using var extras = new global::Android.OS.PersistableBundle();
+            extras.PutBoolean("android.content.extra.IS_SENSITIVE", true);
+            if (clip.Description is not null) clip.Description.Extras = extras;
+            cm!.PrimaryClip = clip;
+        }
+        catch (Exception) { /* необязательный путь */ }
+#endif
     }
 
     private static async void Schedule(string value)

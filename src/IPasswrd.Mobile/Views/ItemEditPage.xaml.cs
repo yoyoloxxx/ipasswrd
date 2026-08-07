@@ -147,6 +147,7 @@ public partial class ItemEditPage : ContentPage
         string digits = new((e.NewTextValue ?? "").Where(char.IsDigit).ToArray());
         if (digits.Length > 19) digits = digits[..19];
         NumberBox.Text = Fmt.GroupDigits(digits);
+        NumberBox.CursorPosition = NumberBox.Text.Length;   // иначе на части Android курсор прыгает в начало
         BrandLabel.Text = Fmt.CardBrand(digits);
         _masking = false;
     }
@@ -161,6 +162,7 @@ public partial class ItemEditPage : ContentPage
             digits = "0" + digits;
         if (digits.Length > 4) digits = digits[..4];
         ExpiryBox.Text = digits.Length > 2 ? digits[..2] + "/" + digits[2..] : digits;
+        ExpiryBox.CursorPosition = ExpiryBox.Text.Length;
         _masking = false;
     }
 
