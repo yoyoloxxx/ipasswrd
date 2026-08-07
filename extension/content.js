@@ -94,13 +94,20 @@
     // Личные данные. Идут ДО логина: поле "Имя получателя" в форме доставки — не логин,
     // хотя по тексту похоже. Почта и телефон, наоборот, остаются логином: на странице входа
     // это чаще именно он, а внутри заполнения личных данных они находятся своими правилами.
+    // Словарь нарочно шире очевидного: в самописных формах подпись часто не привязана к полю
+    // (<label> без for), и всё, что остаётся, — name="surname" или name="addr". Проверено на живой
+    // странице: без этих слов значок не появлялся на «Фамилии» и «Улице».
     if (ac.includes("family-name") || ac.includes("given-name") || ac.includes("additional-name") ||
-        ac === "name" || /(^|[^а-яё])фамили|(^|[^а-яё])отчеств|\bфио\b|получател|recipient|full ?name|first ?name|last ?name/.test(t)) return "id-name";
-    if (ac.includes("postal-code") || /индекс|почтовый индекс|postal|zip/.test(t)) return "id-zip";
+        ac === "name" || /(^|[^а-яё])фамили|(^|[^а-яё])отчеств|\bфио\b|получател|recipient|full ?name|first ?name|last ?name|surname|patronymic|middlename|lastname|firstname|\bfname\b|\blname\b|\bmname\b/.test(t)) return "id-name";
+    // Без голого postal: «postal address» — это адрес, а не индекс.
+    if (ac.includes("postal-code") || /индекс|postal ?code|post ?code|zip|postindex/.test(t)) return "id-zip";
     if (ac.includes("country") || /страна|country/.test(t)) return "id-country";
-    if (ac.includes("address-level2") || /(^|[^а-яё])город|населённ|населенн|\bcity\b|town/.test(t)) return "id-city";
-    if (ac.includes("street-address") || ac.includes("address-line") ||
-        /улиц|(^|[^а-яё])адрес|street|address/.test(t)) return "id-street";
+    if (ac.includes("address-level2") || /(^|[^а-яё])город|населённ|населенн|\bcity\b|town|locality/.test(t)) return "id-city";
+    // «Адрес электронной почты» тоже адрес, но везти туда некуда. Отличаем по «электронн»
+    // и mail, а не по «почт»: «Почтовый адрес» — это как раз куда везти.
+    if ((ac.includes("street-address") || ac.includes("address-line") ||
+         /улиц|(^|[^а-яё])адрес|street|address|\baddr\b|addr[1-2]?\b/.test(t)) &&
+        !/электронн|e[-\s]?mail|\bmail\b/.test(t)) return "id-street";
 
     if (type === "email" || type === "tel" || ac.includes("username") || ac.includes("email") ||
         /\b(user(name)?|login|e[-\s]?mail|phone|tel|account|identifier)\b/.test(t) ||
@@ -209,18 +216,28 @@
       const t = fieldText(el);
       const type = (el.type || "text").toLowerCase();
 
-      if (ac.includes("family-name") || /(^|[^а-яё])фамили|last ?name|surname/.test(t)) { if (idn.lastName) setVal(el, idn.lastName); continue; }
-      if (ac.includes("additional-name") || /отчеств|middle ?name|patronymic/.test(t)) { if (idn.middleName) setVal(el, idn.middleName); continue; }
+      if (ac.includes("family-name") || /(^|[^а-яё])фамили|last ?name|lastname|surname|\blname\b/.test(t)) { if (idn.lastName) setVal(el, idn.lastName); continue; }
+      if (ac.includes("additional-name") || /отчеств|middle ?name|middlename|patronymic|\bmname\b/.test(t)) { if (idn.middleName) setVal(el, idn.middleName); continue; }
       // Собирательное поле — раньше «имени»: «Имя получателя» в русских магазинах ждёт ФИО целиком,
       // а не одно имя, и проверка на given-name перехватила бы его по слову «имя».
       if (ac === "name" || /\bфио\b|получател|recipient|full ?name/.test(t)) { if (fio) setVal(el, fio); continue; }
-      if (ac.includes("given-name") || /(^|[^а-яё])имя([^а-яё]|$)|first ?name/.test(t)) { if (idn.firstName) setVal(el, idn.firstName); continue; }
+      if (ac.includes("given-name") || /(^|[^а-яё])имя([^а-яё]|$)|first ?name|firstname|\bfname\b/.test(t)) { if (idn.firstName) setVal(el, idn.firstName); continue; }
       if (type === "tel" || ac.includes("tel") || /телефон|phone|mobile/.test(t)) { if (idn.phone) setVal(el, idn.phone); continue; }
-      if (type === "email" || ac.includes("email") || /почт|e[-\s]?mail/.test(t)) { if (idn.email) setVal(el, idn.email); continue; }
-      if (ac.includes("postal-code") || /индекс|postal|zip/.test(t)) { if (idn.zip) setVal(el, idn.zip); continue; }
+
+      // Индекс — РАНЬШЕ почты. «Почтовый индекс» содержит слово «почт», и правило для
+      // электронной почты забирало его себе — в поле индекса приезжала почта. Наоборот
+      // запретить «почтов» нельзя: «Почтовый ящик» — это как раз почта. Порядок решает оба
+      // случая без списка исключений.
+      if (ac.includes("postal-code") || /индекс|postal ?code|post ?code|zip|postindex/.test(t)) { if (idn.zip) setVal(el, idn.zip); continue; }
+
+      // Почта — РАНЬШЕ адреса по той же причине: «Адрес электронной почты» — не адрес доставки.
+      // Само слово «почт» слишком широкое: «почтовый адрес» — это куда везти.
+      if (type === "email" || ac.includes("email") || /e[-\s]?mail|электронн\w* почт|почт[аеуы]([^а-яё]|$)/.test(t)) { if (idn.email) setVal(el, idn.email); continue; }
+
       if (ac.includes("country") || /страна|country/.test(t)) { if (idn.country) setVal(el, idn.country); continue; }
-      if (ac.includes("address-level2") || /(^|[^а-яё])город|\bcity\b|town/.test(t)) { if (idn.city) setVal(el, idn.city); continue; }
-      if (ac.includes("street-address") || ac.includes("address-line") || /улиц|(^|[^а-яё])адрес|street|address/.test(t)) { if (idn.street) setVal(el, idn.street); continue; }
+      if (ac.includes("address-level2") || /(^|[^а-яё])город|\bcity\b|town|locality/.test(t)) { if (idn.city) setVal(el, idn.city); continue; }
+      if ((ac.includes("street-address") || ac.includes("address-line") || /улиц|(^|[^а-яё])адрес|street|address|\baddr\b|addr[1-2]?\b/.test(t)) &&
+          !/электронн|e[-\s]?mail|\bmail\b/.test(t)) { if (idn.street) setVal(el, idn.street); continue; }
     }
   }
 

@@ -18,6 +18,16 @@ internal static class Program
     private static int Main(string[] args)
     {
         try { Console.OutputEncoding = Encoding.UTF8; } catch { /* redirected/no console */ }
+
+        // Ввод — тоже UTF-8. Иначе строка, поданная из файла или конвейера, читается в кодировке
+        // консоли, и «Петров» приезжает в сейф как «??????» — молча, без единой ошибки и без
+        // возможности восстановить исходное. Скрипты, заливающие записи пачкой, — ровно тот
+        // случай, где это заметят последним.
+        if (Console.IsInputRedirected)
+        {
+            try { Console.SetIn(new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false))); }
+            catch { /* оставим как есть */ }
+        }
         try
         {
             if (args.Length == 0) { Usage(); return 1; }
@@ -91,6 +101,7 @@ internal static class Program
             "card" => AddCard(),
             "note" => AddNote(),
             "doc" or "document" => AddDoc(),
+            "identity" or "id" => AddIdentity(),
             _ => AddAccount(),
         };
         string id = v.Add(item);
@@ -113,6 +124,27 @@ internal static class Program
         if (!string.IsNullOrEmpty(totp)) item.Fields["totp"] = totp;
         string notes = Prompt("Заметка (необязательно): ");
         if (!string.IsNullOrEmpty(notes)) item.Notes = notes;
+        return item;
+    }
+
+    /// <summary>Личные данные для форм доставки — те же поля и в том же порядке, что в окне приложения.</summary>
+    private static VaultItem AddIdentity()
+    {
+        var item = new VaultItem { Type = "identity", Title = Prompt("Название (пусто = собрать из ФИО): ") };
+        foreach (var (key, label) in new[]
+        {
+            ("lastName", "Фамилия: "), ("firstName", "Имя: "), ("middleName", "Отчество: "),
+            ("phone", "Телефон: "), ("email", "Почта: "), ("zip", "Индекс: "),
+            ("country", "Страна: "), ("city", "Город: "), ("street", "Адрес (улица, дом, квартира): "),
+        })
+        {
+            string v = Prompt(label);
+            if (!string.IsNullOrEmpty(v)) item.Fields[key] = v;
+        }
+        if (string.IsNullOrWhiteSpace(item.Title))
+            item.Title = string.Join(" ", new[] { "lastName", "firstName", "middleName" }
+                .Select(k => item.Fields.GetValueOrDefault(k, ""))
+                .Where(x => x.Length > 0));
         return item;
     }
 

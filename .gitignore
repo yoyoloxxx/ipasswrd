@@ -30,3 +30,5 @@ tools/msix/sdk/
 
 # Ключ подписи Android — НИКОГДА не коммитить
 /_signing/
+
+/test-vault/
