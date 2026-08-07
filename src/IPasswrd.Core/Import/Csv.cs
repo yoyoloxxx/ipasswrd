@@ -7,6 +7,33 @@ namespace IPasswrd.Core.Import;
 /// browser / password-manager exports where passwords may contain commas and quotes.</summary>
 public static class Csv
 {
+    /// <summary>
+    /// Обратная операция к <see cref="Parse"/>, по тем же правилам RFC 4180: поле берётся
+    /// в кавычки, если в нём есть запятая, кавычка или перевод строки — в паролях всё это
+    /// встречается регулярно. Конец строки — CRLF: так пишут браузеры, и так ждёт Excel.
+    /// </summary>
+    public static string Write(IEnumerable<IReadOnlyList<string>> rows)
+    {
+        var sb = new StringBuilder();
+        foreach (IReadOnlyList<string> row in rows)
+        {
+            for (int i = 0; i < row.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(Field(row[i]));
+            }
+            sb.Append("\r\n");
+        }
+        return sb.ToString();
+    }
+
+    private static string Field(string? value)
+    {
+        string s = value ?? "";
+        if (s.IndexOfAny(new[] { ',', '"', '\n', '\r' }) < 0) return s;
+        return '"' + s.Replace("\"", "\"\"") + '"';
+    }
+
     public static List<List<string>> Parse(string text)
     {
         var rows = new List<List<string>>();

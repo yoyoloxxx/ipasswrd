@@ -83,6 +83,16 @@ public partial class MainWindow : Window
         ["Аутентификатор"] = "Authenticator", ["Генератор"] = "Generator", ["Проверка"] = "Security", ["Настройки"] = "Settings",
         ["Локальный сейф"] = "Local storage", ["без синхронизации"] = "no sync",
         ["Импорт из файла"] = "Import from file", ["Заблокировать"] = "Lock",
+        ["Выгрузить"] = "Export", ["Резервная копия сейфа или CSV для переезда в другой менеджер"]
+            = "An encrypted vault backup, or a CSV for moving to another manager",
+        ["Сохранить…"] = "Save…", ["Резервная копия сейфа"] = "Encrypted vault backup",
+        ["CSV со всеми паролями"] = "CSV with every password",
+        ["Выгрузить пароли в CSV?"] = "Export every password to CSV?",
+        ["Файл будет обычным текстом: любой, кто его откроет, увидит все пароли сразу. Он нужен, чтобы переехать в другой менеджер — сразу после переезда его стоит удалить."]
+            = "The file is plain text: anyone who opens it sees every password at once. It exists so you can move to another manager — delete it as soon as you have.",
+        ["Сейф IPasswrd"] = "IPasswrd vault", ["Резервная копия сохранена"] = "Backup saved",
+        ["Файл сохранён. После переезда удалите его."] = "Saved. Delete it once you have moved.",
+        ["Не получилось сохранить: "] = "Could not save: ",
         ["Выбрать файл"] = "Choose file", ["Kaspersky, Chrome, Edge, Яндекс и другие"] = "Kaspersky, Chrome, Edge, Yandex and more",
         // list / search / empty states
         ["Поиск"] = "Search", ["Ничего не найдено"] = "Nothing found", ["Попробуйте другой запрос."] = "Try a different query.",
@@ -1659,6 +1669,53 @@ public partial class MainWindow : Window
     private void CloseCard(Border dim)
     {
         if (this.Content is Grid root) root.Children.Remove(dim);
+    }
+
+    private Border? _toast;
+    private System.Threading.CancellationTokenSource? _toastCts;
+
+    /// <summary>
+    /// Короткое «готово» внизу окна. Модальное окно ради подтверждения успеха требует закрыть
+    /// его руками — плата за новость, которая ничего не требует в ответ.
+    /// </summary>
+    private async void Toast(string message)
+    {
+        if (this.Content is not Grid root) return;
+
+        _toastCts?.Cancel();
+        if (_toast is not null) root.Children.Remove(_toast);
+
+        var card = new Border
+        {
+            Background = Surface2,
+            BorderBrush = HairStrong,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(16, 10),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, 26),
+            IsHitTestVisible = false,
+            Child = new TextBlock
+            {
+                Text = message,
+                Foreground = Text,
+                FontSize = 13,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 460,
+            },
+        };
+        Grid.SetRow(card, 0);
+        Grid.SetRowSpan(card, root.RowDefinitions.Count > 0 ? root.RowDefinitions.Count : 1);
+        root.Children.Add(card);
+        _toast = card;
+
+        var cts = _toastCts = new System.Threading.CancellationTokenSource();
+        try { await Task.Delay(2600, cts.Token); }
+        catch (TaskCanceledException) { return; }
+
+        root.Children.Remove(card);
+        if (ReferenceEquals(_toast, card)) _toast = null;
     }
 
     /// <summary>Правая кнопка по папке в боковой панели: переименовать или распустить.</summary>
@@ -3271,6 +3328,8 @@ public partial class MainWindow : Window
         g.Children.Add(Hairline());
         g.Children.Add(SetRowControl("Импорт из файла", "Kaspersky, Chrome, Edge, Яндекс и другие", ImportControl()));
         g.Children.Add(Hairline());
+        g.Children.Add(SetRowControl("Выгрузить", "Резервная копия сейфа или CSV для переезда в другой менеджер", ExportControl()));
+        g.Children.Add(Hairline());
         g.Children.Add(SetRowControl("Удалить дубликаты", "Схлопнуть одинаковые аккаунты (один логин и пароль, разные поддомены)", DedupeControl()));
 
         ToolHost.Children.Add(new Border { Background = Surface, BorderBrush = Hair, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(14), Margin = new Thickness(0, 20, 0, 0), Child = g, ClipToBounds = true });
@@ -3327,6 +3386,91 @@ public partial class MainWindow : Window
         };
         b.Click += OnImportClick;
         return b;
+    }
+
+    /// <summary>
+    /// Два выхода, и это намеренно. Резервная копия — тот же зашифрованный файл сейфа:
+    /// ничего не теряется и никто чужой её не прочтёт. CSV — способ уйти в другой менеджер,
+    /// и он по определению открытый текст, поэтому спрашивается отдельно и прямо.
+    /// </summary>
+    private Control ExportControl()
+    {
+        var b = new Button
+        {
+            Content = Tr("Сохранить…"),
+            Padding = new Thickness(14, 6),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+        };
+
+        var backup = new MenuItem { Header = Tr("Резервная копия сейфа"), Icon = MakeIcon(IconData("shield"), 15, Text2, 1.6) };
+        backup.Click += async (_, _) => await ExportVaultCopyAsync();
+
+        var csv = new MenuItem { Header = Tr("CSV со всеми паролями"), Icon = MakeIcon(IconData("doc"), 15, Warn, 1.6) };
+        csv.Click += (_, _) => PromptConfirm(
+            Tr("Выгрузить пароли в CSV?"),
+            Tr("Файл будет обычным текстом: любой, кто его откроет, увидит все пароли сразу. " +
+               "Он нужен, чтобы переехать в другой менеджер — сразу после переезда его стоит удалить."),
+            Tr("Выгрузить"), danger: true,
+            () => _ = ExportCsvAsync());
+
+        var flyout = new MenuFlyout { ItemsSource = new List<Control> { backup, csv } };
+        b.Click += (_, _) => flyout.ShowAt(b);
+        return b;
+    }
+
+    /// <summary>Тот же файл сейфа, только туда, куда укажут: резервная копия без потерь и без риска.</summary>
+    private async Task ExportVaultCopyAsync()
+    {
+        if (_vault is null) return;
+        byte[] blob;
+        try { blob = _vault.Serialize(); }
+        catch (Exception) { return; }
+
+        await SaveBytesAsync(blob, $"IPasswrd-{DateTime.Now:yyyy-MM-dd}.ipvault",
+            new FilePickerFileType(Tr("Сейф IPasswrd")) { Patterns = new[] { "*.ipvault" } },
+            Tr("Резервная копия сохранена"));
+    }
+
+    private async Task ExportCsvAsync()
+    {
+        if (_vault is null) return;
+        byte[] bytes;
+        try
+        {
+            // BOM: без него Excel откроет кириллицу кракозябрами, а человек решит, что сломался экспорт.
+            string csv = IPasswrd.Core.Import.Exporter.ToCsv(_vault.Items());
+            bytes = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetBytes(csv);
+        }
+        catch (Exception) { return; }
+
+        await SaveBytesAsync(bytes, $"IPasswrd-{DateTime.Now:yyyy-MM-dd}.csv",
+            new FilePickerFileType("CSV") { Patterns = new[] { "*.csv" } },
+            Tr("Файл сохранён. После переезда удалите его."));
+    }
+
+    private async Task SaveBytesAsync(byte[] data, string suggestedName, FilePickerFileType type, string done)
+    {
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null) return;
+        try
+        {
+            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                SuggestedFileName = suggestedName,
+                DefaultExtension = System.IO.Path.GetExtension(suggestedName).TrimStart('.'),
+                FileTypeChoices = new[] { type },
+            });
+            if (file is null) return;
+
+            await using var stream = await file.OpenWriteAsync();
+            await stream.WriteAsync(data);
+            await stream.FlushAsync();
+            Toast(done);
+        }
+        catch (Exception ex)
+        {
+            Toast(Tr("Не получилось сохранить: ") + ex.Message);
+        }
     }
 
     private static readonly (string Label, int Min)[] _autolockOptions =
