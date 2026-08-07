@@ -166,6 +166,7 @@ public partial class MainWindow : Window
         ["Быстрый поиск"] = "Quick search", ["Ctrl+Shift+Пробел из любого окна"] = "Ctrl+Shift+Space from anywhere",
         // attachments
         ["Вложения"] = "Attachments", ["Прикрепить файл"] = "Attach a file",
+        ["Убрать"] = "Remove", ["Не больше {0} вложений в одной записи."] = "No more than {0} attachments per record.",
         ["Выберите файл"] = "Choose a file", ["Сканы и документы"] = "Scans and documents",
         ["Сохранить вложение"] = "Save the attachment", ["Сохранить как…"] = "Save as…",
         ["Удалить вложение"] = "Delete the attachment",
@@ -4389,6 +4390,9 @@ public partial class MainWindow : Window
         _editExisting = existing;
         _editType = forceType ?? existing?.Type ?? "account";
         _editControls = new Dictionary<string, TextBox>();
+        // Копия списка, а не он сам: пока человек передумывает и убирает файлы в форме,
+        // сохранённая запись меняться не должна — вдруг он закроет редактор, не сохраняя.
+        _editAttachments = existing?.Attachments.ToList() ?? new List<Attachment>();
         BuildEditorForm(existing);
         VaultScreen.IsVisible = false;
         EditorScreen.IsVisible = true;
@@ -4469,6 +4473,8 @@ public partial class MainWindow : Window
                 ? Tr("Необязательно — например: ") + string.Join(", ", known.Take(3))
                 : Tr("Необязательно — например: Работа"));
 
+        EditorForm.Children.Add(Labeled(Tr("Вложения"), EditorAttachments()));
+
         // bottom action row (prototype: source badge left, Save right)
         var save = new Button { Content = "Сохранить", Padding = new Thickness(18, 9) };
         save.Classes.Add("primary");
@@ -4481,6 +4487,86 @@ public partial class MainWindow : Window
         bar.Children.Add(save);
         EditorForm.Children.Add(bar);
         Relocalize();
+    }
+
+    /// <summary>
+    /// Файлы, набранные в редакторе. Живут отдельно от записи до самого сохранения — как и
+    /// текст в полях: закрыл редактор — ничего не поменялось.
+    /// </summary>
+    private List<Attachment> _editAttachments = new();
+
+    /// <summary>
+    /// Вложения прямо в форме — та же починка, что на телефоне: человек, заводящий паспорт,
+    /// прикладывает скан сразу, а не ищет потом кнопку в карточке. Пределы проверяются и здесь
+    /// (чтобы сказать сразу, а не при сохранении), и всё равно сейфом — его слово последнее.
+    /// </summary>
+    private Control EditorAttachments()
+    {
+        var host = new StackPanel { Spacing = 6 };
+
+        void Render()
+        {
+            host.Children.Clear();
+
+            foreach (var a in _editAttachments.ToList())
+            {
+                var att = a;
+                var name = new TextBlock { Text = att.Name, Foreground = Text, FontSize = 12.5, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+                var size = new TextBlock { Text = Attachments.HumanSize(att.Bytes), Foreground = Text3, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center };
+                var kill = new Button { Content = "✕", Padding = new Thickness(8, 3), FontSize = 12 };
+                ToolTip.SetTip(kill, Tr("Убрать"));
+                // Без вопроса «точно?»: до сохранения ничего не теряется, отмена — добавить заново.
+                kill.Click += (_, _) => { _editAttachments.Remove(att); Render(); };
+
+                Grid.SetColumn(name, 0); Grid.SetColumn(size, 1); Grid.SetColumn(kill, 2);
+                var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), ColumnSpacing = 10 };
+                row.Children.Add(name); row.Children.Add(size); row.Children.Add(kill);
+                host.Children.Add(row);
+            }
+
+            var add = new Button { Content = Tr("Прикрепить файл"), Padding = new Thickness(12, 6), HorizontalAlignment = HorizontalAlignment.Left };
+            add.Click += async (_, _) =>
+            {
+                if (_editAttachments.Count >= Vault.MaxAttachmentsPerItem)
+                {
+                    Toast(string.Format(Tr("Не больше {0} вложений в одной записи."), Vault.MaxAttachmentsPerItem));
+                    return;
+                }
+                var top = TopLevel.GetTopLevel(this);
+                if (top is null) return;
+                try
+                {
+                    var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                    {
+                        Title = Tr("Выберите файл"),
+                        AllowMultiple = false,
+                        FileTypeFilter = new[]
+                        {
+                            new FilePickerFileType(Tr("Сканы и документы")) { Patterns = new[] { "*.jpg", "*.jpeg", "*.png", "*.pdf", "*.bmp", "*.tif", "*.tiff", "*.webp" } },
+                            FilePickerFileTypes.All,
+                        },
+                    });
+                    if (files.Count == 0) return;
+
+                    byte[] raw;
+                    await using (var stream = await files[0].OpenReadAsync())
+                    using (var ms = new System.IO.MemoryStream())
+                    {
+                        await stream.CopyToAsync(ms);
+                        raw = ms.ToArray();
+                    }
+
+                    _editAttachments.Add(Attachments.Prepare(files[0].Name, raw));
+                    Render();
+                }
+                catch (AttachmentTooLargeException ex) { Toast(ex.Message); }
+                catch (Exception ex) { Toast(Tr("Ошибка: ") + ex.Message); }
+            };
+            host.Children.Add(add);
+        }
+
+        Render();
+        return host;
     }
 
     private void AddField(string key, string label, string? value, bool multiline = false, string? watermark = null)
@@ -4687,14 +4773,20 @@ public partial class MainWindow : Window
         string notes = Get("notes");
         if (!string.IsNullOrEmpty(notes)) item.Notes = notes;
 
-        // Форма собрала запись с нуля — всё, чего в ней нет, надо перенести руками. Без этого правка
-        // названия тихо уносила приложенные фотографии, снимала звёздочку и выбрасывала поля,
-        // записанные более новой версией программы.
+        // Вложения приносит сама форма — в ней их добавляют и убирают, поэтому пустой список
+        // значит «убрали всё», а не «форма не в курсе». Остальное, чего в форме нет — звёздочку
+        // и поля более новой версии — переносит FormEdit.Carry. Без него правка названия тихо
+        // снимала звёздочку и выбрасывала чужие поля.
+        item.Attachments = _editAttachments;
         FormEdit.Carry(_editExisting, item);
 
         string id;
-        if (_editId is null) id = _vault.Add(item);
-        else { _vault.Update(_editId, item); id = _editId; }
+        try
+        {
+            if (_editId is null) id = _vault.Add(item);
+            else { _vault.Update(_editId, item); id = _editId; }
+        }
+        catch (AttachmentTooLargeException ex) { Toast(ex.Message); return; }   // остаёмся в редакторе — набранное не пропадает
         Save();
 
         if (_editType == "account")   // per-site group name, keyed by the exact URL
