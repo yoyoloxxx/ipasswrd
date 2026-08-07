@@ -27,3 +27,6 @@ tools/msix/sdk/
 /build-extension/
 /demo-vault/
 /dist-android/
+
+# Ключ подписи Android — НИКОГДА не коммитить
+/_signing/

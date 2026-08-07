@@ -15,6 +15,12 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Постоянный ключ подписи. Без него каждая сборка подписывалась бы новым
+      # одноразовым отладочным ключом, и обновление не встало бы поверх старого APK.
+      IPW_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+      IPW_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+      IPW_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,13 +57,37 @@ jobs:
           -f net9.0-android -c Debug
           -p:IpwAndroidOnly=true -p:IpwNet9Only=true
 
-      - name: Publish APK (Release, отладочная подпись)
+      - name: Restore signing keystore
+        run: |
+          if [ -n "$IPW_KEYSTORE_B64" ]; then
+            printf '%s' "$IPW_KEYSTORE_B64" | base64 -d > ipasswrd.keystore
+            echo "IPW_SIGNED=1" >> "$GITHUB_ENV"
+            echo "ключ подписи получен из секретов"
+          else
+            echo "::warning::секрета ANDROID_KEYSTORE_B64 нет — APK будет подписан одноразовым отладочным ключом, и обновление НЕ встанет поверх предыдущего"
+          fi
+
+      - name: Publish APK (Release, постоянный ключ)
+        if: env.IPW_SIGNED == '1'
         run: >
           dotnet publish IPasswrd.Mobile.csproj
           -f net9.0-android -c Release
           -p:IpwAndroidOnly=true -p:IpwNet9Only=true
-          -p:AndroidKeyStore=false
           -p:AndroidPackageFormat=apk
+          -p:AndroidKeyStore=true
+          -p:AndroidSigningKeyStore=ipasswrd.keystore
+          -p:AndroidSigningKeyAlias="$IPW_KEY_ALIAS"
+          -p:AndroidSigningKeyPass="$IPW_KEYSTORE_PASS"
+          -p:AndroidSigningStorePass="$IPW_KEYSTORE_PASS"
+
+      - name: Publish APK (Release, отладочная подпись — запасной путь)
+        if: env.IPW_SIGNED != '1'
+        run: >
+          dotnet publish IPasswrd.Mobile.csproj
+          -f net9.0-android -c Release
+          -p:IpwAndroidOnly=true -p:IpwNet9Only=true
+          -p:AndroidPackageFormat=apk
+          -p:AndroidKeyStore=false
 
       - name: Collect APK
         run: |
@@ -69,6 +99,17 @@ jobs:
           if [ -z "$APK" ]; then echo "::error::apk не собрался"; exit 1; fi
           cp "$APK" out/IPasswrd.apk
           ls -la out
+
+      - name: Отпечаток подписи (чтобы видеть, что ключ тот же)
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs out/IPasswrd.apk | grep -i "SHA-1" || true
+          fi
+
+      - name: Убрать ключ с раннера
+        if: always()
+        run: rm -f ipasswrd.keystore
 
       - uses: actions/upload-artifact@v4
         with:
