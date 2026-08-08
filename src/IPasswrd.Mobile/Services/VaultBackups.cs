@@ -1,14 +1,16 @@
 namespace IPasswrd.Mobile.Services;
 
+/// <summary>Одна локальная копия сейфа.</summary>
+public sealed record BackupEntry(string Path, DateTime TakenUtc, long Bytes);
+
 /// <summary>
 /// Локальные снимки файла сейфа на телефоне. Снимаются ПЕРЕД тем, как локальный
 /// vault.ipvault перезаписывается — привезённым из облака при синхронизации или своей
-/// же новой версией при сохранении. Именно подмена файла целиком (а не поэлементная
-/// правка) — момент, когда можно потерять данные; снимок даёт откат.
+/// же новой версией при сохранении. Именно подмена файла целиком — момент, когда можно
+/// потерять данные; снимок даёт откат.
 ///
-/// Хранятся в приватной папке приложения (не попадает в бэкап ОС, не видна другим
-/// приложениям). Держим последние <see cref="Keep"/> штук, старые вычищаются.
-/// Всё best-effort: сбой снимка не должен мешать основной работе.
+/// Хранятся в приватной папке приложения (не в бэкапе ОС, не видны другим приложениям).
+/// Держим последние <see cref="Keep"/>, старые вычищаются. Всё best-effort.
 /// </summary>
 public static class VaultBackups
 {
@@ -17,8 +19,7 @@ public static class VaultBackups
     private const string Prefix = "vault-";
     private const string Ext = ".ipvault";
 
-    public static string BackupsDir =>
-        Path.Combine(FileSystem.AppDataDirectory, DirName);
+    public static string BackupsDir => Path.Combine(FileSystem.AppDataDirectory, DirName);
 
     /// <summary>Скопировать текущий файл сейфа в папку снимков (если он есть) и вычистить старые.</summary>
     public static void Snapshot(string vaultPath)
@@ -26,32 +27,38 @@ public static class VaultBackups
         try
         {
             if (!File.Exists(vaultPath)) return;   // ещё нечего снимать (первый запуск)
-
             Directory.CreateDirectory(BackupsDir);
-            // метка времени в имени — сортировка по имени совпадает с хронологией
             string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
-            string dest = Path.Combine(BackupsDir, Prefix + stamp + Ext);
-            File.Copy(vaultPath, dest, overwrite: true);
-
+            File.Copy(vaultPath, Path.Combine(BackupsDir, Prefix + stamp + Ext), overwrite: true);
             Prune();
         }
-        catch (Exception)
-        {
-            // снимок — подстраховка, его провал не важен для основной операции
-        }
+        catch (Exception) { /* снимок — подстраховка, его провал не важен */ }
     }
 
-    /// <summary>Снимки от новых к старым.</summary>
-    public static IReadOnlyList<string> List()
+    /// <summary>Снимки от новых к старым. Параметр vaultPath не используется — папка одна;
+    /// он оставлен, чтобы вызов читался симметрично Snapshot/Restore.</summary>
+    public static IReadOnlyList<BackupEntry> List(string? vaultPath = null)
     {
         try
         {
-            if (!Directory.Exists(BackupsDir)) return Array.Empty<string>();
+            if (!Directory.Exists(BackupsDir)) return Array.Empty<BackupEntry>();
             return Directory.GetFiles(BackupsDir, Prefix + "*" + Ext)
-                .OrderByDescending(p => p, StringComparer.Ordinal)
+                .Select(p => new FileInfo(p))
+                .OrderByDescending(fi => fi.Name, StringComparer.Ordinal)
+                .Select(fi => new BackupEntry(fi.FullName, fi.LastWriteTimeUtc, fi.Length))
                 .ToList();
         }
-        catch (Exception) { return Array.Empty<string>(); }
+        catch (Exception) { return Array.Empty<BackupEntry>(); }
+    }
+
+    /// <summary>Вернуть сейф к состоянию из копии. Текущее состояние тоже снимается копией —
+    /// чтобы неудачное восстановление можно было откатить назад.</summary>
+    public static void Restore(string vaultPath, string backupPath)
+    {
+        if (!File.Exists(backupPath)) throw new FileNotFoundException("Копия не найдена.");
+        Snapshot(vaultPath);                       // сегодняшнее состояние — тоже в копии
+        Directory.CreateDirectory(Path.GetDirectoryName(vaultPath)!);
+        File.Copy(backupPath, vaultPath, overwrite: true);
     }
 
     private static void Prune()
@@ -62,9 +69,7 @@ public static class VaultBackups
                 .OrderByDescending(p => p, StringComparer.Ordinal)
                 .ToList();
             for (int i = Keep; i < all.Count; i++)
-            {
                 try { File.Delete(all[i]); } catch (Exception) { }
-            }
         }
         catch (Exception) { }
     }
