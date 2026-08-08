@@ -67,7 +67,21 @@ $manifest = Get-Content (Join-Path $src 'AppxManifest.xml') -Raw -Encoding UTF8
 $manifest = $manifest -replace 'Version="0\.0\.0\.0"', "Version=`"$Version.0`""
 [System.IO.File]::WriteAllText((Join-Path $stage 'AppxManifest.xml'), $manifest, (New-Object System.Text.UTF8Encoding $false))
 
-# --- 4. упаковка ---
+# --- 4. индекс ресурсов (resources.pri) ---
+# Без PRI Windows видит только файлы, названные буквально в манифесте, а варианты
+# targetsize/altform-unplated (голый логотип без подложки для панели задач) находятся
+# только через индекс — без него панель задач рисует плитку с подложкой.
+$priConfig = Join-Path $stage 'priconfig.xml'
+& (Join-Path $sdk 'makepri.exe') createconfig /cf $priConfig /dq ru-RU_en-US /pv 10.0.0 /o | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed" }
+Push-Location $stage
+& (Join-Path $sdk 'makepri.exe') new /pr $stage /cf $priConfig /of (Join-Path $stage 'resources.pri') /mn (Join-Path $stage 'AppxManifest.xml') /o | Out-Null
+$priExit = $LASTEXITCODE
+Pop-Location
+if ($priExit -ne 0) { throw "makepri new failed" }
+Remove-Item $priConfig -Force
+
+# --- 5. упаковка ---
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $msix = Join-Path $out "IPasswrd-$Version.msix"
 if (Test-Path $msix) { Remove-Item $msix -Force }
