@@ -1230,10 +1230,12 @@ public partial class MainWindow : Window
 
         // Folders appear only once something is in one — an empty "ПАПКИ" heading would be
         // a permanent invitation to organise, which is not what anyone opens a vault to do.
+        // Запись может лежать в нескольких папках — в сайдбаре она считается в каждой из них,
+        // иначе папка, где запись «вторая», пропадает из списка вовсе.
         var folders = all
             .Where(x => x.Item.Type != "totp" && x.Item.Type != "meta")
-            .Where(x => x.Item.Folder.Length > 0)
-            .GroupBy(x => x.Item.Folder, StringComparer.Ordinal)
+            .SelectMany(x => ItemFolders.Of(x.Item))
+            .GroupBy(f => f, StringComparer.Ordinal)
             .OrderBy(g => g.Key, StringComparer.CurrentCulture)
             .ToList();
 
