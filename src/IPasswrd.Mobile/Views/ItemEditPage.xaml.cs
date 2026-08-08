@@ -33,6 +33,12 @@ public partial class ItemEditPage : ContentPage
 
     // ================= папки =================
 
+    protected override void OnAppearing()
+    {
+        base.OnAppearing();
+        UpdateFolderRow();   // вернулись с экрана выбора папок — показать актуальный список
+    }
+
     private void UpdateFolderRow()
     {
         var folders = ItemFolders.Of(_item);
@@ -40,54 +46,14 @@ public partial class ItemEditPage : ContentPage
     }
 
     /// <summary>
-    /// Папок у записи может быть несколько, поэтому лист — не выбор одной, а переключатели:
-    /// ✓ — запись в папке, тап вынимает; ＋ — тап кладёт, не трогая остальные. Лист закрывается
-    /// после каждого тапа — так устроен системный ActionSheet; для второй папки кнопка
-    /// нажимается ещё раз. Список существующих предлагается не для красоты: набранная
-    /// руками «работа» рядом с «Работа» даёт две папки вместо одной.
-    ///
-    /// Меняется всё в _item сразу, но в сейф попадает только с кнопкой «Сохранить» —
-    /// как и всё остальное в этой форме.
+    /// Папок у записи может быть несколько, поэтому открываем экран мультивыбора
+    /// (переключатели + создание новой), а не системный лист выбора одной.
+    /// Экран правит список прямо в _item; в сейф уедет с кнопкой «Сохранить».
     /// </summary>
     private async void OnPickFolder(object? sender, EventArgs e)
     {
-        var known = new List<string>();
-        try
-        {
-            Vault? v = Svc.State.Vault;
-            if (v is not null)
-                known = v.Items()
-                    .SelectMany(x => ItemFolders.Of(x.Item))
-                    .Distinct(StringComparer.Ordinal)
-                    .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)
-                    .ToList();
-        }
-        catch (Exception) { }
-        // Папки самой записи видны в листе, даже если она в них пока одна во всём сейфе.
-        foreach (string f in ItemFolders.Of(_item))
-            if (!known.Contains(f, StringComparer.Ordinal)) known.Add(f);
-
-        const string fresh = "Новая папка…";
-        var options = new List<string> { fresh };
-        options.AddRange(known.Select(k => (ItemFolders.In(_item, k) ? "✓ " : "＋ ") + k));
-
-        string choice = await DisplayActionSheet("Папки записи", "Готово", null, options.ToArray());
-        if (string.IsNullOrEmpty(choice) || choice == "Готово") return;
-
-        if (choice == fresh)
-        {
-            string? name = await DisplayPromptAsync("Новая папка", "Название", "Готово", "Отмена", maxLength: 40);
-            name = (name ?? "").Trim().Trim(',');   // запятая — разделитель в редакторе на ПК, в имени ей не место
-            if (name.Length == 0) return;
-            ItemFolders.Add(_item, name);
-        }
-        else if (choice.Length > 2)
-        {
-            string name = choice[2..];
-            if (ItemFolders.In(_item, name)) ItemFolders.Remove(_item, name);
-            else ItemFolders.Add(_item, name);
-        }
-        UpdateFolderRow();
+        await Navigation.PushAsync(new FolderPickPage(_item));
+        // строка обновится в OnAppearing при возврате
     }
 
     // ================= вложения =================
