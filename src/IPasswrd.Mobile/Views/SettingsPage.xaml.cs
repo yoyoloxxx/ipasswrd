@@ -65,6 +65,7 @@ public partial class SettingsPage : ContentPage
         SyncNowButton.IsVisible = connected;
         SyncDisconnectButton.IsVisible = connected;
 
+        RefreshA11y();
         RefreshRecovery();
 
         VersionLabel.Text = $"Версия {AppInfo.Current.VersionString} · формат сейфа v1";
@@ -305,6 +306,35 @@ public partial class SettingsPage : ContentPage
 
     private async void OnChangePassword(object? sender, EventArgs e) =>
         await Navigation.PushAsync(new ChangePasswordPage());
+
+    // ================= автозаполнение в браузерах (спец-возможности) =================
+
+    private void RefreshA11y()
+    {
+#if ANDROID
+        A11ySection.IsVisible = true;
+        bool on = IPasswrd.Mobile.Platforms.Android.AutoFill.IpwAccessibilityService.IsRunning;
+        A11yStatus.Text = on
+            ? "Включено. В Яндекс.Браузере тапните поле логина — появится кнопка IPasswrd."
+            : "Выключено. Нужно один раз включить IPasswrd в спец-возможностях.";
+        A11yButton.Text = on ? "Открыть настройки спец-возможностей" : "Включить";
+#else
+        A11ySection.IsVisible = false;
+#endif
+    }
+
+    private void OnOpenAccessibility(object? sender, EventArgs e)
+    {
+#if ANDROID
+        try
+        {
+            var intent = new global::Android.Content.Intent(global::Android.Provider.Settings.ActionAccessibilitySettings);
+            intent.AddFlags(global::Android.Content.ActivityFlags.NewTask);
+            global::Android.App.Application.Context.StartActivity(intent);
+        }
+        catch (Exception) { }
+#endif
+    }
 
     // ================= код восстановления =================
 
