@@ -38,6 +38,9 @@ internal sealed class AutofillFields
 /// </summary>
 internal static class AutofillParser
 {
+    /// <summary>Диагностика: сколько текстовых полей увидели в последней структуре.</summary>
+    public static int LastTextNodeCount { get; private set; }
+
     private static readonly string[] UserWords =
     {
         "username", "user_name", "userid", "user_id", "login", "email", "e-mail", "mail",
@@ -61,6 +64,7 @@ internal static class AutofillParser
         {
             PackageName = structure.ActivityComponent?.PackageName,
         };
+        LastTextNodeCount = 0;
 
         // Порядок важен: поля собираем так, как они идут по экрану.
         var found = new List<(Kind Kind, AutofillId Id)>();
@@ -144,6 +148,7 @@ internal static class AutofillParser
             AutofillId? id = node.AutofillId;
             if (id is not null && node.AutofillType == AutofillType.Text)
             {
+                LastTextNodeCount++;
                 Kind kind = Classify(node);
                 if (kind != Kind.None) found.Add((kind, id));
             }

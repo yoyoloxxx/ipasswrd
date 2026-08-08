@@ -182,6 +182,9 @@ public sealed class AppState
                 if (g is { Length: > 0 })
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(LocalVaultPath)!);
+                    // Файл сейчас заменится привезённым с Диска — сначала копия того, что было на устройстве:
+                    // именно при таких подменах теряют данные, а не при обычных правках.
+                    VaultBackups.Snapshot(LocalVaultPath);
                     File.WriteAllBytes(LocalVaultPath, g);
                     return g;
                 }
@@ -194,6 +197,7 @@ public sealed class AppState
             if (ext is { Length: > 0 })
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(LocalVaultPath)!);
+                VaultBackups.Snapshot(LocalVaultPath);   // та же подмена, только из iCloud/файла
                 File.WriteAllBytes(LocalVaultPath, ext);
                 return ext;
             }
@@ -295,6 +299,7 @@ public sealed class AppState
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(LocalVaultPath)!);
+            VaultBackups.Snapshot(LocalVaultPath);   // копия того, что сейчас будет перезаписано — как на ПК
             File.WriteAllBytes(LocalVaultPath, data);
         }
         catch (Exception ex)
