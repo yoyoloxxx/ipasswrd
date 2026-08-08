@@ -84,6 +84,17 @@ public partial class MainWindow : Window
         ["Необязательно, через запятую — например: "] = "Optional, comma-separated — e.g.: ",
         ["Необязательно, через запятую — например: Работа, Финансы"] = "Optional, comma-separated — e.g.: Work, Finance",
         ["Аутентификатор"] = "Authenticator", ["Генератор"] = "Generator", ["Проверка"] = "Security", ["Настройки"] = "Settings",
+        // резервные копии
+        ["Резервные копии"] = "Backups",
+        ["Появятся при первом изменении сейфа — отдельно включать не нужно"] = "Appear after the first change to the vault — nothing to switch on",
+        ["Хранятся рядом с сейфом, последняя: "] = "Kept next to the vault, latest: ",
+        ["Восстановить…"] = "Restore…", ["Восстановить из копии"] = "Restore from a backup", ["Восстановить"] = "Restore",
+        ["Резервных копий пока нет."] = "No backups yet.",
+        ["Сейф вернётся к выбранному моменту; сегодняшнее состояние тоже сохранится копией. Если включена синхронизация, она может привезти свежие изменения обратно — на время разбора её лучше отключить."]
+            = "The vault goes back to the chosen moment; today's state is kept as a backup too. If sync is on, it may bring fresh changes back — better switch it off while you sort things out.",
+        ["Не удалось восстановить: "] = "Could not restore: ",
+        ["Сейф восстановлен из копии — введите мастер-пароль."] = "The vault was restored from a backup — enter your master password.",
+        ["Восстановить из резервной копии…"] = "Restore from a backup…",
         ["Локальный сейф"] = "Local storage", ["без синхронизации"] = "no sync",
         ["Импорт из файла"] = "Import from file", ["Заблокировать"] = "Lock",
         ["Личные данные"] = "Personal details", ["ФИО"] = "Full name", ["Фамилия"] = "Last name",
@@ -661,6 +672,7 @@ public partial class MainWindow : Window
     {
         string p = VaultPath();
         System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(p)!);
+        VaultBackups.Snapshot(p);   // копия того, что сейчас будет перезаписано, — единственный откат, который у нас есть
         byte[] data = _vault!.Serialize();
         System.IO.File.WriteAllBytes(p, data);
         try { _vaultStamp = System.IO.File.GetLastWriteTimeUtc(p); } catch { _vaultStamp = default; }
@@ -915,6 +927,7 @@ public partial class MainWindow : Window
         RecoveryPw1.Text = "";
         RecoveryPw2.Text = "";
         ForgotButton.IsVisible = !Creating && VaultFileHasRecovery();
+        RestoreBackupButton.IsVisible = false;   // появляется только после ошибки чтения файла
         UnlockScreen.IsVisible = true;
         VaultScreen.IsVisible = false;
         EditorScreen.IsVisible = false;
@@ -943,6 +956,9 @@ public partial class MainWindow : Window
         {
             if (Creating)
             {
+                // Пустое поле — не «слишком короткий пароль», а отсутствие ответа: «Минимум 8 символов»
+                // на пустом экране звучит как придирка к тому, чего человек ещё не делал.
+                if (pw.Length == 0) { Err("Придумайте и введите пароль."); return; }
                 if (pw != (MasterBox2.Text ?? "")) { Err("Пароли не совпадают."); return; }
                 if (pw.Length < 8) { Err("Минимум 8 символов."); return; }
                 _vault = Vault.Create(pw);
@@ -953,6 +969,7 @@ public partial class MainWindow : Window
             }
             else
             {
+                if (pw.Length == 0) { Err("Введите мастер-пароль."); return; }
                 _vault = Vault.Unlock(System.IO.File.ReadAllBytes(VaultPath()), pw);
             }
         }
@@ -977,7 +994,14 @@ public partial class MainWindow : Window
             }
             return;
         }
-        catch (Exception ex) { Err("Ошибка: " + ex.Message); return; }
+        catch (Exception ex)
+        {
+            Err("Ошибка: " + ex.Message);
+            // Сюда попадают испорченный файл и неподдерживаемый формат — то, от чего есть копии.
+            // Неверный пароль обработан выше и копиями не лечится: в них тот же пароль.
+            if (VaultBackups.List(VaultPath()).Count > 0) RestoreBackupButton.IsVisible = true;
+            return;
+        }
 
         ResetLockout();
         SaveQuickUnlock();
@@ -2484,6 +2508,67 @@ public partial class MainWindow : Window
             : iso;
     }
 
+    // ================= резервные копии =================
+
+    /// <summary>Строка настроек: сколько копий и когда последняя. Копии делаются всегда,
+    /// выключателя нет: защита, которую можно забыть включить, не срабатывает у тех, кому нужнее.</summary>
+    private Control BackupsRow()
+    {
+        var list = VaultBackups.List(VaultPath());
+        string hint = list.Count == 0
+            ? Tr("Появятся при первом изменении сейфа — отдельно включать не нужно")
+            : Tr("Хранятся рядом с сейфом, последняя: ") + BackupLabel(list[0]);
+
+        var b = new Button { Content = Tr("Восстановить…"), Padding = new Thickness(14, 6), IsEnabled = list.Count > 0 };
+        b.Click += OnRestoreBackupClick;
+        return SetRowControl("Резервные копии", hint, b);
+    }
+
+    private static string BackupLabel(VaultBackups.Backup b) =>
+        b.TakenUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm") + " · " + Attachments.HumanSize((int)Math.Min(b.Bytes, int.MaxValue));
+
+    /// <summary>
+    /// Карточка восстановления: список копий, одна выбирается, кнопка опасная. Работает и из
+    /// настроек, и с экрана входа, когда файл сейфа не читается. Перед заменой текущий файл
+    /// сам становится копией — восстановление тоже должно быть обратимым.
+    /// </summary>
+    private void OnRestoreBackupClick(object? sender, RoutedEventArgs e)
+    {
+        var backups = VaultBackups.List(VaultPath());
+        if (backups.Count == 0) { Toast(Tr("Резервных копий пока нет.")); return; }
+
+        var listBox = new ListBox { MaxHeight = 260, SelectedIndex = 0 };
+        foreach (var bk in backups)
+            listBox.Items.Add(new ListBoxItem { Content = BackupLabel(bk), Tag = bk });
+
+        var warn = new TextBlock
+        {
+            Text = Tr("Сейф вернётся к выбранному моменту; сегодняшнее состояние тоже сохранится копией. Если включена синхронизация, она может привезти свежие изменения обратно — на время разбора её лучше отключить."),
+            Foreground = Text2, FontSize = 12, TextWrapping = TextWrapping.Wrap, MaxWidth = 360,
+        };
+
+        if (ShowCard(Tr("Восстановить из копии"), new Control[] { warn, listBox }, Tr("Восстановить"), danger: true) is not { } card) return;
+
+        card.Ok.Click += (_, _) =>
+        {
+            if ((listBox.SelectedItem as ListBoxItem)?.Tag is not VaultBackups.Backup chosen) return;
+            CloseCard(card.Dim);
+            try
+            {
+                VaultBackups.Restore(VaultPath(), chosen.Path);
+            }
+            catch (Exception ex)
+            {
+                Toast(Tr("Не удалось восстановить: ") + ex.Message);
+                return;
+            }
+            // Восстановленный файл открывается заново мастер-паролем — без догадок, что у него внутри.
+            _vault = null;
+            Toast(Tr("Сейф восстановлен из копии — введите мастер-пароль."));
+            SetupUnlock();
+        };
+    }
+
     private void BuildCardDetail(StackPanel wrap, VaultItem item)
     {
         string number = item.Fields.GetValueOrDefault("number", "");
@@ -3616,6 +3701,8 @@ public partial class MainWindow : Window
         g.Children.Add(SetRowControl("Импорт из файла", "Kaspersky, Chrome, Edge, Яндекс и другие", ImportControl()));
         g.Children.Add(Hairline());
         g.Children.Add(SetRowControl("Выгрузить", "Резервная копия сейфа или CSV для переезда в другой менеджер", ExportControl()));
+        g.Children.Add(Hairline());
+        g.Children.Add(BackupsRow());
         g.Children.Add(Hairline());
         g.Children.Add(SetRowControl("Удалить дубликаты", "Схлопнуть одинаковые аккаунты (один логин и пароль, разные поддомены)", DedupeControl()));
 
