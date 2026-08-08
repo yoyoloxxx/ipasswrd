@@ -223,6 +223,82 @@ public partial class SettingsPage : ContentPage
                     : "Копия сейфа выгружена. Это просто запасная копия: для синхронизации с Windows используйте вход через Google.", "Ок");
     }
 
+    /// <summary>
+    /// CSV — открытый текст со всеми паролями, поэтому сначала прямой вопрос, как на ПК.
+    /// Временный файл стирается сразу после передачи: лежать в песочнице приложения в открытом
+    /// виде ему незачем ни минуты дольше, чем нужно системному листу «Поделиться».
+    /// </summary>
+    private async void OnExportCsv(object? sender, EventArgs e)
+    {
+        var v = Svc.State.Vault;
+        if (v is null) return;
+
+        bool sure = await DisplayAlert("Выгрузить CSV?",
+            "В файле будут все пароли открытым текстом — без шифрования. Он нужен только для переезда в другой менеджер. После переноса удалите его там, куда сохранили.",
+            "Выгрузить", "Отмена");
+        if (!sure) return;
+
+        string path = Path.Combine(FileSystem.CacheDirectory, "ipasswrd-export.csv");
+        try
+        {
+            File.WriteAllText(path, Exporter.ToCsv(v.Items().Select(x => x.Item)), System.Text.Encoding.UTF8);
+            await Share.Default.RequestAsync(new ShareFileRequest
+            {
+                Title = "Экспорт IPasswrd",
+                File = new ShareFile(path),
+            });
+        }
+        catch (Exception)
+        {
+            await DisplayAlert("Не получилось", "Файл не выгрузился.", "Ок");
+        }
+        finally
+        {
+            try { File.Delete(path); } catch { /* лучшее усилие */ }
+        }
+    }
+
+    /// <summary>
+    /// Восстановление из локальной копии — те же копии, что делает ПК: снимаются перед каждой
+    /// перезаписью сейфа, включая подмену файла синхронизацией. После восстановления сейф
+    /// запирается — открыть его должен мастер-пароль, а не наша догадка о содержимом.
+    /// </summary>
+    private async void OnRestoreBackup(object? sender, EventArgs e)
+    {
+        var backups = VaultBackups.List(Svc.State.LocalVaultPath);
+        if (backups.Count == 0)
+        {
+            await DisplayAlert("Резервных копий пока нет",
+                "Они появляются сами при первом изменении сейфа — включать ничего не нужно.", "Ок");
+            return;
+        }
+
+        string[] options = backups
+            .Select(b => b.TakenUtc.ToLocalTime().ToString("dd.MM HH:mm") + " · " + Attachments.HumanSize((int)Math.Min(b.Bytes, int.MaxValue)))
+            .ToArray();
+        string choice = await DisplayActionSheet("Какую копию вернуть?", "Отмена", null, options);
+        int idx = Array.IndexOf(options, choice);
+        if (idx < 0) return;
+
+        bool sure = await DisplayAlert("Восстановить?",
+            $"Сейф вернётся к состоянию от {options[idx]}. Сегодняшнее состояние тоже сохранится копией. Если включена синхронизация, она может привезти свежие изменения обратно.",
+            "Восстановить", "Отмена");
+        if (!sure) return;
+
+        try
+        {
+            VaultBackups.Restore(Svc.State.LocalVaultPath, backups[idx].Path);
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlert("Не получилось", ex.Message, "Ок");
+            return;
+        }
+
+        Svc.State.Lock();
+        await DisplayAlert("Готово", "Сейф восстановлен из копии — введите мастер-пароль.", "Ок");
+    }
+
     // ================= сейф =================
 
     private async void OnChangePassword(object? sender, EventArgs e) =>

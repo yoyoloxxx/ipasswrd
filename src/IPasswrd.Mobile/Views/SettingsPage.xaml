@@ -71,6 +71,10 @@
                     <Button Text="Сменить мастер-пароль" BackgroundColor="Transparent" Clicked="OnChangePassword" />
                     <BoxView HeightRequest="1" Color="{AppThemeBinding Dark={StaticResource IpHair}, Light={StaticResource IpHairL}}" />
                     <Button Text="Экспортировать копию сейфа…" BackgroundColor="Transparent" Clicked="OnExportCopy" />
+                <BoxView HeightRequest="1" Color="{AppThemeBinding Dark={StaticResource IpHair}, Light={StaticResource IpHairL}}" />
+                    <Button Text="Выгрузить CSV со всеми паролями…" BackgroundColor="Transparent" Clicked="OnExportCsv" />
+                    <BoxView HeightRequest="1" Color="{AppThemeBinding Dark={StaticResource IpHair}, Light={StaticResource IpHairL}}" />
+                    <Button Text="Восстановить из резервной копии…" BackgroundColor="Transparent" Clicked="OnRestoreBackup" />
                     <BoxView HeightRequest="1" Color="{AppThemeBinding Dark={StaticResource IpHair}, Light={StaticResource IpHairL}}" />
                     <Button Text="Заблокировать" BackgroundColor="Transparent" Clicked="OnLock" />
                 </VerticalStackLayout>
