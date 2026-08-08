@@ -25,18 +25,26 @@ if (Test-Path $hostExe) { Copy-Item $hostExe $stage -Force }
 
 # --- 2. плитки ---
 # Store проверяет размеры, поэтому режем из мастера 512x512, а не переименовываем.
+#
+# ПЛИТКИ — С ФИРМЕННЫМ ТЁМНЫМ ФОНОМ, НЕ ПРОЗРАЧНЫЕ. Прозрачные места плитки Windows
+# заливает акцентным цветом системы — у кого-то он фиолетовый, и логотип плавает на
+# случайной подложке. Цвет фона = IpBg тёмной темы приложения (#090C10) — плитка
+# выглядит как маленький экран входа, на любом акценте одинаковая.
+# Для панели задач отдельно кладутся altform-unplated — там подложки нет вовсе,
+# один логотип, — именно их Windows берёт для таскбара и списка Пуска.
 Add-Type -AssemblyName System.Drawing
 $master = [System.Drawing.Image]::FromFile((Join-Path $root 'src\IPasswrd.App\Assets\ipasswrd_app_512.png'))
 $assets = Join-Path $stage 'Assets'
 New-Item -ItemType Directory -Force -Path $assets | Out-Null
+$brandBg = [System.Drawing.Color]::FromArgb(255, 0x09, 0x0C, 0x10)   # IpBg тёмной темы
 
-function Save-Tile([int]$w, [int]$h, [string]$name) {
+function Save-Tile([int]$w, [int]$h, [string]$name, [double]$scale = 0.75, [bool]$plated = $true) {
     $bmp = New-Object System.Drawing.Bitmap $w, $h
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $g.Clear([System.Drawing.Color]::Transparent)
-    # вписываем квадратный мастер по центру, с полями как требует Store
-    $side = [Math]::Min($w, $h) * 0.75
+    if ($plated) { $g.Clear($script:brandBg) } else { $g.Clear([System.Drawing.Color]::Transparent) }
+    # вписываем квадратный мастер по центру
+    $side = [Math]::Min($w, $h) * $scale
     $g.DrawImage($script:master, ($w - $side) / 2, ($h - $side) / 2, $side, $side)
     $g.Dispose()
     $bmp.Save((Join-Path $assets $name), [System.Drawing.Imaging.ImageFormat]::Png)
@@ -46,6 +54,11 @@ Save-Tile 44  44  'Square44x44Logo.png'
 Save-Tile 150 150 'Square150x150Logo.png'
 Save-Tile 310 150 'Wide310x150Logo.png'
 Save-Tile 50  50  'StoreLogo.png'
+# Без подложки — для таскбара и списка Пуска (логотип крупнее: полей плитки тут не нужно).
+foreach ($ts in 16, 24, 32, 48, 256) {
+    Save-Tile $ts $ts ("Square44x44Logo.targetsize-$ts.png") 0.92 $false
+    Save-Tile $ts $ts ("Square44x44Logo.targetsize-${ts}_altform-unplated.png") 0.92 $false
+}
 $master.Dispose()
 
 # --- 3. манифест с подставленной версией ---
