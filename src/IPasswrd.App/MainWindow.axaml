@@ -42,6 +42,11 @@
             <Button x:Name="ForgotButton" Content="Забыли мастер-пароль?" Click="OnForgotClick" IsVisible="False"
                     HorizontalAlignment="Center" Background="Transparent" BorderThickness="0" Padding="4,2"
                     FontSize="12" Foreground="{DynamicResource IpText3}"/>
+            <!-- Появляется, только когда файл сейфа не читается И есть резервные копии:
+                 человек у сломанного сейфа должен увидеть выход там же, где увидел ошибку. -->
+            <Button x:Name="RestoreBackupButton" Content="Восстановить из резервной копии…" Click="OnRestoreBackupClick" IsVisible="False"
+                    HorizontalAlignment="Center" Background="Transparent" BorderThickness="0" Padding="4,2"
+                    FontSize="12" Foreground="{DynamicResource IpText3}"/>
 
             <!-- recovery: enter the written-down code, set a new master password -->
             <StackPanel x:Name="RecoveryPanel" Spacing="12" IsVisible="False">

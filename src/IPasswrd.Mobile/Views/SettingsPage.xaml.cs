@@ -241,7 +241,7 @@ public partial class SettingsPage : ContentPage
         string path = Path.Combine(FileSystem.CacheDirectory, "ipasswrd-export.csv");
         try
         {
-            File.WriteAllText(path, Exporter.ToCsv(v.Items().Select(x => x.Item)), System.Text.Encoding.UTF8);
+            File.WriteAllText(path, Exporter.ToCsv(v.Items()), System.Text.Encoding.UTF8);
             await Share.Default.RequestAsync(new ShareFileRequest
             {
                 Title = "Экспорт IPasswrd",
