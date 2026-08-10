@@ -117,28 +117,29 @@ public sealed class IpwAccessibilityService : AccessibilityService
         var wm = GetSystemService(WindowService)?.JavaCast<IWindowManager>();
         if (wm is null) return;
 
-        var btn = new AndroidButton(this)
+        var btn = new TextView(this)
         {
-            Text = "IPasswrd",
+            Text = "\U0001F511",   // ключ 🔑
+            Gravity = GravityFlags.Center,
         };
-        btn.SetAllCaps(false);
         btn.SetTextColor(AndroidColor.Argb(255, 9, 12, 16));
+        btn.SetTextSize(ComplexUnitType.Sp, 20);
         var bg = new GradientDrawable();
-        bg.SetShape(ShapeType.Rectangle);
-        bg.SetCornerRadius(Dp(24));
-        bg.SetColor(AndroidColor.Argb(255, 225, 184, 94));   // латунь
+        bg.SetShape(ShapeType.Oval);
+        bg.SetColor(AndroidColor.Argb(235, 225, 184, 94));   // латунь, чуть прозрачная
         btn.Background = bg;
+        btn.Clickable = true;
         btn.Click += (_, _) => ToggleMenu();
 
+        int size = Dp(46);
         var lp = new WindowManagerLayoutParams(
-            ViewGroup.LayoutParams.WrapContent,
-            ViewGroup.LayoutParams.WrapContent,
+            size, size,
             WindowManagerTypes.AccessibilityOverlay,
             WindowManagerFlags.NotFocusable | WindowManagerFlags.NotTouchModal,
             Format.Translucent)
         {
-            Gravity = GravityFlags.End | GravityFlags.CenterVertical,   // сбоку по центру — не на клавиатуре
-            X = Dp(6),
+            Gravity = GravityFlags.End | GravityFlags.CenterVertical,   // маленький ключ сбоку — не на клавиатуре
+            X = Dp(4),
             Y = 0,
         };
 
@@ -243,12 +244,14 @@ public sealed class IpwAccessibilityService : AccessibilityService
     {
         try
         {
-            AccessibilityNodeInfo? root = RootInActiveWindow;
+            AccessibilityNodeInfo? root = BrowserRoot();
             if (root is null) return;
 
             var edits = new List<AccessibilityNodeInfo>();
             CollectEditable(root, edits);
-            if (edits.Count == 0) { Console.WriteLine("[IPW-A11Y] no editable fields"); return; }
+            Console.WriteLine("[IPW-A11Y] fields=" + edits.Count + " [" +
+                string.Join(", ", edits.Take(6).Select(n => ((n.ClassName ?? "").ToString()?.Split('.').LastOrDefault() ?? "") + (n.Password ? ":pw" : ""))) + "]");
+            if (edits.Count == 0) { Console.WriteLine("[IPW-A11Y] no editable fields (win search)"); return; }
 
             AccessibilityNodeInfo? passField = edits.FirstOrDefault(n => n.Password);
             AccessibilityNodeInfo? userField = null;
@@ -280,19 +283,65 @@ public sealed class IpwAccessibilityService : AccessibilityService
         }
     }
 
-    private static void SetText(AccessibilityNodeInfo node, string value)
+    private void SetText(AccessibilityNodeInfo node, string value)
     {
+        try { node.PerformAction(global::Android.Views.Accessibility.Action.Focus); } catch (Exception) { }
+        try { node.PerformAction(global::Android.Views.Accessibility.Action.AccessibilityFocus); } catch (Exception) { }
+
         var args = new Bundle();
         args.PutCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharsequence, new Java.Lang.String(value));
-        node.PerformAction(global::Android.Views.Accessibility.Action.SetText, args);
+        bool ok = false;
+        try { ok = node.PerformAction(global::Android.Views.Accessibility.Action.SetText, args); } catch (Exception) { }
+
+        // Chromium-поля иногда игнорируют SET_TEXT — тогда кладём в буфер и вставляем.
+        if (!ok)
+        {
+            try
+            {
+                var cm = (global::Android.Content.ClipboardManager?)GetSystemService(ClipboardService);
+                cm?.PrimaryClip = global::Android.Content.ClipData.NewPlainText("ipw", value);
+                node.PerformAction(global::Android.Views.Accessibility.Action.Focus);
+                node.PerformAction(global::Android.Views.Accessibility.Action.Paste);
+            }
+            catch (Exception) { }
+        }
+        Console.WriteLine("[IPW-A11Y] setText ok=" + ok + " len=" + value.Length);
     }
 
     // ================= обход дерева =================
 
+    /// <summary>Корень окна браузера. RootInActiveWindow во время нашего меню-оверлея указывает
+    /// на оверлей, а не на страницу — поэтому идём по всем окнам и берём то, чей пакет — браузер.</summary>
+    private AccessibilityNodeInfo? BrowserRoot()
+    {
+        try
+        {
+            var wins = Windows;
+            if (wins is not null)
+            {
+                foreach (AccessibilityWindowInfo w in wins)
+                {
+                    AccessibilityNodeInfo? r = w?.Root;
+                    if (r is not null && Browsers.Contains(r.PackageName ?? "")) return r;
+                }
+            }
+        }
+        catch (Exception) { }
+        return RootInActiveWindow;
+    }
+
     private static void CollectEditable(AccessibilityNodeInfo? node, List<AccessibilityNodeInfo> into)
     {
         if (node is null) return;
-        try { if (node.Editable && node.VisibleToUser) into.Add(node); } catch (Exception) { }
+        try
+        {
+            string cls = (node.ClassName ?? "").ToString() ?? "";
+            bool fieldish = node.Editable || node.Password
+                || cls.Contains("EditText")
+                || (node.Focusable && (cls.Contains("TextField") || cls.Contains("Input")));
+            if (fieldish && node.VisibleToUser) into.Add(node);
+        }
+        catch (Exception) { }
         int n = node.ChildCount;
         for (int i = 0; i < n; i++) CollectEditable(node.GetChild(i), into);
     }
