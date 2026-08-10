@@ -48,6 +48,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
     private AndroidView? _menu;
     private string _domain = "";
     private string _pkg = "";
+    private bool _awaitUnlock;
 
     public static bool IsRunning { get; private set; }
 
@@ -55,18 +56,30 @@ public sealed class IpwAccessibilityService : AccessibilityService
     {
         base.OnServiceConnected();
         IsRunning = true;
+        Svc.State.LockedChanged += OnLockedChanged;
         Console.WriteLine("[IPW-A11Y] connected");
     }
 
     public override void OnDestroy()
     {
         IsRunning = false;
+        try { Svc.State.LockedChanged -= OnLockedChanged; } catch (Exception) { }
         HideButton();
         HideMenu();
         base.OnDestroy();
     }
 
     public override void OnInterrupt() { }
+
+    /// <summary>Сейф разблокировали после нашего запроса — открываем меню записей (на UI-потоке).</summary>
+    private void OnLockedChanged()
+    {
+        if (_awaitUnlock && Svc.State.IsUnlocked)
+        {
+            _awaitUnlock = false;
+            new Handler(Looper.MainLooper!).Post(() => ToggleMenu());
+        }
+    }
 
     public override void OnAccessibilityEvent(AccessibilityEvent? e)
     {
@@ -166,14 +179,30 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
         if (!Svc.State.IsUnlocked)
         {
-            // Сейф закрыт — открываем приложение на разблокировку.
-            Toast.MakeText(this, "Откройте сейф IPasswrd и повторите", ToastLength.Long)?.Show();
-            try
+            if (Svc.State.QuickUnlockAvailable)
             {
-                Intent? launch = PackageManager?.GetLaunchIntentForPackage(PackageName!);
-                if (launch is not null) { launch.AddFlags(ActivityFlags.NewTask); StartActivity(launch); }
+                // Прозрачный хост: только системный отпечаток поверх браузера, без открытия приложения.
+                _awaitUnlock = true;
+                new Handler(Looper.MainLooper!).PostDelayed(() => _awaitUnlock = false, 20000);
+                try
+                {
+                    var i = new Intent(this, typeof(QuickUnlockActivity));
+                    i.AddFlags(ActivityFlags.NewTask | ActivityFlags.NoAnimation);
+                    StartActivity(i);
+                }
+                catch (Exception) { _awaitUnlock = false; }
             }
-            catch (Exception) { }
+            else
+            {
+                // Биометрия не настроена — тут без приложения не разблокировать (нужен мастер-пароль).
+                Toast.MakeText(this, "Откройте сейф IPasswrd и повторите", ToastLength.Long)?.Show();
+                try
+                {
+                    Intent? launch = PackageManager?.GetLaunchIntentForPackage(PackageName!);
+                    if (launch is not null) { launch.AddFlags(ActivityFlags.NewTask); StartActivity(launch); }
+                }
+                catch (Exception) { }
+            }
             return;
         }
 
