@@ -294,6 +294,79 @@ public static class GoogleDrive
         }
     }
 
+    // ================= маленькие служебные файлы (общий буфер с ПК) =================
+    // Тот же приём, что с сейфом: find-or-create по имени в папке IPasswrd, id кешируется.
+
+    private static readonly Dictionary<string, string> SmallIds = new(StringComparer.Ordinal);
+
+    private static async Task<string?> FindSmallAsync(string name)
+    {
+        if (SmallIds.TryGetValue(name, out string? cached)) return cached;
+        string url = DriveFiles + "?spaces=drive&pageSize=5&fields=" + Uri.EscapeDataString("files(id)") +
+            "&q=" + Uri.EscapeDataString($"name = '{name}' and trashed = false");
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        using var resp = await SendAuthed(req);
+        if (!resp.IsSuccessStatusCode) return null;
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        if (!doc.RootElement.TryGetProperty("files", out var files) || files.GetArrayLength() == 0) return null;
+        string? id = files[0].GetProperty("id").GetString();
+        if (id is not null) SmallIds[name] = id;
+        return id;
+    }
+
+    /// <summary>Скачать служебный файл; null — его нет.</summary>
+    public static async Task<byte[]?> DownloadSmallAsync(string name)
+    {
+        string? id = await FindSmallAsync(name);
+        if (id is null) return null;
+        using var req = new HttpRequestMessage(HttpMethod.Get, DriveFiles + "/" + id + "?alt=media");
+        using var resp = await SendAuthed(req);
+        if (resp.StatusCode == HttpStatusCode.NotFound) { SmallIds.Remove(name); return null; }
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadAsByteArrayAsync();
+    }
+
+    /// <summary>Залить служебный файл (создать или заменить).</summary>
+    public static async Task UploadSmallAsync(string name, byte[] bytes)
+    {
+        string? id = await FindSmallAsync(name);
+        if (id is null)
+        {
+            string folderId = await EnsureFolderAsync();
+            string boundary = "ipw" + B64Url(RandomNumberGenerator.GetBytes(12));
+            var content = new MultipartContent("related", boundary);
+            var meta = new StringContent("{\"name\":\"" + name + "\",\"parents\":[\"" + folderId + "\"]}", Encoding.UTF8);
+            meta.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            content.Add(meta);
+            var media = new ByteArrayContent(bytes);
+            media.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            content.Add(media);
+            using var req = new HttpRequestMessage(HttpMethod.Post, DriveUpload + "?uploadType=multipart&fields=id") { Content = content };
+            using var resp = await SendAuthed(req);
+            if (!resp.IsSuccessStatusCode) throw new InvalidOperationException("drive_upload_failed");
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            if (doc.RootElement.TryGetProperty("id", out var nid) && nid.GetString() is { } s) SmallIds[name] = s;
+            return;
+        }
+
+        using var patch = new HttpRequestMessage(HttpMethod.Patch, DriveUpload + "/" + id + "?uploadType=media&fields=id")
+        { Content = new ByteArrayContent(bytes) };
+        patch.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        using var presp = await SendAuthed(patch);
+        if (presp.StatusCode == HttpStatusCode.NotFound) { SmallIds.Remove(name); await UploadSmallAsync(name, bytes); return; }
+        if (!presp.IsSuccessStatusCode) throw new InvalidOperationException("drive_upload_failed");
+    }
+
+    /// <summary>Удалить служебный файл.</summary>
+    public static async Task DeleteSmallAsync(string name)
+    {
+        string? id = await FindSmallAsync(name);
+        if (id is null) return;
+        using var req = new HttpRequestMessage(HttpMethod.Delete, DriveFiles + "/" + id);
+        using var resp = await SendAuthed(req);
+        SmallIds.Remove(name);
+    }
+
     // ================= PKCE =================
 
     private static string B64Url(byte[] b) => Convert.ToBase64String(b).TrimEnd('=').Replace('+', '-').Replace('/', '_');

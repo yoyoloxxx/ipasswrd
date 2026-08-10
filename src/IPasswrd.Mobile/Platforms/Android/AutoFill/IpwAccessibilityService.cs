@@ -1,4 +1,5 @@
 using Android.AccessibilityServices;
+using Android.Runtime;
 using Android.App;
 using Android.Content;
 using Android.Graphics;
@@ -91,8 +92,11 @@ public sealed class IpwAccessibilityService : AccessibilityService
             if (editableFocused)
             {
                 _pkg = pkg;
-                _domain = FindDomain(root) ?? "";
-                ShowButton();
+                if (_button is null)          // домен ищем и кнопку строим один раз на форму
+                {
+                    _domain = FindDomain(root) ?? "";
+                    ShowButton();
+                }
             }
             else if (e.EventType == EventTypes.WindowStateChanged)
             {
@@ -110,7 +114,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
     private void ShowButton()
     {
         if (_button is not null) return;
-        var wm = (IWindowManager?)GetSystemService(WindowService);
+        var wm = GetSystemService(WindowService)?.JavaCast<IWindowManager>();
         if (wm is null) return;
 
         var btn = new AndroidButton(this)
@@ -145,7 +149,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
     private void HideButton()
     {
         if (_button is null) return;
-        try { ((IWindowManager?)GetSystemService(WindowService))?.RemoveView(_button); } catch (Exception) { }
+        try { (GetSystemService(WindowService)?.JavaCast<IWindowManager>())?.RemoveView(_button); } catch (Exception) { }
         _button = null;
     }
 
@@ -176,7 +180,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
         var shown = items.Where(c => c.Score > 0).Take(6).ToList();
         if (shown.Count == 0) shown = items.Take(6).ToList();
 
-        var wm = (IWindowManager?)GetSystemService(WindowService);
+        var wm = GetSystemService(WindowService)?.JavaCast<IWindowManager>();
         if (wm is null) return;
 
         var panel = new LinearLayout(this) { Orientation = AndroidOrientation.Vertical };
@@ -226,7 +230,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
     private void HideMenu()
     {
         if (_menu is null) return;
-        try { ((IWindowManager?)GetSystemService(WindowService))?.RemoveView(_menu); } catch (Exception) { }
+        try { (GetSystemService(WindowService)?.JavaCast<IWindowManager>())?.RemoveView(_menu); } catch (Exception) { }
         _menu = null;
     }
 
