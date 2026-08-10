@@ -120,28 +120,31 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
         var btn = new TextView(this)
         {
-            Text = "\U0001F511",   // ключ 🔑
+            Text = "IP",
             Gravity = GravityFlags.Center,
         };
-        btn.SetTextColor(AndroidColor.Argb(255, 9, 12, 16));
-        btn.SetTextSize(ComplexUnitType.Sp, 20);
+        btn.SetTextColor(AndroidColor.Argb(255, 26, 20, 8));
+        btn.SetTextSize(ComplexUnitType.Sp, 15);
+        btn.SetTypeface(null, global::Android.Graphics.TypefaceStyle.Bold);
         var bg = new GradientDrawable();
         bg.SetShape(ShapeType.Oval);
-        bg.SetColor(AndroidColor.Argb(235, 225, 184, 94));   // латунь, чуть прозрачная
+        bg.SetColor(AndroidColor.Argb(242, 214, 170, 78));       // латунь
+        bg.SetStroke(Dp(2), AndroidColor.Argb(255, 150, 112, 40));
         btn.Background = bg;
         btn.Clickable = true;
         btn.Click += (_, _) => ToggleMenu();
 
-        int size = Dp(46);
+        int size = Dp(44);
+        int screenH = Resources?.DisplayMetrics?.HeightPixels ?? Dp(640);
         var lp = new WindowManagerLayoutParams(
             size, size,
             WindowManagerTypes.AccessibilityOverlay,
             WindowManagerFlags.NotFocusable | WindowManagerFlags.NotTouchModal,
             Format.Translucent)
         {
-            Gravity = GravityFlags.End | GravityFlags.CenterVertical,   // маленький ключ сбоку — не на клавиатуре
+            Gravity = GravityFlags.End | GravityFlags.Top,   // ~четверть от верха, у правого края
             X = Dp(4),
-            Y = 0,
+            Y = screenH / 4,
         };
 
         try { wm.AddView(btn, lp); _button = btn; _btnParams = lp; }
