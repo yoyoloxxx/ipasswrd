@@ -137,9 +137,9 @@ public sealed class IpwAccessibilityService : AccessibilityService
             WindowManagerFlags.NotFocusable | WindowManagerFlags.NotTouchModal,
             Format.Translucent)
         {
-            Gravity = GravityFlags.Bottom | GravityFlags.End,
-            X = Dp(16),
-            Y = Dp(90),
+            Gravity = GravityFlags.End | GravityFlags.CenterVertical,   // сбоку по центру — не на клавиатуре
+            X = Dp(6),
+            Y = 0,
         };
 
         try { wm.AddView(btn, lp); _button = btn; _btnParams = lp; }
@@ -176,9 +176,10 @@ public sealed class IpwAccessibilityService : AccessibilityService
         if (vault is null) return;
 
         List<AutofillCandidate> items = AutofillMatcher.Rank(vault, _domain.Length > 0 ? _domain : null, null);
-        // сначала подходящие под домен, затем остальные; не больше 6
-        var shown = items.Where(c => c.Score > 0).Take(6).ToList();
-        if (shown.Count == 0) shown = items.Take(6).ToList();
+        var matched = items.Where(c => c.Score > 0).ToList();
+        // совпавшие по домену — все; иначе первые 8 (выбор вручную)
+        bool haveMatch = matched.Count > 0;
+        var shown = haveMatch ? matched.Take(12).ToList() : items.Take(8).ToList();
 
         var wm = GetSystemService(WindowService)?.JavaCast<IWindowManager>();
         if (wm is null) return;
@@ -193,7 +194,9 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
         var header = new TextView(this)
         {
-            Text = _domain.Length > 0 ? "Для " + _domain : "Выбор записи",
+            Text = _domain.Length == 0 ? "Выбор записи"
+                 : haveMatch ? "Для " + _domain
+                 : "Для " + _domain + " записей нет — выберите вручную",
         };
         header.SetTextColor(AndroidColor.Argb(255, 140, 152, 165));
         header.SetPadding(Dp(12), Dp(8), Dp(12), Dp(8));
@@ -303,38 +306,35 @@ public sealed class IpwAccessibilityService : AccessibilityService
         return false;
     }
 
-    /// <summary>Домен из адресной строки браузера: узел с id, оканчивающимся на url/url_bar/
-    /// address_bar, либо текст, похожий на адрес, в верхней части экрана.</summary>
+    /// <summary>Домен из адресной строки браузера. Адресная строка у Яндекса ВНИЗУ, поэтому
+    /// по расположению не ориентируемся: приоритет — узел с «адресным» id (url/omnibox/address/
+    /// location/host), иначе любой видимый НЕ-редактируемый текст, из которого получается домен.</summary>
     private string? FindDomain(AccessibilityNodeInfo? root)
     {
         if (root is null) return null;
-        int screenH = Resources?.DisplayMetrics?.HeightPixels ?? 2000;
-        string? best = null;
+        string? byId = null;
+        string? byText = null;
+        string dbgIds = "";
 
         void Walk(AccessibilityNodeInfo? node)
         {
-            if (node is null || best is not null) return;
+            if (node is null) return;
             try
             {
-                string id = node.ViewIdResourceName ?? "";
-                string idl = id.ToLowerInvariant();
+                string id = (node.ViewIdResourceName ?? "").ToLowerInvariant();
                 string text = (node.Text ?? "").ToString() ?? "";
-                bool topHalf = Bounds(node).Top < screenH / 2;
+                bool editable = false; try { editable = node.Editable; } catch (Exception) { }
 
-                bool looksLikeUrlBar = idl.EndsWith("url") || idl.EndsWith("url_bar")
-                    || idl.Contains("address_bar") || idl.Contains("omnibox") || idl.Contains("://");
-
-                if (looksLikeUrlBar && text.Length > 0)
-                {
-                    best = ExtractDomain(text);
-                    if (best is not null) return;
-                }
-                // запасной путь: текст в верхней части, похожий на домен/URL
-                if (best is null && topHalf && text.Length >= 4 && !text.Contains(' ')
-                    && (text.Contains('.') || text.StartsWith("http")))
+                if (!editable && text.Length >= 4 && !text.Contains(' '))
                 {
                     string? d = ExtractDomain(text);
-                    if (d is not null && d.Contains('.')) best = d;
+                    if (d is not null && d.Contains('.'))
+                    {
+                        bool urlish = id.Contains("url") || id.Contains("omnibox") || id.Contains("address")
+                            || id.Contains("location") || id.Contains("host") || id.Contains("domain");
+                        if (urlish) { if (byId is null) { byId = d; dbgIds = id; } }
+                        else byText ??= d;
+                    }
                 }
             }
             catch (Exception) { }
@@ -343,8 +343,9 @@ public sealed class IpwAccessibilityService : AccessibilityService
         }
 
         Walk(root);
-        if (best is not null) Console.WriteLine("[IPW-A11Y] domain=" + best + " pkg=" + _pkg);
-        return best;
+        string? result = byId ?? byText;
+        Console.WriteLine($"[IPW-A11Y] domain byId={byId}({dbgIds}) byText={byText} -> {result} pkg={_pkg}");
+        return result;
     }
 
     private static string? ExtractDomain(string raw)
