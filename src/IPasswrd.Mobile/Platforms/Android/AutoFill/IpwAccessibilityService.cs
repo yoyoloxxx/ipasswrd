@@ -5,6 +5,7 @@ using Android.Content;
 using Android.Graphics;
 using Android.Graphics.Drawables;
 using Android.OS;
+using Android.Util;
 using Android.Views;
 using Android.Views.Accessibility;
 using Android.Widget;
@@ -299,7 +300,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
             try
             {
                 var cm = (global::Android.Content.ClipboardManager?)GetSystemService(ClipboardService);
-                cm?.PrimaryClip = global::Android.Content.ClipData.NewPlainText("ipw", value);
+                if (cm is not null) cm.PrimaryClip = global::Android.Content.ClipData.NewPlainText("ipw", value);
                 node.PerformAction(global::Android.Views.Accessibility.Action.Focus);
                 node.PerformAction(global::Android.Views.Accessibility.Action.Paste);
             }
