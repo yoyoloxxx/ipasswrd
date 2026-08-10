@@ -433,6 +433,7 @@ public partial class MainWindow : Window
         EntryList.ContextRequested += OnEntryContext;
         _ = Updater.CheckAndStageAsync();   // quiet; nothing is applied until the app exits
         StartUpdateWatch();
+        StartDriveClipRelay();   // общий буфер с телефоном через Диск; сам спит, пока сейф заперт
 
         // --tray (background) start is handled in App.axaml.cs: MainWindow is simply never
         // assigned/shown. No Opened+=Hide hack here — it used to re-hide the window the first
@@ -988,9 +989,10 @@ public partial class MainWindow : Window
             {
                 SaveLockout();
                 int left = Lockout.AttemptsLeft(_fails);
-                Err(left > 0
+                // Tr() до склейки: с приклеенной датой строка перестаёт находиться в словаре переводов.
+                Err(Tr(left > 0
                     ? $"Неверный мастер-пароль. Осталось попыток до блокировки: {left}"
-                    : "Неверный мастер-пароль. Следующая попытка заблокирует вход.");
+                    : "Неверный мастер-пароль. Следующая попытка заблокирует вход.") + MasterChangeHint());
             }
             return;
         }
@@ -1008,6 +1010,28 @@ public partial class MainWindow : Window
         EnterVault();
 
         void Err(string m) { UnlockError.Text = Tr(m); UnlockError.IsVisible = true; }
+    }
+
+    /// <summary>
+    /// Подсказка к «неверному паролю»: когда менялся конверт ключа. После синка смена
+    /// мастер-пароля с телефона доезжает до этого файла (Vault.MergeFrom), и человек со
+    /// «правильным старым» паролем упрётся в отказ — дата объясняет, что случилось.
+    /// Ничего секретного: штамп и так лежит в файле открытым текстом.
+    /// </summary>
+    private string MasterChangeHint()
+    {
+        try
+        {
+            string at = Vault.MasterPasswordChangedAtOf(System.IO.File.ReadAllBytes(VaultPath()));
+            if (at.Length == 0) return "";
+            if (!DateTimeOffset.TryParse(at, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal, out DateTimeOffset utc)) return "";
+            string when = utc.ToLocalTime().ToString(_lang == "en" ? "dd.MM 'at' HH:mm" : "dd.MM 'в' HH:mm");
+            return _lang == "en"
+                ? $" The master password was changed {when} — if that was another device, use the new one."
+                : $" Мастер-пароль менялся {when} — если это было на другом устройстве, вводите новый пароль.";
+        }
+        catch { return ""; }
     }
 
     // ================= unlock by recovery code =================

@@ -120,16 +120,17 @@ public sealed class AppState
         catch (WrongMasterPasswordException)
         {
             Fails++;
+            string hint = MasterChangeHint(blob);
             TimeSpan pen = Lockout.PenaltyFor(Fails);
             if (pen > TimeSpan.Zero)
             {
                 LockedUntil = DateTimeOffset.UtcNow + pen;
-                return $"Неверный мастер-пароль. Вход закрыт на {Fmt.Duration(pen)}.";
+                return $"Неверный мастер-пароль. Вход закрыт на {Fmt.Duration(pen)}.{hint}";
             }
             int left = Lockout.AttemptsLeft(Fails);
-            return left > 0
+            return (left > 0
                 ? $"Неверный мастер-пароль. Осталось попыток без блокировки: {left}."
-                : "Неверный мастер-пароль.";
+                : "Неверный мастер-пароль.") + hint;
         }
         catch (Exception)
         {
@@ -140,6 +141,25 @@ public sealed class AppState
         LockedUntil = DateTimeOffset.MinValue;
         AfterUnlock();
         return null;
+    }
+
+    /// <summary>
+    /// Подсказка к неверному паролю: когда конверт ключа менялся. Перед вводом пароля файл
+    /// подтягивается из облака (pull-first), поэтому после смены пароля на ПК человек с
+    /// «правильным старым» паролем упирается в «неверно» — дата объясняет, что произошло,
+    /// и не выдаёт ничего, чего нет в самом файле.
+    /// </summary>
+    private static string MasterChangeHint(byte[] blob)
+    {
+        try
+        {
+            string at = IPasswrd.Core.Vault.MasterPasswordChangedAtOf(blob);
+            if (at.Length == 0) return "";
+            if (!DateTimeOffset.TryParse(at, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal, out DateTimeOffset utc)) return "";
+            return $" Мастер-пароль менялся {utc.ToLocalTime():dd.MM 'в' HH:mm} — если это было на другом устройстве, вводите новый пароль.";
+        }
+        catch { return ""; }
     }
 
     private void AfterUnlock()
@@ -352,9 +372,11 @@ public sealed class AppState
                 return;
             }
 
+            bool adoptedPassword = false;
             if (ext is { Length: > 0 })
             {
                 int changed;
+                string envBefore = v.MasterPasswordChangedAt;
                 try { changed = v.MergeFrom(ext); }
                 catch (VaultIntegrityException)
                 {
@@ -368,7 +390,11 @@ public sealed class AppState
                     SyncProblem?.Invoke(LastSyncStatus);
                     return;
                 }
-                if (changed > 0 && ReferenceEquals(_vault, v))
+                // Смена мастер-пароля с другого устройства: конверт принят внутри MergeFrom.
+                // Записать локальный файл нужно даже без изменённых записей — иначе телефон
+                // до следующей правки хранит старый конверт и путает пользователя при входе.
+                adoptedPassword = !string.Equals(v.MasterPasswordChangedAt, envBefore, StringComparison.Ordinal);
+                if ((changed > 0 || adoptedPassword) && ReferenceEquals(_vault, v))
                 {
                     File.WriteAllBytes(LocalVaultPath, v.Serialize());
                     ShareForAutoFill();
@@ -376,16 +402,21 @@ public sealed class AppState
                 }
             }
 
+            // Отпечаток/Face ID хранит DEK, а не пароль, поэтому быстрая разблокировка
+            // переживает смену конверта; человеку важно лишь знать, что при следующем
+            // вводе пароля телефон ждёт НОВЫЙ (тот, что задан на другом устройстве).
+            string note = adoptedPassword ? " · применена смена мастер-пароля с другого устройства" : "";
+
             byte[] mine = v.Serialize();
             if (ext is null || !mine.AsSpan().SequenceEqual(ext))
             {
                 bool ok = await RemoteWriteAsync(mine);
-                LastSyncStatus = ok ? $"Синхронизировано {DateTime.Now:HH:mm}" : $"Не удалось записать в {where}.";
+                LastSyncStatus = ok ? $"Синхронизировано {DateTime.Now:HH:mm}{note}" : $"Не удалось записать в {where}.";
                 if (!ok) SyncProblem?.Invoke(LastSyncStatus);
             }
             else
             {
-                LastSyncStatus = $"Синхронизировано {DateTime.Now:HH:mm}";
+                LastSyncStatus = $"Синхронизировано {DateTime.Now:HH:mm}{note}";
             }
         }
         finally { Interlocked.Exchange(ref _syncBusy, 0); }

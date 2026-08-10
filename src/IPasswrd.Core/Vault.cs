@@ -38,12 +38,14 @@ public sealed class Vault
     private string _vaultId;
     private RecoveryDto? _recovery;
     private string _recoveryRevokedAt;
+    private string _masterChangedAt;
     private bool? _hasAttachments;   // null = not worked out yet
 
     private static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never };
 
     private Vault(KdfConfig cfg, byte[] salt, byte[] dek, BlobDto wrapped, List<RecordDto> records,
-                  string vaultId, RecoveryDto? recovery = null, string recoveryRevokedAt = "")
+                  string vaultId, RecoveryDto? recovery = null, string recoveryRevokedAt = "",
+                  string masterChangedAt = "")
     {
         _cfg = cfg;
         _salt = salt;
@@ -53,6 +55,7 @@ public sealed class Vault
         _vaultId = vaultId;
         _recovery = recovery;
         _recoveryRevokedAt = recoveryRevokedAt;
+        _masterChangedAt = masterChangedAt;
     }
 
     /// <summary>Deserialise and reject layouts this build does not understand.</summary>
@@ -77,7 +80,8 @@ public sealed class Vault
         byte[] salt = Crypto.RandomBytes(Crypto.SaltLen);
         byte[] dek = Crypto.RandomBytes(Crypto.KeyLen);
         BlobDto wrapped = Wrap(Crypto.DeriveKey(masterPassword, salt, cfg), dek, Crypto.AadVaultKey);
-        return new Vault(cfg, salt, dek, wrapped, new List<RecordDto>(), Guid.NewGuid().ToString());
+        return new Vault(cfg, salt, dek, wrapped, new List<RecordDto>(), Guid.NewGuid().ToString(),
+                         masterChangedAt: NowIsoFine());   // creation is the first "change"
     }
 
     /// <summary>Unlock a serialised vault. Throws <see cref="WrongMasterPasswordException"/> on a bad password.</summary>
@@ -90,7 +94,8 @@ public sealed class Vault
         byte[] kek = Crypto.DeriveKey(masterPassword, salt, cfg);
         byte[] dek = Unwrap(kek, doc.WrappedKey);   // throws WrongMasterPasswordException
         string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
-        return new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt);
+        return new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
+                         doc.MasterChangedAt);
     }
 
     /// <summary>Copy of the session key (DEK) for OS-protected quick unlock. Handle with care.</summary>
@@ -108,7 +113,8 @@ public sealed class Vault
         var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism);
         byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
         string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
-        var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt);
+        var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
+                          doc.MasterChangedAt);
 
         foreach (RecordDto r in doc.Records)
         {
@@ -140,6 +146,7 @@ public sealed class Vault
             WrappedKey = _wrapped,
             Recovery = _recovery,
             RecoveryRevokedAt = _recoveryRevokedAt,
+            MasterChangedAt = _masterChangedAt,
             // canonical order: identical content on two devices serialises to identical bytes,
             // so folder-sync (iCloud/Drive) converges instead of ping-ponging re-uploads
             Records = _records.OrderBy(r => r.Id, StringComparer.Ordinal).ToList(),
@@ -292,10 +299,14 @@ public sealed class Vault
     /// Merge another serialisation of the SAME vault (a copy synced from another device)
     /// into this one. For each record id, keep whichever side has the newer <c>UpdatedAt</c> —
     /// tombstones included, so deletions propagate too. Records stay encrypted the whole time
-    /// (same DEK lineage), so no password is needed. The local key envelope is kept, so this
-    /// vault still unlocks with the local master password afterwards. Refuses to merge a
-    /// different vault (mismatched <see cref="VaultId"/>). Returns the number of records that
-    /// were added or replaced from <paramref name="otherBlob"/>.
+    /// (same DEK lineage), so no password is needed. The master-password envelope follows its
+    /// own last-write-wins rule (newest <c>masterChangedAt</c> wins): a password changed on one
+    /// device replaces the wrapping — never the DEK — everywhere else, so after this call the
+    /// vault may require the OTHER side's master password at the next unlock. Files without a
+    /// stamp keep the local envelope, exactly as every build behaved before the stamp existed.
+    /// Refuses to merge a different vault (mismatched <see cref="VaultId"/>). Returns the number
+    /// of records that were added or replaced from <paramref name="otherBlob"/> (an adopted
+    /// envelope is not counted — compare <see cref="MasterPasswordChangedAt"/> to detect it).
     /// </summary>
     public int MergeFrom(byte[] otherBlob)
     {
@@ -337,7 +348,50 @@ public sealed class Vault
             _recoveryRevokedAt = other.RecoveryRevokedAt;
         }
 
+        // The master-password envelope converges the same way. Historically every device kept
+        // its own envelope forever, so a password changed on the PC lived only there while the
+        // phone silently stayed on the old one — records in sync, passwords diverged, no error
+        // anywhere. Newest change wins now. Adopting swaps only the wrapping around the SAME
+        // DEK: the open session, every record and the recovery envelope are untouched. A
+        // mangled envelope (damaged base64/salt) is skipped — records still merge, and a
+        // broken wrapping must never replace a working one.
+        if (string.CompareOrdinal(other.MasterChangedAt, _masterChangedAt) > 0)
+        {
+            try
+            {
+                byte[] salt = Convert.FromBase64String(other.Kdf.Salt);
+                byte[] ct = Convert.FromBase64String(other.WrappedKey.Ciphertext);
+                byte[] nonce = Convert.FromBase64String(other.WrappedKey.Nonce);
+                if (salt.Length == Crypto.SaltLen && nonce.Length == Crypto.NonceLen && ct.Length >= Crypto.TagLen)
+                {
+                    _cfg = new KdfConfig(other.Kdf.MemoryKiB, other.Kdf.Iterations, other.Kdf.Parallelism);
+                    _salt = salt;
+                    _wrapped = other.WrappedKey;
+                    _masterChangedAt = other.MasterChangedAt;
+                }
+            }
+            catch (FormatException) { /* damaged envelope on the other side — keep ours */ }
+        }
+
         return changed;
+    }
+
+    /// <summary>
+    /// Clear-text ISO stamp of the last master-password change ("" for files that predate the
+    /// stamp). Callers snapshot it around <see cref="MergeFrom"/> to notice that the envelope
+    /// was adopted from another device and the next unlock will want that device's password.
+    /// </summary>
+    public string MasterPasswordChangedAt => _masterChangedAt;
+
+    /// <summary>
+    /// The same stamp straight from a serialised blob, no password needed — for the unlock
+    /// screen to explain a failed attempt ("the master password was changed on …"). The date
+    /// is already visible metadata in the file, like the recovery envelope's presence.
+    /// </summary>
+    public static string MasterPasswordChangedAtOf(byte[] blob)
+    {
+        try { return Parse(blob).MasterChangedAt; }
+        catch { return ""; }
     }
 
     // ---- master password ----
@@ -351,6 +405,7 @@ public sealed class Vault
         _ = Unwrap(Crypto.DeriveKey(oldPassword, _salt, _cfg), _wrapped); // throws if wrong
         _salt = Crypto.RandomBytes(Crypto.SaltLen);
         _wrapped = Wrap(Crypto.DeriveKey(newPassword, _salt, _cfg), _dek, Crypto.AadVaultKey);
+        _masterChangedAt = NowIsoFine();   // this envelope now outranks every other device's
     }
 
     /// <summary>
@@ -364,6 +419,7 @@ public sealed class Vault
     {
         _salt = Crypto.RandomBytes(Crypto.SaltLen);
         _wrapped = Wrap(Crypto.DeriveKey(newPassword, _salt, _cfg), _dek, Crypto.AadVaultKey);
+        _masterChangedAt = NowIsoFine();   // recovery sets a new password: same rule as a change
     }
 
     // ---- recovery code ----
@@ -448,7 +504,8 @@ public sealed class Vault
         var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism);
         byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
         string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
-        return new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt);
+        return new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
+                         doc.MasterChangedAt);
     }
 
     // ---- key wrapping ----
@@ -595,4 +652,12 @@ public sealed class Vault
 
     private static string NowIso() =>
         DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss'Z'", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Envelope stamp with sub-second precision: two devices changing the master password in
+    /// the same second must still order deterministically. One fixed length and layout, so the
+    /// ordinal string compare in <see cref="MergeFrom"/> is a correct time compare.
+    /// </summary>
+    private static string NowIsoFine() =>
+        DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture);
 }
