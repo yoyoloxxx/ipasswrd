@@ -427,4 +427,77 @@ public sealed class GoogleDriveSync
         if (!string.IsNullOrEmpty(rt))
             _ = Http.PostAsync(RevokeEndpoint, new FormUrlEncodedContent(new Dictionary<string, string> { ["token"] = rt! }));
     }
+
+    // ---- маленькие служебные файлы в той же папке (общий буфер обмена и прочее) ----
+    // Тот же приём, что с сейфом: find-or-create по имени, id кешируется, 404 сбрасывает кеш.
+
+    private readonly Dictionary<string, string> _smallIds = new(StringComparer.Ordinal);
+
+    private async Task<string?> FindSmallAsync(string name, CancellationToken ct)
+    {
+        if (_smallIds.TryGetValue(name, out string? cached)) return cached;
+        string url = DriveFiles + "?spaces=drive&pageSize=5&fields=" + Uri.EscapeDataString("files(id)") +
+            "&q=" + Uri.EscapeDataString($"name = '{name}' and trashed = false");
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        using var resp = await SendAuthed(req, ct);
+        if (!resp.IsSuccessStatusCode) return null;
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        if (!doc.RootElement.TryGetProperty("files", out var files) || files.GetArrayLength() == 0) return null;
+        string? id = files[0].GetProperty("id").GetString();
+        if (id is not null) _smallIds[name] = id;
+        return id;
+    }
+
+    /// <summary>Скачать служебный файл целиком; null — его нет.</summary>
+    public async Task<byte[]?> DownloadSmallAsync(string name, CancellationToken ct = default)
+    {
+        string? id = await FindSmallAsync(name, ct);
+        if (id is null) return null;
+        using var req = new HttpRequestMessage(HttpMethod.Get, DriveFiles + "/" + id + "?alt=media");
+        using var resp = await SendAuthed(req, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) { _smallIds.Remove(name); return null; }
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadAsByteArrayAsync(ct);
+    }
+
+    /// <summary>Залить служебный файл (создать или заменить содержимое).</summary>
+    public async Task UploadSmallAsync(string name, byte[] bytes, CancellationToken ct = default)
+    {
+        string? id = await FindSmallAsync(name, ct);
+        if (id is null)
+        {
+            string folderId = await EnsureFolderAsync(ct);
+            string boundary = "ipw" + B64Url(RandomNumberGenerator.GetBytes(12));
+            var content = new MultipartContent("related", boundary);
+            var meta = new StringContent("{\"name\":\"" + name + "\",\"parents\":[\"" + folderId + "\"]}", Encoding.UTF8);
+            meta.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            content.Add(meta);
+            var media = new ByteArrayContent(bytes);
+            media.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            content.Add(media);
+            using var req = new HttpRequestMessage(HttpMethod.Post, DriveUpload + "?uploadType=multipart&fields=id") { Content = content };
+            using var resp = await SendAuthed(req, ct);
+            if (!resp.IsSuccessStatusCode) throw new InvalidOperationException("drive_upload_failed");
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            if (doc.RootElement.TryGetProperty("id", out var nid) && nid.GetString() is { } s) _smallIds[name] = s;
+            return;
+        }
+
+        using var patch = new HttpRequestMessage(HttpMethod.Patch, DriveUpload + "/" + id + "?uploadType=media&fields=id")
+        { Content = new ByteArrayContent(bytes) };
+        patch.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        using var presp = await SendAuthed(patch, ct);
+        if (presp.StatusCode == HttpStatusCode.NotFound) { _smallIds.Remove(name); await UploadSmallAsync(name, bytes, ct); return; }
+        if (!presp.IsSuccessStatusCode) throw new InvalidOperationException("drive_upload_failed");
+    }
+
+    /// <summary>Удалить служебный файл — применённый буфер не должен лежать в облаке.</summary>
+    public async Task DeleteSmallAsync(string name, CancellationToken ct = default)
+    {
+        string? id = await FindSmallAsync(name, ct);
+        if (id is null) return;
+        using var req = new HttpRequestMessage(HttpMethod.Delete, DriveFiles + "/" + id);
+        using var resp = await SendAuthed(req, ct);
+        _smallIds.Remove(name);
+    }
 }

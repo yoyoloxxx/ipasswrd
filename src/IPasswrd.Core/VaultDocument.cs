@@ -18,6 +18,13 @@ internal sealed class VaultDocumentDto
     /// <summary>Clear-text ISO stamp of the last revocation, so a merge can tell "revoked" from "never had one".</summary>
     [JsonPropertyName("recoveryRevokedAt")] public string RecoveryRevokedAt { get; set; } = "";
 
+    /// <summary>
+    /// Clear-text ISO stamp of the last master-password change (creation counts as the first one).
+    /// Sync uses it to converge the password envelope by last-write-wins — see Vault.MergeFrom.
+    /// "" on files written by builds that predate the field; those merge exactly as before.
+    /// </summary>
+    [JsonPropertyName("masterChangedAt")] public string MasterChangedAt { get; set; } = "";
+
     [JsonPropertyName("records")] public List<RecordDto> Records { get; set; } = new();
 }
 
