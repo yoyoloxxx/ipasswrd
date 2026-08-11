@@ -49,7 +49,9 @@ public sealed class Vault
     {
         _cfg = cfg;
         _salt = salt;
-        _dek = dek;
+        _dek = (byte[])dek.Clone();   // own copy: shielding scrambles the buffer in place
+        _dekShielded = MemProt.Shield(_dek);
+        _dekAlive = true;
         _wrapped = wrapped;
         _records = records;
         _vaultId = vaultId;
@@ -79,9 +81,13 @@ public sealed class Vault
         KdfConfig cfg = config ?? KdfConfig.Default;
         byte[] salt = Crypto.RandomBytes(Crypto.SaltLen);
         byte[] dek = Crypto.RandomBytes(Crypto.KeyLen);
-        BlobDto wrapped = Wrap(Crypto.DeriveKey(masterPassword, salt, cfg), dek, Crypto.AadVaultKey);
-        return new Vault(cfg, salt, dek, wrapped, new List<RecordDto>(), Guid.NewGuid().ToString(),
-                         masterChangedAt: NowIsoFine());   // creation is the first "change"
+        byte[] kek = Crypto.DeriveKey(masterPassword, salt, cfg);
+        BlobDto wrapped = Wrap(kek, dek, Crypto.AadVaultKey);
+        CryptographicOperations.ZeroMemory(kek);
+        var v = new Vault(cfg, salt, dek, wrapped, new List<RecordDto>(), Guid.NewGuid().ToString(),
+                          masterChangedAt: NowIsoFine());   // creation is the first "change"
+        CryptographicOperations.ZeroMemory(dek);   // the vault holds its own (shielded) copy now
+        return v;
     }
 
     /// <summary>Unlock a serialised vault. Throws <see cref="WrongMasterPasswordException"/> on a bad password.</summary>
@@ -89,17 +95,92 @@ public sealed class Vault
     {
         VaultDocumentDto doc = Parse(blob);
 
-        var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism);
+        var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism).Capped();
         byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
         byte[] kek = Crypto.DeriveKey(masterPassword, salt, cfg);
         byte[] dek = Unwrap(kek, doc.WrappedKey);   // throws WrongMasterPasswordException
         string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
-        return new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
-                         doc.MasterChangedAt);
+        var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
+                          doc.MasterChangedAt);
+        CryptographicOperations.ZeroMemory(dek);   // the vault holds its own (shielded) copy now
+        CryptographicOperations.ZeroMemory(kek);
+        return v;
     }
 
     /// <summary>Copy of the session key (DEK) for OS-protected quick unlock. Handle with care.</summary>
-    public byte[] ExportSessionKey() => (byte[])_dek.Clone();
+    public byte[] ExportSessionKey() => WithDek(static d => (byte[])d.Clone());
+
+    /// <summary>Best-effort scrub of the session key (DEK) from memory. Called on lock, before the
+    /// vault object is dropped. The DEK is the key to every record, so wiping it the instant the vault
+    /// locks shrinks what a memory scraper can recover from a locked session toward nothing.</summary>
+    public void Wipe()
+    {
+        lock (_dekLock)
+        {
+            CryptographicOperations.ZeroMemory(_dek);
+            _dekShielded = false;   // nothing left worth unshielding
+            _dekAlive = false;      // any later WithDek/ExportSessionKey must FAIL, never hand out the zeroed buffer
+        }
+    }
+
+    // ---- in-memory key protection ----
+    //
+    // Between uses the DEK sits in RAM scrambled by CryptProtectMemory (keyed per-process by
+    // the kernel) and is raw for only the microseconds a record is actually being sealed or
+    // opened. A memory dump of the running process therefore almost never contains the usable
+    // key. Fully transparent to callers; on a platform without crypt32, or if the call ever
+    // fails, the vault simply runs unshielded exactly as before — function over shielding.
+
+    private readonly object _dekLock = new();
+    private bool _dekShielded;
+    private bool _dekAlive;   // false after Wipe(): the key is gone, not merely unshielded
+
+    /// <summary>Run <paramref name="use"/> with the raw DEK, unshielding just around the call.
+    /// Re-entrant: a nested call finds the key already raw and leaves re-shielding to the outer frame.
+    /// <paramref name="use"/> must not stash the array — it is scrambled again on return.
+    /// After <see cref="Wipe"/> this THROWS rather than exposing the zeroed buffer, so a stale caller
+    /// (e.g. a background relay racing a lock) can never seal data under an all-zero key.</summary>
+    private T WithDek<T>(Func<byte[], T> use)
+    {
+        lock (_dekLock)
+        {
+            if (!_dekAlive) throw new InvalidOperationException("vault session key has been wiped (vault is locked)");
+            bool wasShielded = _dekShielded;
+            if (wasShielded)
+            {
+                if (!MemProt.Unshield(_dek)) throw new CryptographicException("session key unshield failed");
+                _dekShielded = false;
+            }
+            try { return use(_dek); }
+            finally { if (wasShielded) _dekShielded = MemProt.Shield(_dek); }
+        }
+    }
+
+    /// <summary>CryptProtectMemory / CryptUnprotectMemory, same-process scope. In-place on a
+    /// 16-byte-multiple buffer (the 32-byte DEK qualifies). Best-effort by design.</summary>
+    private static class MemProt
+    {
+        private const uint SameProcess = 0;   // CRYPTPROTECTMEMORY_SAME_PROCESS
+
+        [System.Runtime.InteropServices.DllImport("crypt32.dll")]
+        private static extern bool CryptProtectMemory(byte[] pData, uint cbData, uint dwFlags);
+
+        [System.Runtime.InteropServices.DllImport("crypt32.dll")]
+        private static extern bool CryptUnprotectMemory(byte[] pData, uint cbData, uint dwFlags);
+
+        public static bool Shield(byte[] buf)
+        {
+            if (!OperatingSystem.IsWindows() || buf.Length == 0 || (buf.Length & 15) != 0) return false;
+            try { return CryptProtectMemory(buf, (uint)buf.Length, SameProcess); }
+            catch { return false; }
+        }
+
+        public static bool Unshield(byte[] buf)
+        {
+            try { return CryptUnprotectMemory(buf, (uint)buf.Length, SameProcess); }
+            catch { return false; }
+        }
+    }
 
     /// <summary>
     /// Reopen a serialised vault with a cached session key, skipping the KDF (quick unlock).
@@ -110,9 +191,11 @@ public sealed class Vault
     {
         VaultDocumentDto doc = Parse(blob);
 
-        var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism);
+        var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism).Capped();
         byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
         string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
+        // NB: the caller keeps ownership of `dek` here (quick-unlock caches it OS-protected);
+        // the ctor clones, so shielding never scrambles the caller's buffer.
         var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
                           doc.MasterChangedAt);
 
@@ -364,7 +447,7 @@ public sealed class Vault
                 byte[] nonce = Convert.FromBase64String(other.WrappedKey.Nonce);
                 if (salt.Length == Crypto.SaltLen && nonce.Length == Crypto.NonceLen && ct.Length >= Crypto.TagLen)
                 {
-                    _cfg = new KdfConfig(other.Kdf.MemoryKiB, other.Kdf.Iterations, other.Kdf.Parallelism);
+                    _cfg = new KdfConfig(other.Kdf.MemoryKiB, other.Kdf.Iterations, other.Kdf.Parallelism).Capped();
                     _salt = salt;
                     _wrapped = other.WrappedKey;
                     _masterChangedAt = other.MasterChangedAt;
@@ -402,9 +485,14 @@ public sealed class Vault
     /// </summary>
     public void ChangeMasterPassword(string oldPassword, string newPassword)
     {
-        _ = Unwrap(Crypto.DeriveKey(oldPassword, _salt, _cfg), _wrapped); // throws if wrong
+        byte[] oldKek = Crypto.DeriveKey(oldPassword, _salt, _cfg);
+        byte[] check = Unwrap(oldKek, _wrapped); // throws if wrong
+        CryptographicOperations.ZeroMemory(oldKek);
+        CryptographicOperations.ZeroMemory(check);
         _salt = Crypto.RandomBytes(Crypto.SaltLen);
-        _wrapped = Wrap(Crypto.DeriveKey(newPassword, _salt, _cfg), _dek, Crypto.AadVaultKey);
+        byte[] kek = Crypto.DeriveKey(newPassword, _salt, _cfg);   // slow KDF outside the key lock
+        _wrapped = WithDek(d => Wrap(kek, d, Crypto.AadVaultKey));
+        CryptographicOperations.ZeroMemory(kek);
         _masterChangedAt = NowIsoFine();   // this envelope now outranks every other device's
     }
 
@@ -417,8 +505,11 @@ public sealed class Vault
     /// </summary>
     public void ResetMasterPassword(string newPassword)
     {
+        _cfg = _cfg.Sanitized();   // recovery reset must never carry over a downgraded KDF from a tampered header
         _salt = Crypto.RandomBytes(Crypto.SaltLen);
-        _wrapped = Wrap(Crypto.DeriveKey(newPassword, _salt, _cfg), _dek, Crypto.AadVaultKey);
+        byte[] kek = Crypto.DeriveKey(newPassword, _salt, _cfg);   // slow KDF outside the key lock
+        _wrapped = WithDek(d => Wrap(kek, d, Crypto.AadVaultKey));
+        CryptographicOperations.ZeroMemory(kek);
         _masterChangedAt = NowIsoFine();   // recovery sets a new password: same rule as a change
     }
 
@@ -461,9 +552,10 @@ public sealed class Vault
         _recovery = new RecoveryDto
         {
             Kdf = KdfDtoOf(_cfg, salt),
-            WrappedKey = Wrap(rek, _dek, Crypto.AadRecoveryKey),
+            WrappedKey = WithDek(d => Wrap(rek, d, Crypto.AadRecoveryKey)),
             CreatedAt = NowIso(),
         };
+        CryptographicOperations.ZeroMemory(rek);
         _recoveryRevokedAt = "";
         return display;
     }
@@ -496,16 +588,19 @@ public sealed class Vault
 
         string canonical = RecoveryCode.Normalize(recoveryCode) ?? throw new WrongRecoveryCodeException();
 
-        var rcfg = new KdfConfig(rec.Kdf.MemoryKiB, rec.Kdf.Iterations, rec.Kdf.Parallelism);
+        var rcfg = new KdfConfig(rec.Kdf.MemoryKiB, rec.Kdf.Iterations, rec.Kdf.Parallelism).Capped();
         byte[] rek = Crypto.DeriveKey(canonical, Convert.FromBase64String(rec.Kdf.Salt), rcfg);
         byte[] dek = TryUnwrap(rek, rec.WrappedKey, Crypto.AadRecoveryKey)
                      ?? throw new WrongRecoveryCodeException();
 
-        var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism);
+        var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism).Capped();
         byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
         string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
-        return new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
-                         doc.MasterChangedAt);
+        var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
+                          doc.MasterChangedAt);
+        CryptographicOperations.ZeroMemory(dek);   // the vault holds its own (shielded) copy now
+        CryptographicOperations.ZeroMemory(rek);
+        return v;
     }
 
     // ---- key wrapping ----
@@ -613,7 +708,7 @@ public sealed class Vault
 
         byte[] nonce = Crypto.RandomBytes(Crypto.NonceLen);
         byte[] plaintext = JsonSerializer.SerializeToUtf8Bytes(item, Json);
-        byte[] ct = Crypto.Seal(_dek, nonce, plaintext, Crypto.RecordAad(id));
+        byte[] ct = WithDek(d => Crypto.Seal(d, nonce, plaintext, Crypto.RecordAad(id)));
         return new RecordDto
         {
             Id = id,
@@ -628,10 +723,10 @@ public sealed class Vault
     {
         try
         {
-            byte[] pt = Crypto.Open(_dek,
+            byte[] pt = WithDek(d => Crypto.Open(d,
                 Convert.FromBase64String(rec.Nonce),
                 Convert.FromBase64String(rec.Ciphertext),
-                Crypto.RecordAad(rec.Id));
+                Crypto.RecordAad(rec.Id)));
             VaultItem item = JsonSerializer.Deserialize<VaultItem>(pt, Json)
                              ?? throw new VaultIntegrityException("record decoded to null");
             // Запись могла приехать с устройства, которое называло тип по-своему — см. ItemTypes.

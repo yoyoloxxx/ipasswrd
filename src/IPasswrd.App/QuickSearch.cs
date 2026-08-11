@@ -112,6 +112,7 @@ public partial class MainWindow
 
         _quick = new QuickSearchWindow(this);
         _quick.Closed += (_, _) => _quick = null;
+        _quick.Opened += (_, _) => ApplyCaptureShield(_quick);   // быстрый поиск показывает пароли — тоже вне записей экрана
         _quick.Show();
         _quick.Activate();
     }
@@ -156,7 +157,7 @@ public partial class MainWindow
 
     internal async Task QuickCopyAsync(string value)
     {
-        try { if (Clipboard is { } cb) await cb.SetTextAsync(value); } catch { /* ignore */ }
+        await CopySecretAsync(value);   // route through the shared helper: keep secrets out of Win+V / Cloud clipboard
         ScheduleClipboardClear(value);
     }
 

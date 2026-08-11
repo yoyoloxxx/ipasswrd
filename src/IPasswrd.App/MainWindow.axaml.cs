@@ -126,6 +126,23 @@ public partial class MainWindow : Window
             = "Passkeys will appear here after import. No need to add them manually.",
         ["Вход по ключу доступа (passkey) настроен для этого аккаунта."] = "Passkey sign-in is set up for this account.",
         ["Создан "] = "Created ",
+        ["Этот сайт поддерживает вход без пароля."] = "This site supports passwordless sign-in.",
+        ["Этот пароль — единственный ключ к сейфу. Надёжнее всего длинная фраза из нескольких слов."]
+            = "This password is the only key to your vault. A long phrase of several words is strongest.",
+        ["Скрывать от записи экрана"] = "Hide from screen capture",
+        ["В скриншотах и трансляциях окно будет пустым. Отключите на время, если нужно показать приложение."]
+            = "The window appears blank in screenshots and screen sharing. Turn off temporarily to show the app.",
+        ["Проверять автоматически"] = "Check automatically",
+        ["Каждый день"] = "Every day", ["Раз в неделю"] = "Weekly", ["Раз в месяц"] = "Monthly",
+        ["Ещё не проверялось"] = "Not checked yet",
+        ["Последняя проверка: "] = "Last check: ",
+        ["только что"] = "just now", ["сегодня"] = "today", ["вчера"] = "yesterday", ["{0} дн. назад"] = "{0} days ago",
+        ["Найдены пароли из утечек"] = "Passwords found in known breaches",
+        ["При последней проверке найдено паролей из утечек: {0}. Нажмите «Проверить пароли», чтобы увидеть список."]
+            = "The last check found {0} breached password(s). Press “Check passwords” to see the list.",
+        ["Включить ключ доступа"] = "Set up a passkey",
+        ["Откроется страница настроек входа на сайте. Ключ создастся в IPasswrd через наше расширение."]
+            = "Opens the site's sign-in settings. The passkey is created in IPasswrd via our browser extension.",
         // unlock
         ["Введите мастер-пароль"] = "Enter master password", ["Придумайте мастер-пароль"] = "Create a master password",
         ["Мастер-пароль"] = "Master password", ["Повторите пароль"] = "Repeat password",
@@ -428,11 +445,20 @@ public partial class MainWindow : Window
         RefreshNativeHostRegistration();   // keep Chrome's allow-list in step with the ids this build trusts
         PointerMoved += (_, _) => _lastActivity = DateTimeOffset.UtcNow;
         KeyDown += (_, _) => _lastActivity = DateTimeOffset.UtcNow;
+        // Lock the vault the instant the workstation locks or the machine sleeps: the vault is only
+        // exposed while unlocked, so collapsing that window is the cheapest defence against a process
+        // lying in wait for an unlocked session. Re-entry is one Windows Hello glance.
+        Microsoft.Win32.SystemEvents.SessionSwitch += OnSessionLockEvent;
+        Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerLockEvent;
         SetupUnlock();
         Opened += (_, _) => SetupGlobalHotkey();   // needs a real window handle, so not in the ctor
+        Opened += (_, _) => ApplyCaptureShield(this);   // окно с секретами — не для записей экрана
+        MasterBox.TextChanged += (_, _) => UpdateMasterMeter();
+        RecoveryPw1.TextChanged += (_, _) => UpdateRecoveryMeter();
         EntryList.ContextRequested += OnEntryContext;
         _ = Updater.CheckAndStageAsync();   // quiet; nothing is applied until the app exits
         StartUpdateWatch();
+        StartBreachWatch();      // авто-проверка утечек по расписанию (тихая, см. Features.cs)
         StartDriveClipRelay();   // общий буфер с телефоном через Диск; сам спит, пока сейф заперт
 
         // --tray (background) start is handled in App.axaml.cs: MainWindow is simply never
@@ -498,6 +524,50 @@ public partial class MainWindow : Window
         Show();
         WindowState = WindowState.Normal;
         Activate();
+        // Brought to the front by the user → offer Hello unlock if the vault is locked.
+        if (_vault is null && !Creating && !IsLocked && HasHelloCache())
+            _ = TryQuickUnlockHelloAsync();
+    }
+
+    /// <summary>Bring our window to the very front and hold foreground so a Windows Hello system dialog
+    /// opens ON TOP, not hidden behind the browser or whatever had focus. A tray-launched window is not
+    /// granted foreground instantly, so we assert it, let it settle, then assert again right before the
+    /// dialog is spawned.</summary>
+    private async Task PrepareForHelloAsync()
+    {
+        try
+        {
+            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+            Show();
+            Activate();
+            ForceForeground();
+            await Task.Delay(160);      // give Windows time to actually commit the foreground change
+            ForceForeground();
+        }
+        catch { /* best effort */ }
+    }
+
+    /// <summary>The Windows Hello credential dialog ("Безопасность Windows", hosted by CredentialUIBroker)
+    /// can still land behind our window on portable (unpackaged) builds. Poll briefly for it once it
+    /// spawns and pull that dialog itself to the front. No-op if not found. Runs in the background so it
+    /// overlaps the SignAsync call that creates the dialog.</summary>
+    private void NudgeCredentialDialogToFront()
+    {
+        _ = Task.Run(async () =>
+        {
+            for (int i = 0; i < 25; i++)   // ~2.5 s window
+            {
+                try
+                {
+                    IntPtr h = FindWindow("Credential Dialog Xaml Host", null);
+                    if (h == IntPtr.Zero) h = FindWindow(null, "Безопасность Windows");
+                    if (h == IntPtr.Zero) h = FindWindow(null, "Windows Security");
+                    if (h != IntPtr.Zero) { SetForegroundWindow(h); break; }
+                }
+                catch { }
+                try { await Task.Delay(100); } catch { break; }
+            }
+        });
     }
 
     /// <summary>Called when the user launches the app again (single-instance): surface this window.</summary>
@@ -541,6 +611,74 @@ public partial class MainWindow : Window
     /// <summary>Extra extension identity to trust, from settings. See Features.TrustedExtensionIds.</summary>
     private string? _extraExtensionId;
 
+    // Onboarding quick-start state (persisted in settings.json).
+    private bool _extEverConnected;   // the browser extension has connected at least once
+    private bool _obMobileDone;       // user ticked the "mobile app" step
+    private bool _quickStartHidden;   // user hid the quick-start checklist
+    private bool _armHelloAfterWelcome; // first run: arm quick unlock only once the welcome is dismissed (never over it)
+    private bool _captureShieldOff;   // хранится «выключенность»: отсутствие поля в настройках = защита включена
+
+    // ---- анти-скриншот ----
+    //
+    // Окно приложения исключается из любого захвата экрана: скриншоты, записи, трансляции,
+    // удалённый доступ (TeamViewer/AnyDesk) и шпионские скринкасты видят на его месте пустоту.
+    // Это закрывает последний зазор показа пароля: даже те секунды, пока он открыт «глазиком»,
+    // в запись не попадают. Пользователь ничего не замечает — пока сам не попробует заскринить;
+    // на этот случай в настройках есть тумблер (показать приложение на созвоне и т.п.).
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);
+    private const uint WdaNone = 0x0;
+    private const uint WdaMonitor = 0x1;               // старые Windows 10: чёрный прямоугольник в захвате
+    private const uint WdaExcludeFromCapture = 0x11;   // Windows 10 2004+: окна в захвате просто нет
+
+    private void ApplyCaptureShield(Window w)
+    {
+        try
+        {
+            nint h = w.TryGetPlatformHandle()?.Handle ?? 0;
+            if (h == 0) return;
+            if (_captureShieldOff) { SetWindowDisplayAffinity(h, WdaNone); return; }
+            if (!SetWindowDisplayAffinity(h, WdaExcludeFromCapture))
+                SetWindowDisplayAffinity(h, WdaMonitor);
+        }
+        catch { /* защита — по возможности, работа — всегда */ }
+    }
+
+    // ---- шкала надёжности мастер-пароля ----
+    //
+    // Мастер-пароль — единственное звено, которое математика не усилит за человека. Шкала
+    // ничего не запрещает и не блокирует: она просто честно показывает, что получилось,
+    // той же полоской, что и у паролей записей.
+
+    private void UpdateMasterMeter()
+    {
+        if (!MasterBox2.IsVisible) { MasterMeter.IsVisible = false; MasterMeter.Content = null; return; }   // шкала уместна только при создании
+        ShowStrength(MasterMeter, MasterBox.Text ?? "");
+    }
+
+    private void UpdateRecoveryMeter() => ShowStrength(RecoveryMeter, RecoveryPw1.Text ?? "");
+
+    private void ShowStrength(ContentControl host, string pw)
+    {
+        if (pw.Length == 0) { host.IsVisible = false; host.Content = null; return; }
+        var s = Auditor.Rate(pw);
+        var box = new StackPanel { Spacing = 5 };
+        var line = StrengthLine(s);
+        // StrengthLine рисует подпись по-русски и в обычных местах её переводит Relocalize;
+        // здесь шкала перестраивается на каждом нажатии — переводим подпись сразу.
+        if (line is StackPanel lp && lp.Children.Count > 1 && lp.Children[^1] is TextBlock { Text: { } lblText } lbl) lbl.Text = Tr(lblText);
+        box.Children.Add(line);
+        if (s == Strength.Weak)
+            box.Children.Add(new TextBlock
+            {
+                Text = Tr("Этот пароль — единственный ключ к сейфу. Надёжнее всего длинная фраза из нескольких слов."),
+                Foreground = Text3, FontSize = 11.5, TextWrapping = TextWrapping.Wrap,
+            });
+        host.Content = box;
+        host.IsVisible = true;
+    }
+
     private sealed class AppSettings
     {
         public int AutolockMinutes { get; set; }
@@ -554,6 +692,22 @@ public partial class MainWindow : Window
 
         /// <summary>Extra extension identity to trust — for pointing a build at a freshly uploaded Store draft.</summary>
         public string? ExtraExtensionId { get; set; }
+
+        /// <summary>Allow GET /clip (PC clipboard → phone) over the LAN relay. Off by default.</summary>
+        public bool LanClipboardDownload { get; set; }
+
+        /// <summary>First-run quick-start checklist progress.</summary>
+        public bool ExtConnected { get; set; }
+        public bool MobileStepDone { get; set; }
+        public bool QuickStartHidden { get; set; }
+
+        /// <summary>Анти-скриншот: хранится «выключено», чтобы отсутствие поля означало «защита включена».</summary>
+        public bool CaptureShieldOff { get; set; }
+
+        /// <summary>Автопроверка утечек: раз в сколько дней (0 = выкл; по умолчанию раз в неделю).</summary>
+        public int BreachEveryDays { get; set; } = 7;
+        public string? BreachLastCheckAt { get; set; }
+        public int BreachFound { get; set; }
     }
 
     private void LoadSettings()
@@ -563,7 +717,7 @@ public partial class MainWindow : Window
             string p = SettingsPath();
             if (!System.IO.File.Exists(p)) return;
             var s = JsonSerializer.Deserialize<AppSettings>(System.IO.File.ReadAllText(p));
-            if (s is not null) { _autolockMinutes = s.AutolockMinutes; _light = s.Light; _lang = string.IsNullOrEmpty(s.Lang) ? "ru" : s.Lang; _syncPath = s.SyncPath; _siteNames = s.SiteNames is null ? new(StringComparer.Ordinal) : new(s.SiteNames, StringComparer.Ordinal); _keepAsIs = s.KeepAsIs is null ? new(StringComparer.Ordinal) : new(s.KeepAsIs, StringComparer.Ordinal); _syncProvider = s.SyncProvider ?? ""; _clipboardClearSeconds = s.ClipboardClearSeconds; _extraExtensionId = s.ExtraExtensionId; }
+            if (s is not null) { _autolockMinutes = s.AutolockMinutes; _light = s.Light; _lang = string.IsNullOrEmpty(s.Lang) ? "ru" : s.Lang; _syncPath = s.SyncPath; _siteNames = s.SiteNames is null ? new(StringComparer.Ordinal) : new(s.SiteNames, StringComparer.Ordinal); _keepAsIs = s.KeepAsIs is null ? new(StringComparer.Ordinal) : new(s.KeepAsIs, StringComparer.Ordinal); _syncProvider = s.SyncProvider ?? ""; _clipboardClearSeconds = s.ClipboardClearSeconds; _extraExtensionId = s.ExtraExtensionId; _lanClipDownEnabled = s.LanClipboardDownload; _extEverConnected = s.ExtConnected; _obMobileDone = s.MobileStepDone; _quickStartHidden = s.QuickStartHidden; _captureShieldOff = s.CaptureShieldOff; _breachEveryDays = s.BreachEveryDays; _breachFound = s.BreachFound; if (!string.IsNullOrEmpty(s.BreachLastCheckAt)) DateTime.TryParse(s.BreachLastCheckAt, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out _breachLastUtc); }
         }
         catch { /* ignore */ }
     }
@@ -574,7 +728,7 @@ public partial class MainWindow : Window
         {
             string p = SettingsPath();
             System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(p)!);
-            System.IO.File.WriteAllText(p, JsonSerializer.Serialize(new AppSettings { AutolockMinutes = _autolockMinutes, Light = _light, Lang = _lang, SyncPath = _syncPath, SiteNames = _siteNames.Count > 0 ? _siteNames : null, KeepAsIs = _keepAsIs.Count > 0 ? _keepAsIs : null, SyncProvider = string.IsNullOrEmpty(_syncProvider) ? null : _syncProvider, ClipboardClearSeconds = _clipboardClearSeconds, ExtraExtensionId = string.IsNullOrWhiteSpace(_extraExtensionId) ? null : _extraExtensionId }));
+            System.IO.File.WriteAllText(p, JsonSerializer.Serialize(new AppSettings { AutolockMinutes = _autolockMinutes, Light = _light, Lang = _lang, SyncPath = _syncPath, SiteNames = _siteNames.Count > 0 ? _siteNames : null, KeepAsIs = _keepAsIs.Count > 0 ? _keepAsIs : null, SyncProvider = string.IsNullOrEmpty(_syncProvider) ? null : _syncProvider, ClipboardClearSeconds = _clipboardClearSeconds, ExtraExtensionId = string.IsNullOrWhiteSpace(_extraExtensionId) ? null : _extraExtensionId, LanClipboardDownload = _lanClipDownEnabled, ExtConnected = _extEverConnected, MobileStepDone = _obMobileDone, QuickStartHidden = _quickStartHidden, CaptureShieldOff = _captureShieldOff, BreachEveryDays = _breachEveryDays, BreachLastCheckAt = _breachLastUtc == default ? null : _breachLastUtc.ToString("o"), BreachFound = _breachFound }));
         }
         catch { /* best effort */ }
         SavePrefsToVault();   // mirror the syncable prefs (site names + keep-marks) into the vault
@@ -744,64 +898,330 @@ public partial class MainWindow : Window
         catch { /* best effort */ }
     }
 
-    // ================= quick unlock (DPAPI) =================
-    // After a successful unlock the session key is stored encrypted by Windows (DPAPI,
-    // current user) with an expiry equal to the auto-lock interval. Locking — manual or
-    // by timer — wipes it, so the master password is asked exactly when the user expects.
+    // ================= quick unlock (Windows Hello + TPM) =================
+    // After a successful unlock the session key (DEK) is cached so the master password is
+    // not needed every time. It is protected in two layers:
+    //   1) Windows Hello / TPM: the DEK is wrapped by a key derived from a Passport-credential
+    //      signature that the TPM releases ONLY after a Hello gesture (face/finger/PIN). No
+    //      process can read the cached DEK without the user physically passing Hello. See
+    //      WindowsHello.cs.
+    //   2) DPAPI (current Windows user) on top, with a per-install random entropy (NOT a
+    //      constant in source), so the file is also account-bound at rest.
+    // On machines without Hello enrolled we fall back to a DPAPI-only "soft" cache (still with
+    // per-install entropy and a bounded lifetime). Locking — manual or by the auto-lock timer —
+    // wipes the cache, and the cached key never lives longer than QuickUnlockMaxLifetime.
 
     private static string QuickUnlockPath() => System.IO.Path.Combine(LocalDataDir(), "quickunlock.bin");
-    private static readonly byte[] QuickEntropy = System.Text.Encoding.UTF8.GetBytes("IPasswrd.QuickUnlock.v1");
+    private static string QuickEntropyPath() => System.IO.Path.Combine(LocalDataDir(), "quickunlock.ent");
     private DateTimeOffset _quickRefreshedAt = DateTimeOffset.MinValue;
+
+    /// <summary>Hard ceiling on how long a cached key may live, even if auto-lock is set to "off".
+    /// "The key sits on disk forever" is exactly the complaint a security review makes; there is
+    /// always an expiry now.</summary>
+    private static readonly TimeSpan QuickUnlockMaxLifetime = TimeSpan.FromDays(7);
+
+    private byte[]? _helloKey;         // in-memory wrap key for this session (Hello mode); never persisted raw
+    private byte[]? _helloChallenge;   // the challenge whose Hello signature yields _helloKey
+    private bool? _helloAvailable;     // cached result of WindowsHello.IsAvailableAsync()
+    private bool _helloInFlight;       // a Hello prompt is already open — do not stack a second one
+
+    // Per-install DPAPI entropy: a random value stored (itself DPAPI-protected) next to the cache,
+    // instead of a hardcoded string that anyone can read in the public source and script against.
+    private static byte[]? _quickEnt;
+    private static byte[] QuickEntropy()
+    {
+        if (_quickEnt is { Length: >= 16 }) return _quickEnt;
+        try
+        {
+            string p = QuickEntropyPath();
+            if (System.IO.File.Exists(p))
+            {
+                byte[] got = System.Security.Cryptography.ProtectedData.Unprotect(
+                    System.IO.File.ReadAllBytes(p), null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+                if (got.Length >= 16) return _quickEnt = got;
+            }
+        }
+        catch { /* unreadable → mint a fresh one; old cache just gets discarded */ }
+        _quickEnt = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        try
+        {
+            System.IO.Directory.CreateDirectory(LocalDataDir());
+            System.IO.File.WriteAllBytes(QuickEntropyPath(), System.Security.Cryptography.ProtectedData.Protect(
+                _quickEnt, null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+        }
+        catch { /* best effort */ }
+        return _quickEnt;
+    }
 
     private sealed class QuickUnlockData
     {
-        public string Dek { get; set; } = "";
-        public long ExpiresAt { get; set; }          // unix seconds; 0 = no expiry (auto-lock off)
+        public string Mode { get; set; } = "soft";   // "hello" | "soft"
+        public string Dek { get; set; } = "";          // soft: base64 DEK; hello: base64 AES-GCM(cipher||tag) of the DEK
+        public string Challenge { get; set; } = "";     // hello only
+        public string Nonce { get; set; } = "";         // hello only
+        public long ExpiresAt { get; set; }             // unix seconds; always > 0 now
     }
 
-    private void SaveQuickUnlock()
+    /// <summary>Cache expiry: the auto-lock interval, but never longer than the hard ceiling
+    /// (and the ceiling also covers "auto-lock off").</summary>
+    /// <summary>Cache expiry: a fixed ceiling, INDEPENDENT of the auto-lock interval. Auto-lock only
+    /// drops the in-memory vault; Windows Hello re-unlocks within this window without the master
+    /// password. The password is required only on a cold device, after this ceiling, on a password
+    /// change, or on explicit sign-out — that is what makes Hello a real alternative, not an addition.</summary>
+    private long QuickUnlockExpiry() =>
+        DateTimeOffset.UtcNow.Add(QuickUnlockMaxLifetime).ToUnixTimeSeconds();
+
+    /// <summary>Bind the expiry into the AES-GCM tag so it cannot be pushed out on disk.</summary>
+    private static byte[] ExpAad(long exp) =>
+        System.Text.Encoding.ASCII.GetBytes("ipasswrd/quickunlock/v2/" + exp.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// Arm quick unlock right after a fresh master-password unlock (or vault creation). In Hello
+    /// mode this asks for ONE Hello gesture the first time, to mint the session wrap key; declining
+    /// simply leaves quick unlock off (the password always works). Fire-and-forget: never blocks the UI.
+    /// </summary>
+    private async Task ArmQuickUnlockAsync()
     {
         if (_vault is null) return;
         try
         {
-            long exp = _autolockMinutes > 0
-                ? DateTimeOffset.UtcNow.AddMinutes(_autolockMinutes).ToUnixTimeSeconds()
-                : 0;
-            byte[] plain = JsonSerializer.SerializeToUtf8Bytes(new QuickUnlockData
+            bool avail = await WindowsHello.IsAvailableAsync();
+            _helloAvailable = avail;
+            byte[] dek = _vault.ExportSessionKey();
+            long exp = QuickUnlockExpiry();
+
+            if (avail)
             {
-                Dek = Convert.ToBase64String(_vault.ExportSessionKey()),
-                ExpiresAt = exp,
-            });
-            byte[] prot = System.Security.Cryptography.ProtectedData.Protect(
-                plain, QuickEntropy, System.Security.Cryptography.DataProtectionScope.CurrentUser);
-            System.IO.Directory.CreateDirectory(LocalDataDir());
-            System.IO.File.WriteAllBytes(QuickUnlockPath(), prot);
+                if (_helloKey is null)
+                {
+                    byte[] challenge = _helloChallenge ?? System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+                    await PrepareForHelloAsync();                              // bring us to front…
+                    NudgeCredentialDialogToFront();                            // …and pull the system dialog forward once it appears
+                    byte[]? secret = await WindowsHello.SignAsync(challenge);   // Hello prompt
+                    if (secret is null) { WipeQuickUnlock(); return; }          // declined → no quick unlock
+                    _helloChallenge = challenge;
+                    _helloKey = System.Security.Cryptography.SHA256.HashData(secret);
+                }
+                WriteHelloBlob(dek, exp, _helloChallenge!, _helloKey!);
+            }
+            else
+            {
+                WriteSoftBlob(dek, exp);
+            }
             _quickRefreshedAt = DateTimeOffset.UtcNow;
         }
         catch { /* quick unlock is best-effort; the password path always works */ }
     }
 
-    private static void WipeQuickUnlock()
+    /// <summary>Re-stamp the (already armed) cache with a fresh expiry. Silent: reuses the in-memory
+    /// Hello key, never prompts. Called from the once-a-minute tick and on auto-lock changes.</summary>
+    private void SaveQuickUnlock()
+    {
+        if (_vault is null) return;
+        try
+        {
+            long exp = QuickUnlockExpiry();
+            if (_helloKey is not null && _helloChallenge is not null)
+            {
+                WriteHelloBlob(_vault.ExportSessionKey(), exp, _helloChallenge, _helloKey);   // silent
+                _quickRefreshedAt = DateTimeOffset.UtcNow;
+                return;
+            }
+            // No in-memory Hello key. If Hello is available but not yet armed (user declined the
+            // gesture), do NOT quietly write a weaker soft cache — that would defeat the point.
+            if (_helloAvailable == true) return;
+            WriteSoftBlob(_vault.ExportSessionKey(), exp);
+            _quickRefreshedAt = DateTimeOffset.UtcNow;
+        }
+        catch { /* best effort */ }
+    }
+
+    private void WriteHelloBlob(byte[] dek, long exp, byte[] challenge, byte[] key)
+    {
+        byte[] nonce = System.Security.Cryptography.RandomNumberGenerator.GetBytes(12);
+        byte[] cipher = new byte[dek.Length];
+        byte[] tag = new byte[16];
+        using (var gcm = new System.Security.Cryptography.AesGcm(key, 16))
+            gcm.Encrypt(nonce, dek, cipher, tag, ExpAad(exp));
+        byte[] blob = new byte[cipher.Length + tag.Length];
+        Buffer.BlockCopy(cipher, 0, blob, 0, cipher.Length);
+        Buffer.BlockCopy(tag, 0, blob, cipher.Length, tag.Length);
+
+        WriteQuickFile(new QuickUnlockData
+        {
+            Mode = "hello",
+            Dek = Convert.ToBase64String(blob),
+            Challenge = Convert.ToBase64String(challenge),
+            Nonce = Convert.ToBase64String(nonce),
+            ExpiresAt = exp,
+        });
+        // dek — свежий клон из ExportSessionKey у любого вызывающего; стираем сырую копию с кучи
+        System.Security.Cryptography.CryptographicOperations.ZeroMemory(dek);
+        System.Security.Cryptography.CryptographicOperations.ZeroMemory(cipher);
+    }
+
+    private void WriteSoftBlob(byte[] dek, long exp)
+    {
+        WriteQuickFile(new QuickUnlockData
+        {
+            Mode = "soft",
+            Dek = Convert.ToBase64String(dek),
+            ExpiresAt = exp,
+        });
+        System.Security.Cryptography.CryptographicOperations.ZeroMemory(dek);
+    }
+
+    private static void WriteQuickFile(QuickUnlockData d)
+    {
+        byte[] plain = JsonSerializer.SerializeToUtf8Bytes(d);
+        byte[] prot = System.Security.Cryptography.ProtectedData.Protect(
+            plain, QuickEntropy(), System.Security.Cryptography.DataProtectionScope.CurrentUser);
+        System.IO.Directory.CreateDirectory(LocalDataDir());
+        System.IO.File.WriteAllBytes(QuickUnlockPath(), prot);
+    }
+
+    private static QuickUnlockData? ReadQuickFile()
+    {
+        byte[] plain = System.Security.Cryptography.ProtectedData.Unprotect(
+            System.IO.File.ReadAllBytes(QuickUnlockPath()), QuickEntropy(), System.Security.Cryptography.DataProtectionScope.CurrentUser);
+        return JsonSerializer.Deserialize<QuickUnlockData>(plain);
+    }
+
+    private void WipeQuickUnlock()
     {
         try { string p = QuickUnlockPath(); if (System.IO.File.Exists(p)) System.IO.File.Delete(p); }
         catch { /* ignore */ }
+        _helloKey = null;
+        _helloChallenge = null;
     }
 
+    /// <summary>Fast path: only the DPAPI-only "soft" cache (machines without Hello). Synchronous,
+    /// never prompts. A Hello-mode cache returns false here and is handled by
+    /// <see cref="TryQuickUnlockHelloAsync"/>. A cache written by an older build fails to decrypt
+    /// under the new per-install entropy and is simply discarded (one extra password entry).</summary>
     private bool TryQuickUnlock()
     {
         try
         {
-            string p = QuickUnlockPath();
-            if (Creating || !System.IO.File.Exists(p)) return false;
-            byte[] plain = System.Security.Cryptography.ProtectedData.Unprotect(
-                System.IO.File.ReadAllBytes(p), QuickEntropy, System.Security.Cryptography.DataProtectionScope.CurrentUser);
-            var d = JsonSerializer.Deserialize<QuickUnlockData>(plain);
-            if (d is null || string.IsNullOrEmpty(d.Dek)) { WipeQuickUnlock(); return false; }
+            if (Creating || !System.IO.File.Exists(QuickUnlockPath())) return false;
+            QuickUnlockData? d;
+            try { d = ReadQuickFile(); } catch { WipeQuickUnlock(); return false; }
+            if (d is null || d.Mode == "hello") return false;              // Hello handled asynchronously
+            if (string.IsNullOrEmpty(d.Dek)) { WipeQuickUnlock(); return false; }
             if (d.ExpiresAt != 0 && DateTimeOffset.UtcNow.ToUnixTimeSeconds() > d.ExpiresAt) { WipeQuickUnlock(); return false; }
-            _vault = Vault.UnlockWithSessionKey(System.IO.File.ReadAllBytes(VaultPath()), Convert.FromBase64String(d.Dek));
+            byte[] softDek = Convert.FromBase64String(d.Dek);
+            _vault = Vault.UnlockWithSessionKey(System.IO.File.ReadAllBytes(VaultPath()), softDek);
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(softDek);   // сейф держит свою (заслонённую) копию
+            _helloAvailable = false;
             return true;
         }
         catch { WipeQuickUnlock(); return false; }
+    }
+
+    /// <summary>Hello-mode quick unlock: prompts for the gesture over the (already shown) password
+    /// screen and, on success, enters the vault. Any failure/cancel silently leaves the user on the
+    /// password screen.</summary>
+    private async Task TryQuickUnlockHelloAsync()
+    {
+        if (_helloInFlight) return;
+        _helloInFlight = true;
+        try
+        {
+            if (Creating || _vault is not null || !System.IO.File.Exists(QuickUnlockPath())) return;
+            QuickUnlockData? d;
+            try { d = ReadQuickFile(); } catch { WipeQuickUnlock(); return; }
+            if (d is null || d.Mode != "hello"
+                || string.IsNullOrEmpty(d.Dek) || string.IsNullOrEmpty(d.Challenge) || string.IsNullOrEmpty(d.Nonce)) return;
+            if (d.ExpiresAt != 0 && DateTimeOffset.UtcNow.ToUnixTimeSeconds() > d.ExpiresAt) { WipeQuickUnlock(); return; }
+            if (IsLocked) return;
+
+            _helloAvailable = true;
+            byte[] challenge = Convert.FromBase64String(d.Challenge);
+            await PrepareForHelloAsync();                              // bring us to front…
+            NudgeCredentialDialogToFront();                            // …and pull the system dialog forward once it appears
+            byte[]? secret = await WindowsHello.SignAsync(challenge);   // Hello prompt
+            if (secret is null) return;                                 // cancelled → stay on password
+            if (_vault is not null) return;                            // password won the race
+
+            byte[] key = System.Security.Cryptography.SHA256.HashData(secret);
+            byte[] blob = Convert.FromBase64String(d.Dek);
+            byte[] nonce = Convert.FromBase64String(d.Nonce);
+            if (blob.Length < 16) { WipeQuickUnlock(); return; }
+            byte[] cipher = blob[..^16];
+            byte[] tag = blob[^16..];
+            byte[] dek = new byte[cipher.Length];
+            try
+            {
+                using var gcm = new System.Security.Cryptography.AesGcm(key, 16);
+                gcm.Decrypt(nonce, cipher, tag, dek, ExpAad(d.ExpiresAt));
+            }
+            catch { WipeQuickUnlock(); return; }   // wrong Hello identity / tampered file
+
+            _vault = Vault.UnlockWithSessionKey(System.IO.File.ReadAllBytes(VaultPath()), dek);
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(dek);   // сейф держит свою (заслонённую) копию
+            _helloChallenge = challenge;
+            _helloKey = key;
+            ResetLockout();
+            EnterVault();
+        }
+        catch { /* best effort — password path remains */ }
+        finally { _helloInFlight = false; }
+    }
+
+    /// <summary>Is there a valid Hello-gated quick-unlock cache on disk? A soft (DPAPI-only) cache does
+    /// NOT count: nothing would gate it, so it must not survive a lock.</summary>
+    private static bool HasHelloCache()
+    {
+        try
+        {
+            if (!System.IO.File.Exists(QuickUnlockPath())) return false;
+            QuickUnlockData? d = ReadQuickFile();
+            return d is not null && d.Mode == "hello" && !string.IsNullOrEmpty(d.Dek)
+                   && (d.ExpiresAt == 0 || DateTimeOffset.UtcNow.ToUnixTimeSeconds() <= d.ExpiresAt);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Prompt Windows Hello to unlock — but only while the window is actually in front of the
+    /// user. A background auto-lock must not pop a system dialog out of nowhere; the visible
+    /// "Войти через Windows Hello" button and the next bring-to-front cover that case.</summary>
+    private void MaybePromptHello()
+    {
+        if (_vault is not null || Creating || IsLocked) return;
+        if (!IsVisible || WindowState == WindowState.Minimized) return;
+        if (!HasHelloCache()) return;
+        _ = TryQuickUnlockHelloAsync();
+    }
+
+    /// <summary>Lock the vault. A Hello-gated cache is KEPT so the next unlock is a gesture, not the
+    /// master password — that is the whole point of quick unlock. A soft cache is wiped (nothing would
+    /// gate it). Does not auto-prompt: the user just locked or stepped away.</summary>
+    private void LockVault()
+    {
+        _detailTimer?.Stop();
+        try { _vault?.Wipe(); } catch { /* best effort */ }   // scrub the session key from memory before dropping the vault
+        _vault = null;
+        _helloKey = null;
+        _helloChallenge = null;
+        _breachCounts = null;    // ключи словаря — сами пароли; после блокировки им в памяти не место
+        _breachStatus = null;
+        WipePendingClipboard();
+        if (!HasHelloCache()) WipeQuickUnlock();
+        SetupUnlock(promptHello: false);
+    }
+
+    // Workstation lock / machine sleep → lock the vault immediately (only if it is open).
+    // Fired on a system thread, so marshal the actual lock onto the UI thread.
+    private void OnSessionLockEvent(object? sender, Microsoft.Win32.SessionSwitchEventArgs e)
+    {
+        if (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionLock)
+            Dispatcher.UIThread.Post(() => { if (_vault is not null) LockVault(); });
+    }
+
+    private void OnPowerLockEvent(object? sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == Microsoft.Win32.PowerModes.Suspend)
+            Dispatcher.UIThread.Post(() => { if (_vault is not null) LockVault(); });
     }
 
     private sealed class LockoutData
@@ -893,7 +1313,7 @@ public partial class MainWindow : Window
 
     // ================= unlock =================
 
-    private void SetupUnlock()
+    private void SetupUnlock(bool promptHello = true)
     {
         LoadLockout();
         _detailTimer?.Stop();
@@ -928,6 +1348,7 @@ public partial class MainWindow : Window
         RecoveryPw1.Text = "";
         RecoveryPw2.Text = "";
         ForgotButton.IsVisible = !Creating && VaultFileHasRecovery();
+        HelloButton.IsVisible = !Creating && !IsLocked && HasHelloCache();   // primary way in when armed
         RestoreBackupButton.IsVisible = false;   // появляется только после ошибки чтения файла
         UnlockScreen.IsVisible = true;
         VaultScreen.IsVisible = false;
@@ -943,6 +1364,10 @@ public partial class MainWindow : Window
             MasterBox.Focus();
         }
         Relocalize();
+
+        // Auto-offer Hello when the user is actively opening the app (the password field stays as the
+        // fallback). Suppressed on lock — see LockVault — so locking never immediately re-prompts.
+        if (promptHello) MaybePromptHello();
     }
 
     private void OnMasterKeyDown(object? sender, KeyEventArgs e)
@@ -989,10 +1414,9 @@ public partial class MainWindow : Window
             {
                 SaveLockout();
                 int left = Lockout.AttemptsLeft(_fails);
-                // Tr() до склейки: с приклеенной датой строка перестаёт находиться в словаре переводов.
-                Err(Tr(left > 0
+                Err(left > 0
                     ? $"Неверный мастер-пароль. Осталось попыток до блокировки: {left}"
-                    : "Неверный мастер-пароль. Следующая попытка заблокирует вход.") + MasterChangeHint());
+                    : "Неверный мастер-пароль. Следующая попытка заблокирует вход.");
             }
             return;
         }
@@ -1006,32 +1430,10 @@ public partial class MainWindow : Window
         }
 
         ResetLockout();
-        SaveQuickUnlock();
         EnterVault();
+        _ = ArmQuickUnlockAsync();   // arm quick unlock (may ask for one Hello gesture); never blocks
 
         void Err(string m) { UnlockError.Text = Tr(m); UnlockError.IsVisible = true; }
-    }
-
-    /// <summary>
-    /// Подсказка к «неверному паролю»: когда менялся конверт ключа. После синка смена
-    /// мастер-пароля с телефона доезжает до этого файла (Vault.MergeFrom), и человек со
-    /// «правильным старым» паролем упрётся в отказ — дата объясняет, что случилось.
-    /// Ничего секретного: штамп и так лежит в файле открытым текстом.
-    /// </summary>
-    private string MasterChangeHint()
-    {
-        try
-        {
-            string at = Vault.MasterPasswordChangedAtOf(System.IO.File.ReadAllBytes(VaultPath()));
-            if (at.Length == 0) return "";
-            if (!DateTimeOffset.TryParse(at, System.Globalization.CultureInfo.InvariantCulture,
-                    System.Globalization.DateTimeStyles.AssumeUniversal, out DateTimeOffset utc)) return "";
-            string when = utc.ToLocalTime().ToString(_lang == "en" ? "dd.MM 'at' HH:mm" : "dd.MM 'в' HH:mm");
-            return _lang == "en"
-                ? $" The master password was changed {when} — if that was another device, use the new one."
-                : $" Мастер-пароль менялся {when} — если это было на другом устройстве, вводите новый пароль.";
-        }
-        catch { return ""; }
     }
 
     // ================= unlock by recovery code =================
@@ -1052,6 +1454,7 @@ public partial class MainWindow : Window
         MasterBox.IsVisible = false;
         MasterBox2.IsVisible = false;
         UnlockButton.IsVisible = false;
+        HelloButton.IsVisible = false;
         ForgotButton.IsVisible = false;
         UnlockError.IsVisible = false;
         UnlockSub.Text = Tr("Восстановление доступа");
@@ -1139,7 +1542,9 @@ public partial class MainWindow : Window
         FirstRunCode.Text = code;
         MasterBox.IsVisible = false;
         MasterBox2.IsVisible = false;
+        MasterMeter.IsVisible = false;
         UnlockButton.IsVisible = false;
+        HelloButton.IsVisible = false;
         ForgotButton.IsVisible = false;
         UnlockError.IsVisible = false;
         UnlockSub.Text = Tr("Запишите код восстановления");
@@ -1149,11 +1554,36 @@ public partial class MainWindow : Window
     private async void OnFirstRunCopy(object? sender, RoutedEventArgs e)
     {
         string val = FirstRunCode.Text ?? "";
-        try { if (Clipboard is { } cb) await cb.SetTextAsync(val); } catch { /* ignore */ }
+        try { await CopySecretAsync(val); } catch { /* ignore */ }
         ScheduleClipboardClear(val);
         FirstRunCopy.Content = Tr("Скопировано");
         try { await Task.Delay(1100); } catch { /* ignore */ }
         FirstRunCopy.Content = Tr("Скопировать");
+    }
+
+    /// <summary>
+    /// Copy a secret to the clipboard, but tag it so Windows keeps it OUT of clipboard history
+    /// (Win+V) and does NOT roam it to the Cloud Clipboard. The auto-clear timer still wipes the
+    /// live clipboard; these formats stop the copy from surviving as plaintext elsewhere. Falls back
+    /// to a plain copy if the platform rejects the tagged data object.
+    /// </summary>
+    private async Task CopySecretAsync(string val)
+    {
+        if (Clipboard is not { } cb) return;
+        try
+        {
+            var data = new DataObject();
+            data.Set(DataFormats.Text, val);
+            // Documented Windows clipboard formats used by password managers/terminals to opt out:
+            data.Set("ExcludeClipboardContentFromMonitorProcessing", new byte[] { 0 });
+            data.Set("CanIncludeInClipboardHistory", new byte[] { 0, 0, 0, 0 });   // DWORD 0 = exclude
+            data.Set("CanUploadToCloudClipboard", new byte[] { 0, 0, 0, 0 });      // DWORD 0 = exclude
+            await cb.SetDataObjectAsync(data);
+        }
+        catch
+        {
+            try { await cb.SetTextAsync(val); } catch { /* ignore */ }
+        }
     }
 
     private async void OnFirstRunSave(object? sender, RoutedEventArgs e)
@@ -1163,8 +1593,18 @@ public partial class MainWindow : Window
     {
         FirstRunCode.Text = "";
         FirstRunPanel.IsVisible = false;
-        SaveQuickUnlock();
         EnterVault();
+        if (!_quickStartHidden)   // greet a brand-new user with the full-screen welcome
+        {
+            // Don't pop the Windows Hello enrollment dialog over the welcome — arm quick unlock
+            // once the user dismisses the welcome (over the vault, a natural "finishing setup" moment).
+            _armHelloAfterWelcome = true;
+            ShowWelcome();
+        }
+        else
+        {
+            _ = ArmQuickUnlockAsync();
+        }
     }
 
     /// <summary>
@@ -1181,18 +1621,13 @@ public partial class MainWindow : Window
     private void OnRecoveryDone(object? sender, RoutedEventArgs e)
     {
         RecoveryDonePanel.IsVisible = false;
-        SaveQuickUnlock();
         EnterVault();
+        _ = ArmQuickUnlockAsync();
     }
 
-    private void OnLockClick(object? sender, RoutedEventArgs e)
-    {
-        _detailTimer?.Stop();
-        _vault = null;
-        WipePendingClipboard();
-        WipeQuickUnlock();
-        SetupUnlock();
-    }
+    private void OnLockClick(object? sender, RoutedEventArgs e) => LockVault();
+
+    private void OnHelloUnlockClick(object? sender, RoutedEventArgs e) => _ = TryQuickUnlockHelloAsync();
 
     // ================= vault view =================
 
@@ -1223,11 +1658,16 @@ public partial class MainWindow : Window
         _detailTimer.Start();
 
         if (_syncProvider == "google") GoogleResumeAfterUnlock();   // start from the freshest Drive copy
+        _ = MaybeAutoBreachCheckAsync();   // пора? — тихо прогонит пароли по базе утечек
     }
 
     private void RenderSidebar()
     {
         if (_vault is null) return;
+
+        // Retire onboarding for good once every step is done — the strip and the sidebar entry both vanish.
+        if (OnboardState().done >= 4 && !_quickStartHidden) { _quickStartHidden = true; SaveSettings(); }
+
         SectionHost.Children.Clear();
         var all = _vault.Items().ToList();
         var attachedPk = AttachedPasskeyIds();   // hidden from «Все записи» (represented by their account) → excluded from that count only
@@ -1298,6 +1738,17 @@ public partial class MainWindow : Window
             Margin = new Thickness(10, 14, 10, 5),
         });
 
+        if (!_quickStartHidden)   // onboarding checklist — stays until the user hides it
+        {
+            SectionHost.Children.Add(SideButton("Быстрый старт", "wand", null, _toolMode == "quickstart", () =>
+            {
+                _toolMode = "quickstart";
+                ToolPane.IsVisible = true;
+                RenderSidebar();
+                ShowTool("quickstart");
+            }));
+        }
+
         foreach (var tl in _tools)
         {
             bool active = _toolMode == tl.Type;
@@ -1308,9 +1759,10 @@ public partial class MainWindow : Window
                 ToolPane.IsVisible = true;
                 RenderSidebar();
                 ShowTool(type);
-            }));
+            }, dot: tl.Type == "security" && _breachFound > 0));
         }
         UpdateSyncChip();
+        RefreshOnboardStrip();
         Relocalize();
     }
 
@@ -1372,7 +1824,7 @@ public partial class MainWindow : Window
         catch { /* guidance text covers the manual path */ }
     }
 
-    private Control SideButton(string label, string icon, int? count, bool active, Action onClick)
+    private Control SideButton(string label, string icon, int? count, bool active, Action onClick, bool dot = false)
     {
         var ic = MakeIcon(IconData(icon), 17, active ? Accent : Text3, 1.7);
         ((Control)ic).Margin = new Thickness(0, 0, 10, 0);
@@ -1394,6 +1846,14 @@ public partial class MainWindow : Window
             var cnt = new TextBlock { Text = c.ToString(), Foreground = Text3, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(cnt, 2);
             g.Children.Add(cnt);
+        }
+        else if (dot)
+        {
+            // тихая точка: «загляни сюда, когда будет минутка» — никаких попапов
+            var d = new Avalonia.Controls.Shapes.Ellipse { Width = 7, Height = 7, Fill = Bad, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 2, 0) };
+            ToolTip.SetTip(d, Tr("Найдены пароли из утечек"));
+            Grid.SetColumn(d, 2);
+            g.Children.Add(d);
         }
 
         var btn = new Button { Content = g };
@@ -2222,6 +2682,75 @@ public partial class MainWindow : Window
         return chip;
     }
 
+    /// <summary>Сайты, где вход по ключу доступа точно поддерживается, → страница настроек входа.
+    /// Только проверенная классика: подсказка, которая ошибается, учит себя игнорировать.</summary>
+    private static readonly (string Domain, string Settings)[] PasskeySites =
+    {
+        ("google.com",    "https://myaccount.google.com/signinoptions/passkeys"),
+        ("github.com",    "https://github.com/settings/security"),
+        ("microsoft.com", "https://account.microsoft.com/security"),
+        ("live.com",      "https://account.microsoft.com/security"),
+        ("outlook.com",   "https://account.microsoft.com/security"),
+        ("apple.com",     "https://account.apple.com/account/manage"),
+        ("icloud.com",    "https://account.apple.com/account/manage"),
+        ("amazon.com",    "https://www.amazon.com/gp/css/homepage.html"),
+        ("paypal.com",    "https://www.paypal.com/myaccount/security"),
+        ("x.com",         "https://x.com/settings/security"),
+        ("twitter.com",   "https://x.com/settings/security"),
+        ("facebook.com",  "https://accountscenter.facebook.com/password_and_security"),
+        ("instagram.com", "https://accountscenter.instagram.com/password_and_security"),
+        ("linkedin.com",  "https://www.linkedin.com/mypreferences/d/sign-in-and-security"),
+        ("dropbox.com",   "https://www.dropbox.com/account/security"),
+        ("adobe.com",     "https://account.adobe.com/security"),
+        ("coinbase.com",  "https://www.coinbase.com/settings/security"),
+        ("binance.com",   "https://www.binance.com/en/my/security"),
+        ("roblox.com",    "https://www.roblox.com/my/account#!/security"),
+    };
+
+    private static string? PasskeySettingsUrlFor(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        string host;
+        try { host = new Uri(url.Contains("://") ? url : "https://" + url).Host.ToLowerInvariant(); }
+        catch { return null; }
+        if (host.StartsWith("www.", StringComparison.Ordinal)) host = host[4..];
+        foreach (var (domain, settings) in PasskeySites)
+            if (host == domain || host.EndsWith("." + domain, StringComparison.Ordinal)) return settings;
+        return null;
+    }
+
+    /// <summary>Одна тихая строчка в карточке: у этого сайта есть вход без пароля. Показывается
+    /// только для проверенных сайтов, пока ключа ещё нет, и исчезает сама, когда он появится.
+    /// Никаких попапов, никаких «понятно» — прочитал или не заметил, оба варианта нормальные.</summary>
+    private Control PasskeyNudge(string settingsUrl)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
+        sp.Children.Add((Control)MakeIcon(IconData("passkey"), 13, Accent, 1.6));
+        sp.Children.Add(new TextBlock
+        {
+            Text = Tr("Этот сайт поддерживает вход без пароля."),
+            Foreground = Text3, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center,
+        });
+        var link = new TextBlock
+        {
+            Text = Tr("Включить ключ доступа"), Foreground = Accent, FontSize = 12.5,
+            VerticalAlignment = VerticalAlignment.Center,
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+        };
+        ToolTip.SetTip(link, Tr("Откроется страница настроек входа на сайте. Ключ создастся в IPasswrd через наше расширение."));
+        link.PointerPressed += async (_, _) =>
+        {
+            try
+            {
+                var top = TopLevel.GetTopLevel(this);
+                if (top?.Launcher is { } l) await l.LaunchUriAsync(new Uri(settingsUrl));
+            }
+            catch { /* ignore */ }
+        };
+        sp.Children.Add(link);
+        return sp;
+    }
+
     private void BuildAccountDetail(StackPanel wrap, VaultItem item, string id)
     {
         string user = item.Fields.GetValueOrDefault("username", "");
@@ -2275,6 +2804,10 @@ public partial class MainWindow : Window
         }
 
         wrap.Children.Add(Margined(FGroup(rows), 22));
+
+        // тихая подсказка: сайт умеет вход без пароля, а ключа доступа у записи ещё нет
+        if (MatchingPasskey(item) is null && PasskeySettingsUrlFor(url) is { } pkUrl)
+            wrap.Children.Add(Margined(PasskeyNudge(pkUrl), 12));
 
         if (PasswordHistoryGroup(item, id) is { } history)
             wrap.Children.Add(Margined(history, 14));
@@ -2840,11 +3373,7 @@ public partial class MainWindow : Window
         if (_autolockMinutes > 0 && _vault is not null && (VaultScreen.IsVisible || EditorScreen.IsVisible)
             && (DateTimeOffset.UtcNow - _lastActivity).TotalMinutes >= _autolockMinutes)
         {
-            _detailTimer?.Stop();
-            _vault = null;
-            WipePendingClipboard();
-            WipeQuickUnlock();
-            SetupUnlock();
+            LockVault();
             return;
         }
 
@@ -3131,7 +3660,7 @@ public partial class MainWindow : Window
         b.Click += async (_, _) =>
         {
             string val = get() ?? "";
-            try { if (Clipboard is { } cb) await cb.SetTextAsync(val); } catch { /* ignore */ }
+            try { await CopySecretAsync(val); } catch { /* ignore */ }
             ScheduleClipboardClear(val);
             b.Content = MakeIcon(IconData("check"), 15, Ok, 1.7);
             try { await Task.Delay(1100); } catch { /* ignore */ }
@@ -3143,13 +3672,29 @@ public partial class MainWindow : Window
     private Button EyeButton(TextBlock target, string real, Func<string> masked)
     {
         bool shown = false;
+        int gen = 0;   // токен автоскрытия: любой новый клик отменяет прежний таймер
         var b = IconButton("eye", Text2, "Показать");
-        b.Click += (_, _) =>
+
+        void Apply()
         {
-            shown = !shown;
             target.Text = shown ? real : masked();
             b.Content = MakeIcon(IconData(shown ? "eyeoff" : "eye"), 15, Text2, 1.5);
             ToolTip.SetTip(b, shown ? "Скрыть" : "Показать");
+        }
+
+        b.Click += async (_, _) =>
+        {
+            shown = !shown;
+            int my = ++gen;
+            Apply();
+            if (!shown) return;
+            // Показанный секрет прячется сам через 15 секунд — от случайно оставленного
+            // на экране пароля (шеринг экрана, отошёл от компьютера). Пользователю думать не о чем:
+            // всегда можно нажать глаз ещё раз.
+            try { await Task.Delay(TimeSpan.FromSeconds(15)); } catch { return; }
+            if (my != gen || !shown) return;   // уже скрыли или перепоказали вручную
+            shown = false;
+            Apply();
         };
         return b;
     }
@@ -3167,6 +3712,7 @@ public partial class MainWindow : Window
             case "security":      BuildSecurity(); break;
             case "authenticator": BuildAuthenticator(); break;
             case "settings":      BuildSettings(); break;
+            case "quickstart":    BuildQuickStart(); break;
         }
         Relocalize();
     }
@@ -3176,6 +3722,309 @@ public partial class MainWindow : Window
         ToolHost.Children.Add(new TextBlock { Text = title, FontSize = 20, FontWeight = FontWeight.Bold, Foreground = Text });
         if (!string.IsNullOrEmpty(sub))
             ToolHost.Children.Add(new TextBlock { Text = sub, Foreground = Text2, FontSize = 13, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 0), MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Left });
+    }
+
+    // ----- quick start (first-run onboarding checklist) -----
+
+    private void BuildQuickStart()
+    {
+        ToolHeader("Добро пожаловать в IPasswrd",
+            "Пара шагов — и всё под рукой: автозаполнение в браузере, синхронизация между устройствами и ваши старые пароли.");
+
+        var (extDone, syncDone, importDone, mobileDone, done) = OnboardState();
+
+        ToolHost.Children.Add(new TextBlock
+        {
+            Text = done >= 4 ? "Всё готово! 🎉" : $"Выполнено {done} из 4",
+            Foreground = done >= 4 ? Ok : Accent, FontWeight = FontWeight.SemiBold, FontSize = 13,
+            Margin = new Thickness(0, 18, 0, 6),
+        });
+        ToolHost.Children.Add(new ProgressBar { Minimum = 0, Maximum = 4, Value = done, Height = 6, Foreground = done >= 4 ? Ok : Accent });
+
+        ToolHost.Children.Add(QuickCard("Расширение для браузера",
+            "Автозаполнение логинов и паролей в Chrome и Edge.", extDone, "Открыть настройки",
+            OpenSettingsTool));
+        if (!extDone)
+        {
+            var alreadyExt = new Button
+            {
+                Content = "У меня уже установлено — отметить",
+                Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+                Foreground = Text3, FontSize = 12, Padding = new Thickness(2, 4),
+                HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(56, 4, 0, 0),
+            };
+            alreadyExt.Click += (_, _) => { _extEverConnected = true; SaveSettings(); ShowTool("quickstart"); RenderSidebar(); };
+            ToolHost.Children.Add(alreadyExt);
+        }
+        ToolHost.Children.Add(QuickCard("Синхронизация",
+            "Один сейф на всех устройствах — через iCloud или Google Drive.", syncDone, "Настроить",
+            OpenSettingsTool));
+        ToolHost.Children.Add(QuickCard("Перенести пароли",
+            "Импорт из Kaspersky, Chrome, Edge, Яндекс и других менеджеров.", importDone, "Импортировать",
+            () => OnImportClick(this, new RoutedEventArgs())));
+        ToolHost.Children.Add(QuickCard("IPasswrd на телефоне",
+            "iPhone и Android — тот же сейф в кармане.", mobileDone, mobileDone ? "Отмечено" : "Отметить",
+            () => { _obMobileDone = !_obMobileDone; SaveSettings(); ShowTool("quickstart"); RenderSidebar(); }));
+
+        var hide = new Button
+        {
+            Content = "Скрыть быстрый старт", Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            Foreground = Text3, FontSize = 12, Padding = new Thickness(2, 8),
+            HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 14, 0, 0),
+        };
+        hide.Click += (_, _) =>
+        {
+            _quickStartHidden = true; SaveSettings();
+            _toolMode = null; ToolPane.IsVisible = false;
+            _section = "all"; ListTitle.Text = "Все записи";
+            LoadEntries(); RenderSidebar();
+        };
+        ToolHost.Children.Add(hide);
+    }
+
+    private void OpenSettingsTool()
+    {
+        _toolMode = "settings"; ToolPane.IsVisible = true;
+        RenderSidebar(); ShowTool("settings");
+    }
+
+    private Control QuickCard(string title, string desc, bool done, string btnText, Action onClick)
+    {
+        var check = new Border
+        {
+            Width = 26, Height = 26, CornerRadius = new CornerRadius(13),
+            Background = done ? Ok : Brushes.Transparent,
+            BorderBrush = done ? Ok : Hair, BorderThickness = new Thickness(done ? 0 : 1.5),
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 0),
+            Child = new TextBlock
+            {
+                Text = done ? "✓" : "", Foreground = Brushes.White, FontWeight = FontWeight.Bold, FontSize = 14,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+        Grid.SetColumn(check, 0);
+
+        var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
+        texts.Children.Add(new TextBlock { Text = title, Foreground = Text, FontWeight = FontWeight.SemiBold, FontSize = 14 });
+        texts.Children.Add(new TextBlock { Text = desc, Foreground = Text2, FontSize = 12, TextWrapping = TextWrapping.Wrap });
+        Grid.SetColumn(texts, 1);
+
+        var btn = new Button { Content = btnText, Padding = new Thickness(14, 7), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+        if (!done) btn.Classes.Add("primary");
+        btn.Click += (_, _) => onClick();
+        Grid.SetColumn(btn, 2);
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        grid.Children.Add(check);
+        grid.Children.Add(texts);
+        grid.Children.Add(btn);
+
+        return new Border
+        {
+            Background = Surface, BorderBrush = Hair, BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(16, 14),
+            Margin = new Thickness(0, 10, 0, 0), Child = grid,
+        };
+    }
+
+    // ----- onboarding: shared state, full-screen welcome, top-of-vault progress strip -----
+
+    /// <summary>The four first-run steps and how many are done. One source of truth for the
+    /// welcome screen, the progress strip and the quick-start checklist.</summary>
+    private (bool ext, bool sync, bool import, bool mobile, int done) OnboardState()
+    {
+        bool ext = _extEverConnected;
+        bool sync = !string.IsNullOrEmpty(_syncProvider) || (_gdrive?.IsSignedIn ?? false) || !string.IsNullOrEmpty(_syncPath);
+        bool import = _vault?.Items().Any(x => x.Item.Type == "account") ?? false;
+        bool mobile = _obMobileDone;
+        int done = (ext ? 1 : 0) + (sync ? 1 : 0) + (import ? 1 : 0) + (mobile ? 1 : 0);
+        return (ext, sync, import, mobile, done);
+    }
+
+    private void ShowWelcome()
+    {
+        BuildWelcome();
+        WelcomeScreen.IsVisible = true;
+    }
+
+    private void CloseWelcome(bool armHello = false)
+    {
+        WelcomeScreen.IsVisible = false;
+        RefreshOnboardStrip();
+        if (armHello && _armHelloAfterWelcome)
+        {
+            _armHelloAfterWelcome = false;
+            _ = ArmQuickUnlockAsync();   // enroll Hello now, over the vault — not over the welcome
+        }
+    }
+
+    /// <summary>Full-screen first-run welcome: hero, live progress, the four step cards, footer.
+    /// Uses the app's own theme brushes, so it is correct in light mode too.</summary>
+    private void BuildWelcome()
+    {
+        WelcomeHost.Children.Clear();
+        var (ext, sync, import, mobile, done) = OnboardState();
+
+        // hero — brand mark in a soft tile, title, one-line subtitle
+        WelcomeHost.Children.Add(new Border
+        {
+            Width = 66, Height = 66, CornerRadius = new CornerRadius(19),
+            Background = Surface, BorderBrush = HairStrong, BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Child = new Border { Width = 36, Height = 36, Child = BrandLogo() },
+        });
+        WelcomeHost.Children.Add(new TextBlock
+        {
+            Text = "Добро пожаловать в IPasswrd",
+            FontSize = 26, FontWeight = FontWeight.Bold, Foreground = Text,
+            HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center,
+            Margin = new Thickness(0, 18, 0, 0),
+        });
+        WelcomeHost.Children.Add(new TextBlock
+        {
+            Text = "Сейф создан. Осталась пара шагов, чтобы всё работало на полную — это займёт минуту.",
+            FontSize = 14, Foreground = Text2, TextWrapping = TextWrapping.Wrap,
+            HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center,
+            MaxWidth = 430, Margin = new Thickness(0, 9, 0, 0),
+        });
+
+        // live progress
+        var bar = new ProgressBar { Minimum = 0, Maximum = 4, Value = done, Height = 7, Foreground = done >= 4 ? Ok : Accent, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(bar, 0);
+        var lbl = new TextBlock { Text = done >= 4 ? "Всё готово" : $"{done} из 4", Foreground = done >= 4 ? Ok : Accent, FontWeight = FontWeight.SemiBold, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 0, 0) };
+        Grid.SetColumn(lbl, 1);
+        var pg = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 26, 0, 20) };
+        pg.Children.Add(bar); pg.Children.Add(lbl);
+        WelcomeHost.Children.Add(pg);
+
+        // the four steps
+        var steps = new StackPanel { Spacing = 11 };
+        steps.Children.Add(WelcomeCard("grid", "Расширение для браузера",
+            "Автозаполнение логинов и паролей в Chrome и Edge.", ext,
+            "Показать как", () => { CloseWelcome(); OpenSettingsTool(); }));
+        steps.Children.Add(WelcomeCard("cloud", "Синхронизация",
+            "Один сейф на всех устройствах — через iCloud или Google Drive.", sync,
+            "Настроить", () => { CloseWelcome(); OpenSettingsTool(); }));
+        steps.Children.Add(WelcomeCard("import", "Перенести пароли",
+            "Импорт из Kaspersky, Chrome, Edge, Яндекс и других менеджеров.", import,
+            "Импортировать", () => { CloseWelcome(); OnImportClick(this, new RoutedEventArgs()); }));
+        steps.Children.Add(WelcomeCard("phone", "IPasswrd на телефоне",
+            "iPhone и Android — тот же сейф в кармане.", mobile,
+            "Отметить", () => { _obMobileDone = true; SaveSettings(); BuildWelcome(); }));
+        WelcomeHost.Children.Add(steps);
+
+        // footer
+        var primary = new Button { Content = done >= 4 ? "Готово — открыть сейф" : "Отлично, за дело", Padding = new Thickness(24, 12), VerticalAlignment = VerticalAlignment.Center };
+        primary.Classes.Add("primary");
+        primary.Click += (_, _) => CloseWelcome(armHello: true);
+        Grid.SetColumn(primary, 0);
+        var later = new Button { Content = "Позже", Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = Text3, FontSize = 13, Padding = new Thickness(8), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        later.Click += (_, _) => CloseWelcome(armHello: true);
+        Grid.SetColumn(later, 1);
+        var foot = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Margin = new Thickness(0, 28, 0, 0) };
+        foot.Children.Add(primary); foot.Children.Add(later);
+        WelcomeHost.Children.Add(foot);
+    }
+
+    /// <summary>One step card on the welcome screen. Done → green tile + «Готово»; otherwise an accent CTA.</summary>
+    private Control WelcomeCard(string icon, string title, string desc, bool done, string btnText, Action onClick)
+    {
+        var tile = new Border
+        {
+            Width = 46, Height = 46, CornerRadius = new CornerRadius(13),
+            Background = done ? new SolidColorBrush(Color.Parse("#226CC185")) : AccentWash,
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 15, 0),
+            Child = MakeIcon(IconData(icon), 23, done ? Ok : Accent, 1.7),
+        };
+        Grid.SetColumn(tile, 0);
+
+        var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 3 };
+        texts.Children.Add(new TextBlock { Text = title, Foreground = Text, FontWeight = FontWeight.SemiBold, FontSize = 15 });
+        texts.Children.Add(new TextBlock { Text = desc, Foreground = Text2, FontSize = 12.5, TextWrapping = TextWrapping.Wrap });
+        Grid.SetColumn(texts, 1);
+
+        Control right;
+        if (done)
+        {
+            var flag = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+            flag.Children.Add(MakeIcon(IconData("check"), 16, Ok, 2.4));
+            flag.Children.Add(new TextBlock { Text = "Готово", Foreground = Ok, FontWeight = FontWeight.SemiBold, FontSize = 13, VerticalAlignment = VerticalAlignment.Center });
+            right = flag;
+        }
+        else
+        {
+            var btn = new Button { Content = btnText, Padding = new Thickness(16, 8), VerticalAlignment = VerticalAlignment.Center };
+            btn.Classes.Add("primary");
+            btn.Click += (_, _) => onClick();
+            right = btn;
+        }
+        right.Margin = new Thickness(12, 0, 0, 0);
+        Grid.SetColumn(right, 2);
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        grid.Children.Add(tile); grid.Children.Add(texts); grid.Children.Add(right);
+
+        return new Border
+        {
+            Background = Surface,
+            BorderBrush = done ? new SolidColorBrush(Color.Parse("#2E6CC185")) : Hair,
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(16, 15), Child = grid,
+        };
+    }
+
+    /// <summary>Slim progress strip at the top of the vault. A gentle nudge to finish setup;
+    /// disappears for good once all four steps are done or the user dismisses it.</summary>
+    private void RefreshOnboardStrip()
+    {
+        if (OnboardStrip is null) return;
+        if (_vault is null) { OnboardStrip.IsVisible = false; OnboardStrip.Child = null; return; }
+
+        var (ext, sync, import, mobile, done) = OnboardState();
+        if (done >= 4 && !_quickStartHidden) { _quickStartHidden = true; SaveSettings(); }
+        if (_quickStartHidden || done >= 4) { OnboardStrip.IsVisible = false; OnboardStrip.Child = null; return; }
+
+        string next = !ext ? "расширение" : !sync ? "синхронизация" : !import ? "перенос паролей" : "приложение на телефоне";
+
+        var tile = new Border
+        {
+            Width = 30, Height = 30, CornerRadius = new CornerRadius(9),
+            Background = AccentWash, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 11, 0),
+            Child = MakeIcon(IconData("wand"), 16, Accent, 1.7),
+        };
+        Grid.SetColumn(tile, 0);
+
+        var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
+        texts.Children.Add(new TextBlock { Text = "Завершите настройку", Foreground = Text, FontWeight = FontWeight.SemiBold, FontSize = 13 });
+        texts.Children.Add(new TextBlock { Text = $"Готово {done} из 4 · дальше: {next}", Foreground = Text3, FontSize = 11.5 });
+        Grid.SetColumn(texts, 1);
+
+        var bar = new ProgressBar { Minimum = 0, Maximum = 4, Value = done, Width = 130, Height = 6, Foreground = Accent, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 14, 0) };
+        Grid.SetColumn(bar, 2);
+
+        var cont = new Button { Content = "Продолжить", VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(14, 6) };
+        cont.Classes.Add("primary");
+        cont.Click += (_, _) => { _toolMode = "quickstart"; ToolPane.IsVisible = true; RenderSidebar(); ShowTool("quickstart"); };
+        Grid.SetColumn(cont, 3);
+
+        var close = new Button { Content = "✕", Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = Text3, FontSize = 13, Padding = new Thickness(8, 4), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0) };
+        ToolTip.SetTip(close, "Скрыть");
+        close.Click += (_, _) => { _quickStartHidden = true; SaveSettings(); OnboardStrip.IsVisible = false; OnboardStrip.Child = null; RenderSidebar(); };
+        Grid.SetColumn(close, 4);
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto"), Margin = new Thickness(16, 9) };
+        grid.Children.Add(tile); grid.Children.Add(texts); grid.Children.Add(bar); grid.Children.Add(cont); grid.Children.Add(close);
+        OnboardStrip.Child = grid;
+        OnboardStrip.IsVisible = true;
+    }
+
+    /// <summary>Called (on the UI thread) the first time the browser extension talks to the app —
+    /// tick the extension step live, so the strip and checklist update without a manual refresh.</summary>
+    private void RefreshOnboardAfterExtension()
+    {
+        if (_vault is null) return;
+        RenderSidebar();
+        if (_toolMode == "quickstart") ShowTool("quickstart");
     }
 
     // ----- generator -----
@@ -3192,7 +4041,7 @@ public partial class MainWindow : Window
         copy.Click += async (_, _) =>
         {
             string val = _genOut!.Text ?? "";
-            try { if (Clipboard is { } cb) await cb.SetTextAsync(val); } catch { /* ignore */ }
+            try { await CopySecretAsync(val); } catch { /* ignore */ }
             ScheduleClipboardClear(val);
             copy.Content = "Скопировано";
             try { await Task.Delay(1100); } catch { /* ignore */ }
@@ -3708,6 +4557,8 @@ public partial class MainWindow : Window
         g.Children.Add(Hairline());
         g.Children.Add(SetRowControl("Очистка буфера обмена", "Стирать скопированный пароль через заданное время", ClipboardClearControl()));
         g.Children.Add(Hairline());
+        g.Children.Add(SetRowControl("Скрывать от записи экрана", "В скриншотах и трансляциях окно будет пустым. Отключите на время, если нужно показать приложение.", CaptureShieldControl()));
+        g.Children.Add(Hairline());
         g.Children.Add(ChangePasswordRow());
         g.Children.Add(Hairline());
         g.Children.Add(RecoveryRow());
@@ -3921,6 +4772,8 @@ public partial class MainWindow : Window
         var cur = new TextBox { PasswordChar = '●', Watermark = "Текущий пароль", FontFamily = MonoFont };
         var nw  = new TextBox { PasswordChar = '●', Watermark = "Новый пароль (минимум 8)", FontFamily = MonoFont };
         var cf  = new TextBox { PasswordChar = '●', Watermark = "Повторите новый пароль", FontFamily = MonoFont };
+        var nwMeter = new ContentControl { IsVisible = false };
+        nw.TextChanged += (_, _) => ShowStrength(nwMeter, nw.Text ?? "");
         var status = new TextBlock { IsVisible = false, TextWrapping = TextWrapping.Wrap, FontSize = 12 };
         var apply = new Button { Content = "Сменить пароль", Padding = new Thickness(16, 9), HorizontalAlignment = HorizontalAlignment.Right };
         apply.Classes.Add("primary");
@@ -3928,6 +4781,7 @@ public partial class MainWindow : Window
         var form = new StackPanel { Spacing = 9, Margin = new Thickness(17, 0, 17, 14), IsVisible = false };
         form.Children.Add(cur);
         form.Children.Add(nw);
+        form.Children.Add(nwMeter);
         form.Children.Add(cf);
         form.Children.Add(status);
         form.Children.Add(apply);
@@ -4110,7 +4964,7 @@ public partial class MainWindow : Window
         copyBtn.Click += async (_, _) =>
         {
             string val = codeText.Text ?? "";
-            try { if (Clipboard is { } cb) await cb.SetTextAsync(val); } catch { /* ignore */ }
+            try { await CopySecretAsync(val); } catch { /* ignore */ }
             ScheduleClipboardClear(val);
             copyBtn.Content = Tr("Скопировано");
             try { await Task.Delay(1100); } catch { /* ignore */ }
@@ -4267,6 +5121,19 @@ public partial class MainWindow : Window
         var ts = new ToggleSwitch { IsChecked = IsAutostartOn(), OnContent = "", OffContent = "", VerticalAlignment = VerticalAlignment.Center };
         ts.Checked += (_, _) => SetAutostart(true);
         ts.Unchecked += (_, _) => SetAutostart(false);
+        return ts;
+    }
+
+    private Control CaptureShieldControl()
+    {
+        var ts = new ToggleSwitch { IsChecked = !_captureShieldOff, OnContent = "", OffContent = "", VerticalAlignment = VerticalAlignment.Center };
+        ts.IsCheckedChanged += (_, _) =>
+        {
+            _captureShieldOff = ts.IsChecked != true;
+            SaveSettings();
+            ApplyCaptureShield(this);                              // вступает в силу мгновенно
+            if (_quick is not null) ApplyCaptureShield(_quick);
+        };
         return ts;
     }
 
@@ -5289,6 +6156,9 @@ public partial class MainWindow : Window
         "gear"    => "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm8.5 3a8.4 8.4 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a8.6 8.6 0 0 0-2.1-1.3L15.6 3h-4l-.4 2.6a8.6 8.6 0 0 0-2.1 1.2l-2.3-1-2 3.5 2 1.5a8.4 8.4 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-1a8.6 8.6 0 0 0 2.1 1.3l.4 2.6h4l.4-2.6a8.6 8.6 0 0 0 2.1-1.2l2.3 1 2-3.5-2-1.5c.06-.4.1-.8.1-1.2z",
         "timer"   => "M12 8.5v4l2.7 1.6M12 5.5a8 8 0 1 0 0 16 8 8 0 0 0 0-16zM12 5.5V3M9.5 3h5",
         "passkey" => "M11 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3.5 20.5c.8-3.6 3.9-6 7.5-6 1 0 1.9.16 2.8.47M18 17.6a2.7 2.7 0 1 0-1.5-5.2 2.7 2.7 0 0 0 1.5 5.2zM17.6 17.5l.7 3 1.7-1M17.9 12.3l.4-1.6",
+        "cloud"   => "M7 18a4.5 4.5 0 0 1-.4-9A6 6 0 0 1 18.3 10 4 4 0 0 1 17.5 18H7z",
+        "import"  => "M12 3.5v10m0 0l-3.4-3.4M12 13.5l3.4-3.4M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3",
+        "phone"   => "M8 2.75h8A1.5 1.5 0 0 1 17.5 4.25v15.5A1.5 1.5 0 0 1 16 21.25H8A1.5 1.5 0 0 1 6.5 19.75V4.25A1.5 1.5 0 0 1 8 2.75zM10.5 18.5h3",
         _          => "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z",
     };
 }

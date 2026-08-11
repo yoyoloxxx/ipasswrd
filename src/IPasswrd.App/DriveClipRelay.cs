@@ -32,6 +32,7 @@ public partial class MainWindow
     /// синхронизация не Google — просто спит.</summary>
     private void StartDriveClipRelay()
     {
+        if (!ClipSyncEnabled) return;   // общий буфер ПК↔телефон выключен до после-релизной переработки
         _clipRelayCts?.Cancel();
         var cts = _clipRelayCts = new CancellationTokenSource();
         _ = Task.Run(() => DriveClipLoop(cts.Token));
@@ -91,7 +92,12 @@ public partial class MainWindow
 
         var vault = _vault;
         if (vault is null) return;
-        byte[] blob = ClipEnvelope.Seal(vault.ExportSessionKey(), text);
+        byte[] clipKey = vault.ExportSessionKey();
+        // Гонка с блокировкой: Wipe() мог стереть ключ, пока мы держим ссылку на сейф. Нулевым
+        // ключом печатать нельзя — это шифрование предсказуемым ключом, т.е. почти открытый текст.
+        if (System.MemoryExtensions.IndexOfAnyExcept<byte>(clipKey, (byte)0) < 0) return;
+        byte[] blob = ClipEnvelope.Seal(clipKey, text);
+        System.Security.Cryptography.CryptographicOperations.ZeroMemory(clipKey);
         await g.UploadSmallAsync(ClipFromPc, blob, ct);
         _clipLastSeen = text;
         NotifLog($"буфер → Диск: {text.Length} симв.");
@@ -104,7 +110,11 @@ public partial class MainWindow
 
         var vault = _vault;
         if (vault is null) return;
-        if (!ClipEnvelope.TryOpen(vault.ExportSessionKey(), blob, out string text))
+        byte[] clipKey = vault.ExportSessionKey();
+        if (System.MemoryExtensions.IndexOfAnyExcept<byte>(clipKey, (byte)0) < 0) return;   // заперли: ключ стёрт — конверт телефона НЕ удаляем
+        bool opened = ClipEnvelope.TryOpen(clipKey, blob, out string text);
+        System.Security.Cryptography.CryptographicOperations.ZeroMemory(clipKey);
+        if (!opened)
         {
             // Чужой или битый конверт: применить нечего, но и оставлять его крутиться в опросе
             // незачем — удаляем, телефон при желании положит новый.

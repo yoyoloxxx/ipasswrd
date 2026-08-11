@@ -20,6 +20,15 @@ namespace IPasswrd.App;
 //   • "Install extension" one-click helper (register the native host + guide load-unpacked)
 public partial class MainWindow
 {
+    // ================= общий буфер обмена ПК↔телефон — ВРЕМЕННО ВЫКЛЮЧЕН =================
+    //
+    // Решение перед релизом в Store: канал общего буфера (Google Диск, iCloud clip-inbox,
+    // Bluetooth-уведомления IPWCLIP, LAN /clip) отключён ЦЕЛИКОМ одним флагом — до полной
+    // переработки и пересмотра после релиза. Код остаётся на месте: вернём обновлением.
+    // Локальная гигиена буфера (копирование с защитой от Win+V и автоочистка) НЕ затронута,
+    // как и перехват СМС-кодов — это отдельная функция.
+    private static readonly bool ClipSyncEnabled = false;
+
     // ================= clipboard auto-clear =================
 
     private int _clipboardClearSeconds = 30;   // 0 = off
@@ -97,6 +106,92 @@ public partial class MainWindow
     private bool _breachRunning;
     private string? _breachStatus;                     // localized status / error line (null = none)
 
+    // ---- автопроверка по расписанию ----
+    // Ручную проверку никто не запускает — сейф следит сам: раз в N дней тихо прогоняет пароли
+    // через ту же k-анонимную проверку и, если что-то нашлось, зажигает точку на «Проверке»
+    // в боковой панели. Ни попапов, ни уведомлений: пользователь не думает об утечках,
+    // пока думать не о чем.
+    private int _breachEveryDays = 7;          // 0 = выкл; частота выбирается в самом разделе проверки
+    private DateTime _breachLastUtc;           // последняя УСПЕШНАЯ проверка (UTC)
+    private int _breachFound;                  // сколько аккаунтов затронуто (живёт в настройках ради точки после рестарта)
+    private DateTime _breachTriedUtc;          // офлайн-щадящий режим: не пробовать чаще раза в час
+    private bool _breachAutoPending;           // одна отложенная автопроверка за раз
+
+    /// <summary>Прогон всех паролей по базе утечек (общее ядро ручной и автоматической проверки).</summary>
+    private async Task<Dictionary<string, long>> RunBreachScanAsync()
+    {
+        var pwds = _vault!.Items()
+            .Where(x => x.Item.Type == "account"
+                        && x.Item.Fields.TryGetValue("password", out var p) && !string.IsNullOrEmpty(p))
+            .Select(x => x.Item.Fields["password"])
+            .Distinct()
+            .ToList();
+
+        var counts = new Dictionary<string, long>();
+        var rangeCache = new Dictionary<string, string>();        // prefix -> body, so shared prefixes hit the API once
+        foreach (var pw in pwds)
+        {
+            string prefix = BreachCheck.Prefix(pw);
+            if (!rangeCache.TryGetValue(prefix, out var body))
+            {
+                body = await FetchRange(prefix);
+                rangeCache[prefix] = body;
+            }
+            long n = BreachCheck.CountInBody(pw, body);
+            if (n > 0) counts[pw] = n;
+        }
+        return counts;
+    }
+
+    /// <summary>Сколько аккаунтов используют пробитые пароли (для точки в боковой панели).</summary>
+    private int BreachAffectedCount(Dictionary<string, long> counts) =>
+        _vault is null ? 0 : _vault.Items().Count(x => x.Item.Type == "account"
+            && x.Item.Fields.TryGetValue("password", out var p) && counts.ContainsKey(p));
+
+    /// <summary>Запустить автопроверку, если пришло время. Безопасно дёргать сколько угодно:
+    /// сама решает, надо ли, и никогда не мешает разблокировке (стартует с паузой).</summary>
+    private async Task MaybeAutoBreachCheckAsync()
+    {
+        if (_breachAutoPending) return;
+        _breachAutoPending = true;
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5));   // разблокировка должна оставаться мгновенной
+            if (_vault is null || _breachRunning || _breachEveryDays <= 0) return;
+            if (_breachLastUtc != default && (DateTime.UtcNow - _breachLastUtc).TotalDays < _breachEveryDays) return;
+            if (_breachTriedUtc != default && (DateTime.UtcNow - _breachTriedUtc).TotalHours < 1) return;
+            _breachTriedUtc = DateTime.UtcNow;
+            _breachRunning = true;
+            _breachStatus = Tr("Проверяем пароли в базе утечек…");
+            if (_toolMode == "security") ShowTool("security");      // раздел открыт — показать, что идёт проверка
+            try
+            {
+                var counts = await RunBreachScanAsync();
+                _breachStatus = null;
+                if (_vault is null) return;   // сейф заперли посреди проверки — не трогаем результаты, придём позже
+                _breachCounts = counts;
+                _breachFound = BreachAffectedCount(counts);
+                _breachLastUtc = DateTime.UtcNow;
+                SaveSettings();
+                RenderSidebar();                                    // точка появляется/гаснет сама
+            }
+            catch { _breachStatus = null; /* офлайн или сеть моргнула — тихо попробуем в следующий раз */ }
+            finally
+            {
+                _breachRunning = false;
+                if (_vault is not null && _toolMode == "security") ShowTool("security");  // раздел открыт — обновить
+            }
+        }
+        finally { _breachAutoPending = false; }
+    }
+
+    private void StartBreachWatch()
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromHours(6) };
+        timer.Tick += (_, _) => _ = MaybeAutoBreachCheckAsync();
+        timer.Start();
+    }
+
     private async Task<string> FetchRange(string prefix)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.pwnedpasswords.com/range/" + prefix);
@@ -115,28 +210,16 @@ public partial class MainWindow
         ShowTool("security");
         try
         {
-            var pwds = _vault.Items()
-                .Where(x => x.Item.Type == "account"
-                            && x.Item.Fields.TryGetValue("password", out var p) && !string.IsNullOrEmpty(p))
-                .Select(x => x.Item.Fields["password"])
-                .Distinct()
-                .ToList();
-
-            var counts = new Dictionary<string, long>();
-            var rangeCache = new Dictionary<string, string>();        // prefix -> body, so shared prefixes hit the API once
-            foreach (var pw in pwds)
-            {
-                string prefix = BreachCheck.Prefix(pw);
-                if (!rangeCache.TryGetValue(prefix, out var body))
-                {
-                    body = await FetchRange(prefix);
-                    rangeCache[prefix] = body;
-                }
-                long n = BreachCheck.CountInBody(pw, body);
-                if (n > 0) counts[pw] = n;
-            }
-            _breachCounts = counts;
+            var counts = await RunBreachScanAsync();
             _breachStatus = null;
+            if (_vault is not null)   // сейф заперли, пока ходили в сеть? — тогда результат не запоминаем
+            {
+                _breachCounts = counts;
+                _breachFound = BreachAffectedCount(counts);   // ручная проверка тоже двигает расписание и точку
+                _breachLastUtc = DateTime.UtcNow;
+                SaveSettings();
+                RenderSidebar();
+            }
         }
         catch
         {
@@ -145,7 +228,7 @@ public partial class MainWindow
         finally
         {
             _breachRunning = false;
-            ShowTool("security");
+            if (_vault is not null) ShowTool("security");   // на запертом сейфе перерисовывать нечего (иначе краш)
         }
     }
 
@@ -175,6 +258,34 @@ public partial class MainWindow
         btn.Classes.Add("primary");
         btn.Click += (_, _) => OnBreachCheckClick();
         head.Children.Add(btn);
+
+        // частота автопроверки — прямо здесь, рядом с ручной кнопкой
+        var freqLeft = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        freqLeft.Children.Add(new TextBlock { Text = Tr("Проверять автоматически"), Foreground = Text, FontSize = 13, FontWeight = FontWeight.SemiBold });
+        freqLeft.Children.Add(new TextBlock { Text = BreachLastLine(), Foreground = Text3, FontSize = 11.5 });
+        Grid.SetColumn(freqLeft, 0);
+        var freqCombo = new ComboBox
+        {
+            ItemsSource = _breachFreqOptions.Select(o => Tr(o.Label)).ToList(),
+            MinWidth = 150, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
+        };
+        int fi = Array.FindIndex(_breachFreqOptions, o => o.Days == _breachEveryDays);
+        freqCombo.SelectedIndex = fi < 0 ? 2 : fi;    // default → раз в неделю
+        freqCombo.SelectionChanged += (_, _) =>
+        {
+            int i = freqCombo.SelectedIndex;
+            if (i >= 0 && i < _breachFreqOptions.Length)
+            {
+                _breachEveryDays = _breachFreqOptions[i].Days;
+                SaveSettings();
+                _ = MaybeAutoBreachCheckAsync();   // включили, а срок уже вышел — проверить сразу
+            }
+        };
+        Grid.SetColumn(freqCombo, 1);
+        var freqRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 12, 0, 0) };
+        freqRow.Children.Add(freqLeft);
+        freqRow.Children.Add(freqCombo);
+        head.Children.Add(freqRow);
         card.Children.Add(head);
 
         if (_breachStatus is not null)
@@ -184,6 +295,15 @@ public partial class MainWindow
             {
                 Text = _breachStatus, Foreground = err ? Bad : Text2, FontSize = 12.5,
                 TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16, 0, 16, 14),
+            });
+        }
+        else if (_breachCounts is null && _breachFound > 0)
+        {
+            // после перезапуска: сама находка помнится (ради точки), но список заново не хранится на диске
+            card.Children.Add(new TextBlock
+            {
+                Text = string.Format(Tr("При последней проверке найдено паролей из утечек: {0}. Нажмите «Проверить пароли», чтобы увидеть список."), _breachFound),
+                Foreground = Bad, FontSize = 12.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16, 0, 16, 14),
             });
         }
         else if (_breachCounts is not null)
@@ -225,6 +345,23 @@ public partial class MainWindow
             CornerRadius = new CornerRadius(14), Child = card, ClipToBounds = true,
         });
         return sp;
+    }
+
+    private static readonly (string Label, int Days)[] _breachFreqOptions =
+    {
+        ("Выкл", 0), ("Каждый день", 1), ("Раз в неделю", 7), ("Раз в месяц", 30),
+    };
+
+    private string BreachLastLine()
+    {
+        if (_breachLastUtc == default) return Tr("Ещё не проверялось");
+        var age = DateTime.UtcNow - _breachLastUtc;
+        var local = _breachLastUtc.ToLocalTime().Date;
+        string when = age.TotalMinutes < 2 ? Tr("только что")
+            : local == DateTime.Now.Date ? Tr("сегодня")
+            : local == DateTime.Now.Date.AddDays(-1) ? Tr("вчера")
+            : string.Format(Tr("{0} дн. назад"), Math.Max(1, (int)age.TotalDays));
+        return Tr("Последняя проверка: ") + when;
     }
 
     private Control BreachRow(string title, string id, long count)
