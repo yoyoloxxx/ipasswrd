@@ -21,8 +21,8 @@
     <ApplicationTitle>IPasswrd</ApplicationTitle>
     <!-- совпадает с id нативного хоста браузера: com.yoyoloxxx.ipasswrd -->
     <ApplicationId>com.yoyoloxxx.ipasswrd</ApplicationId>
-    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
-    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.2.0</ApplicationDisplayVersion>
+    <ApplicationVersion>2</ApplicationVersion>
 
     <!-- сейф сериализуется рефлексией System.Text.Json — защищаем от триммера в Release -->
     <TrimMode>partial</TrimMode>

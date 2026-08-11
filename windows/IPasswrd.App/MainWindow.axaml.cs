@@ -197,6 +197,7 @@ public partial class MainWindow : Window
         ["Быстрый поиск"] = "Quick search", ["Ctrl+Shift+Пробел из любого окна"] = "Ctrl+Shift+Space from anywhere",
         // attachments
         ["Вложения"] = "Attachments", ["Прикрепить файл"] = "Attach a file",
+        ["Вложение добавлено"] = "Attachment added", ["Вложений добавлено: {0}"] = "Attachments added: {0}",
         ["Убрать"] = "Remove", ["Не больше {0} вложений в одной записи."] = "No more than {0} attachments per record.",
         ["Выберите файл"] = "Choose a file", ["Сканы и документы"] = "Scans and documents",
         ["Сохранить вложение"] = "Save the attachment", ["Сохранить как…"] = "Save as…",
@@ -456,6 +457,7 @@ public partial class MainWindow : Window
         MasterBox.TextChanged += (_, _) => UpdateMasterMeter();
         RecoveryPw1.TextChanged += (_, _) => UpdateRecoveryMeter();
         EntryList.ContextRequested += OnEntryContext;
+        HookAttachmentDrop();   // файлы можно бросать мышью в редактор и в карточку записи
         _ = Updater.CheckAndStageAsync();   // quiet; nothing is applied until the app exits
         StartUpdateWatch();
         StartBreachWatch();      // авто-проверка утечек по расписанию (тихая, см. Features.cs)
@@ -2976,6 +2978,91 @@ public partial class MainWindow : Window
         }
         catch (AttachmentTooLargeException ex) { onError(ex.Message); }
         catch (Exception ex) { onError(Tr("Ошибка: ") + ex.Message); }
+    }
+
+    // ================= вложения перетаскиванием =================
+    // Файл бросают мышью: в форме редактора — в набор _editAttachments (запись ещё не
+    // сохранена, отмена редактора ничего не трогает), в карточке записи — сразу в сейф.
+    // Ограничения те же, что у кнопки «Прикрепить файл»: лимит штук и размера — у сейфа.
+    private Action? _renderEditAttachments;
+
+    private void HookAttachmentDrop()
+    {
+        foreach (Control host in new Control[] { EditorScreen, DetailPanel })
+        {
+            // StackPanel без фона не ловит указатель в пустых местах — без этого бросок
+            // срабатывал бы только точно над текстом, что выглядит как «не работает».
+            if (host is Panel p && p.Background is null) p.Background = Brushes.Transparent;
+            DragDrop.SetAllowDrop(host, true);
+            host.AddHandler(DragDrop.DragOverEvent, (object? _, DragEventArgs e) =>
+            {
+                bool ours = e.Data.Contains(DataFormats.Files)
+                    && (ReferenceEquals(host, EditorScreen) || (_vault is not null && _currentId is not null));
+                e.DragEffects = ours ? DragDropEffects.Copy : DragDropEffects.None;
+                e.Handled = true;
+            });
+            host.AddHandler(DragDrop.DropEvent, async (object? _, DragEventArgs e) =>
+            {
+                e.Handled = true;
+                if (!e.Data.Contains(DataFormats.Files)) return;
+                try { await AcceptDroppedFilesAsync(ReferenceEquals(host, EditorScreen), e); }
+                catch (Exception ex) { Toast(Tr("Ошибка: ") + ex.Message); }
+            });
+        }
+    }
+
+    private async Task AcceptDroppedFilesAsync(bool toEditor, DragEventArgs e)
+    {
+        var files = e.Data.GetFiles()?.OfType<IStorageFile>().ToList();
+        if (files is null || files.Count == 0) return;
+        if (!toEditor && (_vault is null || _currentId is null)) return;
+
+        VaultItem? fresh = null;
+        if (!toEditor)
+        {
+            try { fresh = _vault!.Get(_currentId!); }
+            catch { return; }   // запись успели удалить — бросать некуда
+        }
+        int have = toEditor ? _editAttachments.Count : fresh!.Attachments.Count;
+
+        var accepted = new List<Attachment>();
+        foreach (IStorageFile f in files)
+        {
+            if (have + accepted.Count >= Vault.MaxAttachmentsPerItem)
+            {
+                Toast(string.Format(Tr("Не больше {0} вложений в одной записи."), Vault.MaxAttachmentsPerItem));
+                break;
+            }
+            try
+            {
+                byte[] raw;
+                await using (var s = await f.OpenReadAsync())
+                using (var ms = new System.IO.MemoryStream())
+                {
+                    await s.CopyToAsync(ms);
+                    raw = ms.ToArray();
+                }
+                accepted.Add(Attachments.Prepare(f.Name, raw));
+            }
+            catch (AttachmentTooLargeException ex) { Toast(ex.Message); }
+            catch (Exception ex) { Toast(Tr("Ошибка: ") + ex.Message); }
+        }
+        if (accepted.Count == 0) return;
+
+        if (toEditor)
+        {
+            _editAttachments.AddRange(accepted);
+            _renderEditAttachments?.Invoke();
+        }
+        else
+        {
+            fresh!.Attachments.AddRange(accepted);
+            try { _vault!.Update(_currentId!, fresh); Save(); }
+            catch (AttachmentTooLargeException ex) { Toast(ex.Message); return; }
+            ShowDetail(_vault.Get(_currentId!), _currentId!);
+        }
+        Toast(accepted.Count == 1 ? Tr("Вложение добавлено")
+                                  : string.Format(Tr("Вложений добавлено: {0}"), accepted.Count));
     }
 
     private async Task SaveAttachmentAsync(Attachment a, byte[] bytes)
@@ -5567,6 +5654,7 @@ public partial class MainWindow : Window
             host.Children.Add(add);
         }
 
+        _renderEditAttachments = Render;   // чтобы бросок файла в форму мог перерисовать список
         Render();
         return host;
     }

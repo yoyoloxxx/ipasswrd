@@ -19,6 +19,8 @@
                        ReturnType="Go" Completed="OnPrimaryAction" />
             </Border>
 
+            <Label x:Name="MeterLabel" IsVisible="False" FontSize="12" Margin="4,-6,4,0" />
+
             <Border x:Name="ConfirmCard" Style="{StaticResource Card}" Padding="16,6" IsVisible="False">
                 <Entry x:Name="ConfirmBox" Placeholder="Мастер-пароль ещё раз" IsPassword="True"
                        ReturnType="Go" Completed="OnPrimaryAction" />
