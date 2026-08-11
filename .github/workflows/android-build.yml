@@ -125,7 +125,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VER=$(grep -o '<ApplicationDisplayVersion>[^<]*' IPasswrd.Mobile.csproj | cut -d'>' -f2)
-          TAG="mobile-v$VER"
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "IPasswrd mobile $VER" --notes "Мобильная сборка $VER: IPA — для AltStore/SideStore (источник https://yoyoloxxx.github.io/ipasswrd/altstore.json), APK — для Android." || true
+          # Скользящий ПРЕРЕЛИЗНЫЙ тег — тот же, что у iOS; «latest» остаётся за Windows-релизом.
+          TAG="mobile-latest"
+          gh release create "$TAG" --prerelease --repo "$GITHUB_REPOSITORY" --title "IPasswrd mobile (текущая сборка)" --notes "Мобильная сборка: IPA — для AltStore/SideStore (источник https://yoyoloxxx.github.io/ipasswrd/altstore.json), APK — для Android. Версия — в altstore.json." || true
           gh release upload "$TAG" out/IPasswrd.apk --repo "$GITHUB_REPOSITORY" --clobber
