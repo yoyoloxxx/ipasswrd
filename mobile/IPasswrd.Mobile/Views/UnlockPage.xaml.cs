@@ -10,6 +10,13 @@ public partial class UnlockPage : ContentPage
     public UnlockPage()
     {
         InitializeComponent();
+        // Индикатор стойкости нужен только при СОЗДАНИИ сейфа (видно поле подтверждения):
+        // при обычном входе оценивать вводимый пароль бессмысленно и шумно.
+        PasswordBox.TextChanged += (_, _) =>
+        {
+            if (ConfirmCard.IsVisible) StrengthMeter.Show(MeterLabel, PasswordBox.Text);
+            else MeterLabel.IsVisible = false;
+        };
     }
 
     protected override void OnAppearing()

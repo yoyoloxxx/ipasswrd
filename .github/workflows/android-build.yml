@@ -1,4 +1,6 @@
 name: android-build
+permissions:
+  contents: write
 on:
   workflow_dispatch:
   push:
@@ -115,3 +117,15 @@ jobs:
         with:
           name: IPasswrd-android-apk
           path: mobile/IPasswrd.Mobile/out/IPasswrd.apk
+
+      # APK кладётся в тот же релиз mobile-v<версия>, что и iOS-IPA —
+      # с GitHub его можно скачать и поставить на Android напрямую.
+      - name: Publish APK to GitHub Release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER=$(grep -o '<ApplicationDisplayVersion>[^<]*' IPasswrd.Mobile.csproj | cut -d'>' -f2)
+          TAG="mobile-v$VER"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "IPasswrd mobile $VER" --notes "Мобильная сборка $VER: IPA — для AltStore/SideStore (источник https://yoyoloxxx.github.io/ipasswrd/altstore.json), APK — для Android." || true
+          gh release upload "$TAG" out/IPasswrd.apk --repo "$GITHUB_REPOSITORY" --clobber

@@ -1,3 +1,4 @@
+using IPasswrd.Core;
 using IPasswrd.Mobile.Services;
 
 namespace IPasswrd.Mobile.Views;
@@ -7,6 +8,8 @@ public partial class ChangePasswordPage : ContentPage
     public ChangePasswordPage()
     {
         InitializeComponent();
+        // Индикатор стойкости — та же шкала, что на ПК и в аудите (SecurityAudit.Rate).
+        NewBox.TextChanged += (_, _) => StrengthMeter.Show(MeterLabel, NewBox.Text);
     }
 
     private async void OnSave(object? sender, EventArgs e)

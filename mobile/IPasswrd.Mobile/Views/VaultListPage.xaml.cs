@@ -62,9 +62,15 @@ public partial class VaultListPage : ContentPage
         UpdateSectionButton();
         Svc.State.VaultChanged += OnVaultChanged;
 
-        // Клавиатура поиска закрывается по «Найти» и при прокрутке списка.
+        // Клавиатура поиска закрывается по «Найти» и при ЖИВОЙ прокрутке списка.
+        // ⚠ iOS кидает Scrolled и при перезагрузке списка после каждой введённой буквы —
+        // без окна тишины клавиатура пряталась после первого же символа.
         Search.SearchButtonPressed += (_, _) => Search.Unfocus();
-        List.Scrolled += (_, _) => { if (Search.IsFocused) Search.Unfocus(); };
+        List.Scrolled += (_, _) =>
+        {
+            if (DateTime.UtcNow < _scrollUnfocusHoldUntil) return;   // это не человек листает, это Reload()
+            if (Search.IsFocused) Search.Unfocus();
+        };
     }
 
     private void OnVaultChanged() => MainThread.BeginInvokeOnMainThread(Reload);
@@ -207,7 +213,15 @@ public partial class VaultListPage : ContentPage
     private static Color GetColor(string key) =>
         Application.Current?.Resources.TryGetValue(key, out var v) == true && v is Color c ? c : Colors.Gray;
 
-    private void OnSearch(object? sender, TextChangedEventArgs e) => Reload();
+    // Окно тишины для List.Scrolled: пока идёт перерисовка результатов поиска,
+    // «прокрутка» — артефакт обновления данных, а не жест человека.
+    private DateTime _scrollUnfocusHoldUntil;
+
+    private void OnSearch(object? sender, TextChangedEventArgs e)
+    {
+        if (Search.IsFocused) _scrollUnfocusHoldUntil = DateTime.UtcNow.AddMilliseconds(800);
+        Reload();
+    }
 
     private void Reload()
     {
