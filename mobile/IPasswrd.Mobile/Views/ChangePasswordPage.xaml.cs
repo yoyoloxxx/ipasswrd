@@ -8,7 +8,7 @@ public partial class ChangePasswordPage : ContentPage
     public ChangePasswordPage()
     {
         InitializeComponent();
-        // Индикатор стойкости — та же шкала, что на ПК и в аудите (SecurityAudit.Rate).
+        // Индикатор стойкости — та же шкала, что на ПК и в аудите (Auditor.Rate).
         NewBox.TextChanged += (_, _) => StrengthMeter.Show(MeterLabel, NewBox.Text);
     }
 
