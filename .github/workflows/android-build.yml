@@ -4,13 +4,13 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/IPasswrd.Mobile/**'
-      - 'src/IPasswrd.Core/**'
+      - 'mobile/IPasswrd.Mobile/**'
+      - 'core/IPasswrd.Core/**'
       - '.github/workflows/android-build.yml'
 
 defaults:
   run:
-    working-directory: src/IPasswrd.Mobile
+    working-directory: mobile/IPasswrd.Mobile
 
 jobs:
   build:
@@ -114,4 +114,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: IPasswrd-android-apk
-          path: src/IPasswrd.Mobile/out/IPasswrd.apk
+          path: mobile/IPasswrd.Mobile/out/IPasswrd.apk

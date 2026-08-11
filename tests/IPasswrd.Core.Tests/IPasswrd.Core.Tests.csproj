@@ -18,7 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\IPasswrd.Core\IPasswrd.Core.csproj" />
+    <ProjectReference Include="..\..\core\IPasswrd.Core\IPasswrd.Core.csproj" />
   </ItemGroup>
 
 </Project>

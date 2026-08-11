@@ -1,6 +1,6 @@
 # IPasswrd для iPhone — как собрать и запустить
 
-Приложение: `src/IPasswrd.Mobile` (.NET MAUI 9, `net9.0-ios`), использует то же ядро
+Приложение: `mobile/IPasswrd.Mobile` (.NET MAUI 9, `net9.0-ios`), использует то же ядро
 `IPasswrd.Core` и тот же файл сейфа `vault.ipvault`, что и Windows-приложение.
 
 ## Что уже умеет
@@ -20,7 +20,7 @@
 2. **iTunes** (из Microsoft Store или 64-бит с apple.com) — для связи с iPhone.
 3. **Apple Developer Program (платный, $99/год)** — Hot Restart с бесплатным Apple ID не работает.
 
-Шаги: открыть `src/IPasswrd.Mobile/IPasswrd.Mobile.csproj` в VS 2022 → цель отладки «iOS Local Devices → Local Device» → подключить iPhone кабелем → мастер настройки сам проведёт вход в Apple-аккаунт и провижининг → F5. Ограничения Hot Restart: это Debug-режим, иконка будет стандартной .NET, первая разблокировка медленнее (интерпретатор).
+Шаги: открыть `mobile/IPasswrd.Mobile/IPasswrd.Mobile.csproj` в VS 2022 → цель отладки «iOS Local Devices → Local Device» → подключить iPhone кабелем → мастер настройки сам проведёт вход в Apple-аккаунт и провижининг → F5. Ограничения Hot Restart: это Debug-режим, иконка будет стандартной .NET, первая разблокировка медленнее (интерпретатор).
 
 ## Путь 2 (без Mac и без $99): GitHub Actions + AltStore
 
@@ -35,7 +35,7 @@ IPA ставится на iPhone через AltStore/SideStore с бесплат
 ## Проверка компиляции на этом ПК (без iPhone)
 
 ```cmd
-dotnet build src\IPasswrd.Mobile\IPasswrd.Mobile.csproj -f net9.0-ios
+dotnet build mobile\IPasswrd.Mobile\IPasswrd.Mobile.csproj -f net9.0-ios
 ```
 
 C#-компиляция и XAML проходят на Windows; на финальном шаге упаковки без Mac/VS сборка

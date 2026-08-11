@@ -3,10 +3,27 @@
 Free, cross-platform password manager. A full alternative to Kaspersky Password Manager, built on an
 own end-to-end-encrypted vault so the same data works on Windows, iPhone and Android.
 
-**Status: encrypted core + a full-featured CLI**, all unit-tested (42 tests) and verified end-to-end on
-Windows: an envelope-encrypted vault, import (Chrome / Edge / Yandex / Kaspersky), TOTP 2FA codes
-(RFC 6238), a local weak/reused password audit, and a CSPRNG generator. No GUI yet; the Avalonia app and
-cross-device sync are next. The clickable UI prototype lives in [`prototype/`](prototype/).
+**Download for Windows:** https://yoyoloxxx.github.io/ipasswrd/ — installs in one click and updates itself.
+
+**Status: the Windows app has shipped.** Encrypted vault (Argon2id + AES-256-GCM), full GUI, browser
+autofill via the bundled extension (passwords, cards, forms, several accounts per site), passkeys,
+built-in TOTP authenticator, breach check against Have I Been Pwned (k-anonymity), password generator,
+Windows Hello quick unlock (TPM-backed), optional sync through the user's own iCloud Drive / Google
+Drive (only the encrypted file ever leaves the device), in-memory key protection, anti-screenshot mode,
+and automatic updates from GitHub Releases. Android and iOS apps are in progress on the same core.
+
+## Repository layout
+
+```
+ipasswrd/
+├─ core/       IPasswrd.Core — the encrypted-vault engine, shared by every platform
+├─ windows/    Avalonia desktop app, native-messaging Host, browser extension, build scripts
+├─ mobile/     Android + iOS — one .NET MAUI project (plus the iOS AutoFill extension)
+├─ docs/       download page + privacy policy (GitHub Pages)
+├─ tests/      xUnit suite for the security core
+├─ tools/     dev CLI, import checker, packaging/screenshot scripts
+└─ reference/  executable Python spec of the crypto scheme
+```
 
 ## Architecture decisions
 
@@ -15,12 +32,11 @@ cross-device sync are next. The clickable UI prototype lives in [`prototype/`](p
   matter, which is exactly what makes one codebase work on Windows, iPhone and Android (the model Bitwarden
   and Proton Pass use). Apple Passwords and Google Credential Manager are used for *import* and, on their
   own platforms, as a *mirror* so the OS-native autofill keeps working.
-- **Stack: C# + Avalonia.** Avalonia targets desktop and mobile (iOS/Android) from one C#/XAML codebase,
-  so the mobile goal does not force a rewrite. The core here is plain .NET with no UI dependency.
-- **Order: Windows first, mobile later** — on the same core.
-- **Sync is transport-agnostic.** The vault serialises to one self-contained JSON blob, so *how* it syncs
-  (encrypted file in the user's iCloud/Google Drive, or a managed realtime backend for near-instant sync)
-  is a later, swappable decision. The core neither knows nor cares.
+- **Stack: C# everywhere.** Avalonia on desktop, .NET MAUI on mobile, one plain-.NET core with no UI
+  dependency underneath both.
+- **Order: Windows first, mobile next** — on the same core.
+- **Sync is transport-agnostic.** The vault serialises to one self-contained encrypted blob, so *how* it
+  syncs (iCloud Drive today, Google Drive for Android) is a swappable decision. The core neither knows nor cares.
 
 ## The vault scheme
 
@@ -42,6 +58,8 @@ Why this shape:
 - **AES-256-GCM** is authenticated: any tampering (or a wrong master password) is detected, never
   silently accepted.
 
+At runtime the unwrapped DEK is additionally shielded in memory (`CryptProtectMemory`) and wiped on lock.
+
 ### Cryptographic choices
 
 | Concern | Choice | Notes |
@@ -60,11 +78,13 @@ Requires the .NET 10 SDK (LTS).
 dotnet test                      # builds everything and runs the security-core test suite
 
 # or per project
-dotnet build src/IPasswrd.Core
+dotnet build core/IPasswrd.Core
 dotnet test  tests/IPasswrd.Core.Tests
 ```
 
-> On this dev machine the SDK is installed user-local at `%LOCALAPPDATA%\Microsoft\dotnet` (the machine had only a runtime). If your terminal's `dotnet` says "No .NET SDKs were found", prepend that folder to PATH for the session (`set PATH=%LOCALAPPDATA%\Microsoft\dotnet;%PATH%`) or call that `dotnet.exe` by full path. To run the built `ipasswrd.exe` directly, set `DOTNET_ROOT=%LOCALAPPDATA%\Microsoft\dotnet` so the app finds the runtime.
+Windows packaging lives in `windows/`: `publish-installer.cmd <version>` builds the Velopack installer
+and update packages, `upload-release.cmd <version>` publishes them to GitHub Releases. Mobile CI builds
+run from `.github/workflows/`.
 
 ## Verification
 
@@ -85,9 +105,12 @@ The same suite exists twice:
 
 Keeping both honest is deliberate: the Python file is the human-readable spec, the C# file is the product.
 
+Before the first public release the app also went through an adversarial security audit (red team);
+everything found was fixed and re-verified. See `SECURITY.md`.
+
 ## Command line (dev)
 
-A thin console front-end over the core, for exercising the vault and (next) importing:
+A thin console front-end over the core (`tools/IPasswrd.Cli`), for exercising the vault and imports:
 
 ```bash
 ipasswrd init                 # create a vault (asks for a master password, twice)
@@ -113,30 +136,10 @@ Vault file: `%LOCALAPPDATA%\IPasswrd\vault.ipvault` (override with the `IPASSWRD
 - **Known trade-off:** storing a login and its 2FA code (TOTP) in the same vault is a convenience choice
   (as Apple and 1Password do). A future setting may allow keeping 2FA separate.
 
-## Layout
+## Roadmap
 
-```
-IPasswrd/
-├─ src/IPasswrd.Core/          # the encrypted-vault engine + services
-│  ├─ Vault.cs                 # Create / Unlock / Add / Get / Update / Delete / ChangeMasterPassword / Serialize
-│  ├─ Crypto.cs                # Argon2id + AES-256-GCM primitives, KdfConfig
-│  ├─ Totp.cs                  # TOTP / HOTP verification codes (RFC 6238 / 4226)
-│  ├─ Generator.cs             # CSPRNG password generator
-│  ├─ SecurityAudit.cs         # local weak / reused password analysis
-│  ├─ Import/                  # Chrome/Edge/Yandex CSV + Kaspersky text parsers
-│  ├─ VaultItem.cs             # decrypted item model
-│  ├─ VaultDocument.cs         # on-disk JSON DTOs
-│  └─ Exceptions.cs
-├─ src/IPasswrd.Cli/           # console front-end over the core (dev tool)
-├─ tests/IPasswrd.Core.Tests/  # xUnit suite (42 tests: crypto, import, TOTP, audit, generator)
-├─ reference/                  # executable Python spec of the same scheme
-└─ prototype/                  # clickable HTML UI prototype
-```
-
-## Next steps
-
-1. Vault persistence + a CLI to exercise the core end-to-end. **Done** (`src/IPasswrd.Cli`, verified end-to-end on Windows).
-2. Import: CSV from Chrome / Edge / Yandex / Kaspersky. **Done.** (Apple Passwords import next.)
-3. TOTP 2FA, local security audit, CSPRNG generator. **Done.**
-4. Sync layer (decide: encrypted file in cloud vs. managed realtime backend).
-5. Avalonia UI on Windows, ported from the prototype's design tokens.
+1. Encrypted core + CLI + imports + TOTP + audit + generator. **Done.**
+2. Windows app: GUI, browser autofill, passkeys, Windows Hello, sync, auto-updates. **Done — shipped.**
+3. Android app (same core, Google Drive sync). **In progress.**
+4. iOS app (same core, iCloud sync, AutoFill extension). **In progress.**
+5. Shared-clipboard rework, then macOS.

@@ -28,16 +28,16 @@ set VPK=%USERPROFILE%\.dotnet\tools\vpk.exe
 echo === publish %VER% === > "%LOG%"
 if exist "%OUT%" rmdir /S /Q "%OUT%"
 
-"C:\Program Files\dotnet\dotnet.exe" publish "%ROOT%\src\IPasswrd.App\IPasswrd.App.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:DebugType=None -p:Version=%VER% -o "%OUT%" >> "%LOG%" 2>&1
+"C:\Program Files\dotnet\dotnet.exe" publish "%ROOT%\windows\IPasswrd.App\IPasswrd.App.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:DebugType=None -p:Version=%VER% -o "%OUT%" >> "%LOG%" 2>&1
 if errorlevel 1 goto fail
 
 rem Расширение и нативный хост едут рядом с программой, чтобы кнопка
 rem "Установить расширение" нашла всё в одной папке.
-xcopy /E /I /Y "%ROOT%\extension" "%OUT%\extension" >> "%LOG%" 2>&1
+xcopy /E /I /Y "%ROOT%\windows\extension" "%OUT%\extension" >> "%LOG%" 2>&1
 if exist "%ROOT%\dist-host\IPasswrd.Host.exe" copy /Y "%ROOT%\dist-host\IPasswrd.Host.exe" "%OUT%\IPasswrd.Host.exe" >> "%LOG%" 2>&1
 
 echo === pack === >> "%LOG%"
-"%VPK%" pack --packId IPasswrdApp --packTitle IPasswrd --packAuthors "yoyoloxxx Dev" --packVersion %VER% --packDir "%OUT%" --mainExe IPasswrd.App.exe --icon "%ROOT%\src\IPasswrd.App\Assets\ipasswrd_app.ico" --outputDir "%ROOT%\Releases" >> "%LOG%" 2>&1
+"%VPK%" pack --packId IPasswrdApp --packTitle IPasswrd --packAuthors "yoyoloxxx Dev" --packVersion %VER% --packDir "%OUT%" --mainExe IPasswrd.App.exe --icon "%ROOT%\windows\IPasswrd.App\Assets\ipasswrd_app.ico" --outputDir "%ROOT%\Releases" >> "%LOG%" 2>&1
 if errorlevel 1 goto fail
 
 echo === OK === >> "%LOG%"

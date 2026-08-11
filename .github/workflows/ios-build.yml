@@ -4,14 +4,14 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/IPasswrd.Mobile/**'
-      - 'src/IPasswrd.AutoFill/**'
-      - 'src/IPasswrd.Core/**'
+      - 'mobile/IPasswrd.Mobile/**'
+      - 'mobile/IPasswrd.AutoFill/**'
+      - 'core/IPasswrd.Core/**'
       - '.github/workflows/ios-build.yml'
 
 defaults:
   run:
-    working-directory: src/IPasswrd.Mobile
+    working-directory: mobile/IPasswrd.Mobile
 
 jobs:
   build:
@@ -84,4 +84,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: IPasswrd-unsigned-ipa
-          path: src/IPasswrd.Mobile/out/IPasswrd-unsigned.ipa
+          path: mobile/IPasswrd.Mobile/out/IPasswrd-unsigned.ipa
