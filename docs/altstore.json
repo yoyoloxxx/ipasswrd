@@ -1,0 +1,43 @@
+{
+  "name": "IPasswrd",
+  "subtitle": "Менеджер паролей без серверов",
+  "description": "Официальный источник IPasswrd для AltStore и SideStore. Добавьте его один раз — и обновления приложения будут приходить сами.",
+  "iconURL": "https://yoyoloxxx.github.io/ipasswrd/icon.png",
+  "website": "https://yoyoloxxx.github.io/ipasswrd/",
+  "tintColor": "#e1b85e",
+  "apps": [
+    {
+      "name": "IPasswrd",
+      "bundleIdentifier": "com.yoyoloxxx.ipasswrd",
+      "developerName": "yoyoloxxx",
+      "subtitle": "Пароли, 2FA и документы в зашифрованном сейфе",
+      "localizedDescription": "Локальный менеджер паролей: оконечное шифрование (Argon2id + AES-256-GCM), коды 2FA, банковские карты, сканы документов во вложениях, автозаполнение iOS, проверка утечек по k-анонимности, генератор паролей, Face ID. Синхронизация — только зашифрованным файлом через ваш iCloud Drive или Google Диск. Без серверов и слежки.",
+      "iconURL": "https://yoyoloxxx.github.io/ipasswrd/icon.png",
+      "tintColor": "#e1b85e",
+      "category": "utilities",
+      "screenshots": [],
+      "versions": [
+        {
+          "version": "0.2.0",
+          "buildVersion": "2",
+          "date": "2026-08-11",
+          "size": 25441701,
+          "downloadURL": "https://github.com/yoyoloxxx/ipasswrd/releases/download/mobile-latest/IPasswrd-unsigned.ipa",
+          "minOSVersion": "15.0",
+          "localizedDescription": "Свежая сборка IPasswrd для iPhone."
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [
+          "com.apple.security.application-groups"
+        ],
+        "privacy": {
+          "NSCameraUsageDescription": "Камера — сканировать QR-коды 2FA и снимать документы во вложения.",
+          "NSPhotoLibraryUsageDescription": "Фото — прикрепить скан или снимок документа к записи.",
+          "NSFaceIDUsageDescription": "Face ID открывает сейф без ввода мастер-пароля."
+        }
+      }
+    }
+  ],
+  "news": []
+}
