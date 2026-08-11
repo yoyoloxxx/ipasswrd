@@ -1,10 +1,10 @@
 @echo off
 rem Launcher for the IPasswrd desktop app. Double-click, or use the IPasswrd.lnk shortcut.
 cd /d "%~dp0"
-set "EXE=src\IPasswrd.App\bin\Debug\net10.0\IPasswrd.App.exe"
+set "EXE=IPasswrd.App\bin\Debug\net10.0\IPasswrd.App.exe"
 if not exist "%EXE%" (
   echo Building IPasswrd, please wait...
-  dotnet build "src\IPasswrd.App\IPasswrd.App.csproj" -v minimal || goto :error
+  dotnet build "IPasswrd.App\IPasswrd.App.csproj" -v minimal || goto :error
 )
 start "" "%EXE%"
 exit /b 0

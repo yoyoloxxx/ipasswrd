@@ -1,6 +1,6 @@
 # IPasswrd для Android — как собрать и что уже умеет
 
-Приложение то же самое, что на iPhone: `src/IPasswrd.Mobile` (.NET MAUI 9), общее ядро
+Приложение то же самое, что на iPhone: `mobile/IPasswrd.Mobile` (.NET MAUI 9), общее ядро
 `IPasswrd.Core` и общий файл сейфа `vault.ipvault`. Android добавлен вторым таргетом —
 `net9.0-ios;net9.0-android`, весь XAML и вся логика экранов общие, различаются только
 пять платформенных сервисов.
@@ -55,8 +55,8 @@ Android спросит разрешение «Установка из этого
 ## Сборка локально (если поставим Android SDK)
 
 ```cmd
-dotnet build src\IPasswrd.Mobile\IPasswrd.Mobile.csproj -f net9.0-android -t:InstallAndroidDependencies -p:AcceptAndroidSDKLicenses=True
-dotnet build src\IPasswrd.Mobile\IPasswrd.Mobile.csproj -f net9.0-android -p:IpwAndroidOnly=true
+dotnet build mobile\IPasswrd.Mobile\IPasswrd.Mobile.csproj -f net9.0-android -t:InstallAndroidDependencies -p:AcceptAndroidSDKLicenses=True
+dotnet build mobile\IPasswrd.Mobile\IPasswrd.Mobile.csproj -f net9.0-android -p:IpwAndroidOnly=true
 ```
 
 ## ⚠ Два TFM и флаги сборки
@@ -72,7 +72,7 @@ dotnet build src\IPasswrd.Mobile\IPasswrd.Mobile.csproj -f net9.0-android -p:Ipw
 Проверка компиляции iOS на этом ПК теперь тоже с флагом:
 
 ```cmd
-dotnet build src\IPasswrd.Mobile\IPasswrd.Mobile.csproj -f net9.0-ios -p:IpwIosOnly=true
+dotnet build mobile\IPasswrd.Mobile\IPasswrd.Mobile.csproj -f net9.0-ios -p:IpwIosOnly=true
 ```
 
 ## Автозаполнение: как включить на телефоне

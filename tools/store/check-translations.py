@@ -9,7 +9,7 @@ Tr("...") без записи в EnMap не падает и не подчёрк�
 """
 import io, os, re, sys
 
-ROOT = r"D:\MyProjects\IPasswrd\src\IPasswrd.App"
+ROOT = r"D:\MyProjects\IPasswrd\windows\IPasswrd.App"
 
 # Ключи EnMap: ["текст"] = "text"
 KEY_RE = re.compile(r'\["((?:[^"\\]|\\.)*)"\]\s*=\s*"')

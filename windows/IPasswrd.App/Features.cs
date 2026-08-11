@@ -449,7 +449,7 @@ public partial class MainWindow
             Path.Combine(b, "extension"),
             Path.GetFullPath(Path.Combine(b, "..", "extension")),
             Path.GetFullPath(Path.Combine(b, "..", "..", "extension")),
-            @"D:\MyProjects\IPasswrd\extension",
+            @"D:\MyProjects\IPasswrd\windows\extension",
         })
         {
             if (File.Exists(Path.Combine(cand, "manifest.json"))) return cand;

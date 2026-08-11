@@ -5,7 +5,7 @@ Purpose: this Python module is an executable specification of the vault's
 cryptographic scheme. It uses the SAME primitives the C# core uses
 (Argon2id for key derivation, AES-256-GCM for authenticated encryption),
 so running its test suite green proves the construction is correct. The C#
-implementation in ../src/IPasswrd.Core mirrors this exact construction
+implementation in ../core/IPasswrd.Core mirrors this exact construction
 (same primitives, same KEK/DEK split, same AAD binding).
 
 Scheme (envelope encryption, KEK/DEK split):

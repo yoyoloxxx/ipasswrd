@@ -89,7 +89,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\IPasswrd.Core\IPasswrd.Core.csproj" />
+    <ProjectReference Include="..\..\core\IPasswrd.Core\IPasswrd.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
