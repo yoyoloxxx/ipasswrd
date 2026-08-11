@@ -15,7 +15,7 @@ $refresh = [Text.Encoding]::UTF8.GetString(
 
 # OAuth client shipped inside the app (PKCE desktop client - not a secret).
 $cid = '520945928883-8l31pocdehdrgagp3e8dh0sie6ocsjol.apps.googleusercontent.com'
-$csec = 'REMOVED-FROM-HISTORY'
+$csec = $env:IPASSWRD_GOOGLE_SECRET; if (-not $csec) { $csec = (Get-Content (Join-Path $PSScriptRoot '..\..\google_oauth.json') -Raw | ConvertFrom-Json).client_secret }
 
 $tok = Invoke-RestMethod -Method Post -Uri 'https://oauth2.googleapis.com/token' -Body @{
     client_id = $cid; client_secret = $csec; refresh_token = $refresh; grant_type = 'refresh_token'
