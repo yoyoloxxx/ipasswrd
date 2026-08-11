@@ -23,7 +23,7 @@ namespace IPasswrd.App;
 /// </summary>
 internal static class Updater
 {
-    private const string RepoUrl = "https://github.com/yoyololka/ipasswrd";
+    private const string RepoUrl = "https://github.com/yoyoloxxx/ipasswrd";
 
     private static UpdateManager? _mgr;
     private static bool _armed;

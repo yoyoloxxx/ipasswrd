@@ -57,9 +57,9 @@ IPasswrd не собирает, не передаёт и не продаёт в�
 
 ## Исходный код
 
-Проект открыт: https://github.com/yoyololka/ipasswrd — всё написанное выше можно
+Проект открыт: https://github.com/yoyoloxxx/ipasswrd — всё написанное выше можно
 проверить по коду.
 
 ## Связь
 
-Вопросы и сообщения об ошибках: https://github.com/yoyololka/ipasswrd/issues
+Вопросы и сообщения об ошибках: https://github.com/yoyoloxxx/ipasswrd/issues
