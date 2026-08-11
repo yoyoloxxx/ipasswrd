@@ -101,9 +101,11 @@ jobs:
           BUILD=$(grep -o '<ApplicationVersion>[^<]*' IPasswrd.Mobile.csproj | cut -d'>' -f2)
           SIZE=$(stat -f%z out/IPasswrd-unsigned.ipa)
           DATE=$(date -u +%Y-%m-%d)
-          TAG="mobile-v$VER"
+          # Скользящий ПРЕРЕЛИЗНЫЙ тег: ссылки вечные, а «latest» остаётся за Windows-релизом —
+          # иначе кнопка скачивания на сайте (releases/latest/download/...) начала бы отдавать 404.
+          TAG="mobile-latest"
           URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/IPasswrd-unsigned.ipa"
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "IPasswrd mobile $VER" --notes "Мобильная сборка $VER: IPA — для AltStore/SideStore (источник https://yoyoloxxx.github.io/ipasswrd/altstore.json), APK — для Android." || true
+          gh release create "$TAG" --prerelease --repo "$GITHUB_REPOSITORY" --title "IPasswrd mobile (текущая сборка)" --notes "Мобильная сборка: IPA — для AltStore/SideStore (источник https://yoyoloxxx.github.io/ipasswrd/altstore.json), APK — для Android. Версия — в altstore.json." || true
           gh release upload "$TAG" out/IPasswrd-unsigned.ipa --repo "$GITHUB_REPOSITORY" --clobber
           jq --arg v "$VER" --arg b "$BUILD" --arg d "$DATE" --argjson s "$SIZE" --arg u "$URL" \
             '.apps[0].versions[0] |= (.version=$v | .buildVersion=$b | .date=$d | .size=$s | .downloadURL=$u)' \
