@@ -3,7 +3,7 @@ using IPasswrd.Core;
 namespace IPasswrd.Mobile.Services;
 
 /// <summary>
-/// Индикатор стойкости мастер-пароля — та же шкала, что на ПК (SecurityAudit.Rate):
+/// Индикатор стойкости мастер-пароля — та же шкала, что на ПК (Auditor.Rate из ядра):
 /// длина и число классов символов. Не оценка «на глаз», а то самое правило, по которому
 /// аудит потом пометил бы пароль слабым.
 /// </summary>
@@ -13,7 +13,7 @@ public static class StrengthMeter
     {
         string pw = password ?? "";
         if (pw.Length == 0) { label.IsVisible = false; return; }
-        (string text, string hex) = SecurityAudit.Rate(pw) switch
+        (string text, string hex) = Auditor.Rate(pw) switch
         {
             Strength.Weak => ("Стойкость: слабый — такой подбирают быстро", "#E4574F"),
             Strength.Fair => ("Стойкость: средний — лучше длиннее и разнообразнее", "#E1B85E"),
