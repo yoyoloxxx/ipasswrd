@@ -36,6 +36,10 @@ public partial class MainWindow
     private readonly object _smsLock = new();
     private readonly List<(string Code, string Hint, DateTimeOffset At)> _smsInbox = new();
 
+    /// <summary>Whether GET /clip (PC clipboard → phone) is served. OFF by default: it is the only
+    /// route that could hand a just-copied PC password to a LAN peer. Loaded from settings.</summary>
+    private bool _lanClipDownEnabled;
+
     private static string SmsDir()
         => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "IPasswrd");
 
@@ -145,8 +149,10 @@ public partial class MainWindow
                 // уходит по Bluetooth в «Связь с телефоном» и всплывает здесь. Кладём текст
                 // в буфер Windows и стираем уведомление из центра, чтобы не мусорить.
                 // Работает везде, где телефон рядом: Wi-Fi/LTE не нужны вовсе.
-                string? clip = ExtractClipPayload(parts);
-                NotifLog($"[{app}] {string.Join(" | ", parts)}  => clip:{(clip is null ? "-" : clip.Length + " симв.")}");
+                string? clip = ClipSyncEnabled ? ExtractClipPayload(parts) : null;   // общий буфер выключен до после-релизной переработки
+                // Never write the notification text itself to disk — it is the SMS / clipboard content
+                // (i.e. potentially a code or a password). Log only shape and detected lengths.
+                NotifLog($"[{app}] уведомление: {parts.Length} эл.  => clip:{(clip is null ? "-" : clip.Length + " симв.")}");
                 if (clip is not null)
                 {
                     // Уведомление приходит по Bluetooth на пару секунд ПОЗЖЕ мгновенного POST —
@@ -247,6 +253,7 @@ public partial class MainWindow
 
     private void StartClipDropFolder()
     {
+        if (!ClipSyncEnabled) return;   // iCloud clip-inbox (общий буфер) выключен до после-релизной переработки
         try
         {
             string dir = ClipDropDir();
@@ -488,6 +495,35 @@ public partial class MainWindow
         return s.Trim();
     }
 
+    /// <summary>Is the remote peer on a private/local network (RFC1918 / link-local / loopback, or an
+    /// IPv6 loopback / link-local / unique-local)? Public, routed peers are refused — the relay is a
+    /// LAN convenience, never internet-facing.</summary>
+    private static bool IsLanClient(System.Net.EndPoint? ep)
+    {
+        if (ep is not IPEndPoint ipep) return false;
+        IPAddress a = ipep.Address;
+        if (IPAddress.IsLoopback(a)) return true;
+        if (a.IsIPv4MappedToIPv6) a = a.MapToIPv4();
+        if (a.AddressFamily == AddressFamily.InterNetwork)
+        {
+            byte[] b = a.GetAddressBytes();
+            if (b[0] == 10) return true;                                 // 10.0.0.0/8
+            if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return true;    // 172.16.0.0/12 (incl. hotspot 172.20.10.x)
+            if (b[0] == 192 && b[1] == 168) return true;                 // 192.168.0.0/16
+            if (b[0] == 169 && b[1] == 254) return true;                 // 169.254.0.0/16 link-local
+            if (b[0] == 127) return true;                                // loopback
+            return false;
+        }
+        if (a.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            if (a.IsIPv6LinkLocal) return true;                          // fe80::/10
+            byte[] b = a.GetAddressBytes();
+            if ((b[0] & 0xFE) == 0xFC) return true;                      // fc00::/7 unique-local
+            return false;
+        }
+        return false;
+    }
+
     /// <summary>Пробелы/переводы строк — в один пробел: в тексте уведомления переносов нет.</summary>
     private static string NormWs(string s) => Regex.Replace(s, @"\s+", " ").Trim();
 
@@ -515,7 +551,7 @@ public partial class MainWindow
         }
         bool same = last.Length > head.Length && last.StartsWith(head, StringComparison.Ordinal);
         if (!same && last.Length > 0)
-            NotifLog($"   (не обрезок: начало «{head[..Math.Min(24, head.Length)]}…» в буфере «{last[..Math.Min(24, last.Length)]}…»)");
+            NotifLog($"   (не обрезок: {head.Length} симв. против {last.Length} в буфере)");   // без содержимого
         return same;
     }
 
@@ -590,8 +626,11 @@ public partial class MainWindow
             sb.AppendLine("  (с заменой, без вопроса куда сохранять). Приложение заберёт и удалит.");
             sb.AppendLine();
             sb.AppendLine("ЗАПАСНОЙ СЕТЕВОЙ ПУТЬ (та же сеть, мгновенно):");
+            sb.AppendLine("  Токен можно слать заголовком X-IPW-Token (надёжнее — не попадает в логи URL)");
+            sb.AppendLine("  ЛИБО как ?t=… в адресе. Принимаются только адреса из локальной сети.");
             sb.AppendLine($"  Телефон → ПК: POST http://{Environment.MachineName.ToLowerInvariant()}.local:{SmsRelayPort}/clip?t={_smsToken}   (тело — текст буфера)");
             sb.AppendLine($"  ПК → телефон: GET  http://{Environment.MachineName.ToLowerInvariant()}.local:{SmsRelayPort}/clip?t={_smsToken}   (в ответе JSON, поле text)");
+            sb.AppendLine("     ⚠ ПК → телефон (GET /clip) по умолчанию ВЫКЛЮЧЕН — включается в Настройках.");
             File.WriteAllText(Path.Combine(SmsDir(), "sms-relay.txt"), sb.ToString(), new UTF8Encoding(false));
         }
         catch { /* информационный файл — не критично */ }
@@ -618,6 +657,11 @@ public partial class MainWindow
         try
         {
             using var _ = client;
+            // Only ever talk to a peer on a private/local network (home Wi-Fi, phone hotspot).
+            // If the machine ends up on a public IP or someone port-forwards this port, routed
+            // clients from the internet are refused outright — the relay is a LAN convenience,
+            // never an internet-facing service.
+            if (!IsLanClient(client.Client.RemoteEndPoint)) return;
             client.ReceiveTimeout = 10000;
             client.SendTimeout = 10000;
             var stream = client.GetStream();
@@ -667,20 +711,30 @@ public partial class MainWindow
             int q = target.IndexOf('?');
             string path = q < 0 ? target : target[..q];
             string query = q < 0 ? "" : target[(q + 1)..];
-            string token = "";
-            foreach (string pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+            // Token may arrive in the X-IPW-Token header (preferred — never lands in a URL log) or,
+            // for the limited Shortcuts client, in the ?t= query parameter.
+            string token = Header("X-IPW-Token");
+            if (token.Length == 0)
             {
-                int eq = pair.IndexOf('=');
-                if (eq > 0 && pair[..eq] == "t") token = Uri.UnescapeDataString(pair[(eq + 1)..]);
+                foreach (string pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    int eq = pair.IndexOf('=');
+                    if (eq > 0 && pair[..eq] == "t") token = Uri.UnescapeDataString(pair[(eq + 1)..]);
+                }
             }
 
             bool smsUp  = path == "/sms"  && method == "POST";
-            bool clipUp = path == "/clip" && method == "POST";
-            bool clipDn = path == "/clip" && method == "GET";
+            bool clipUp = ClipSyncEnabled && path == "/clip" && method == "POST";   // общий буфер выключен до после-релизной переработки
+            bool clipDn = ClipSyncEnabled && path == "/clip" && method == "GET";
             if (!smsUp && !clipUp && !clipDn) { await Send("404 Not Found", "{\"ok\":false}"); return; }
             if (_smsToken.Length == 0 || !CryptographicOperations.FixedTimeEquals(
                     Encoding.UTF8.GetBytes(token), Encoding.UTF8.GetBytes(_smsToken)))
             { await Send("403 Forbidden", "{\"ok\":false}"); return; }
+
+            // Handing the PC clipboard back over the LAN is the one route that can leak whatever was
+            // just copied on the PC (often a password). It stays OFF unless explicitly turned on.
+            if (clipDn && !_lanClipDownEnabled)
+            { await Send("403 Forbidden", "{\"ok\":false,\"error\":\"clip_down_disabled\"}"); return; }
 
             if (clipDn)
             {

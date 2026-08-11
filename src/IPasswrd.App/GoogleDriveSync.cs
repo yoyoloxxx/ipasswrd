@@ -38,12 +38,17 @@ public sealed class GoogleDriveSync
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(60) };
 
-    // Baked-in OAuth client for the shipped IPasswrd build (created ONCE in the author's Google
-    // Cloud project). With this present, end users just click "Sign in with Google" — no per-user
-    // setup. A desktop app's client secret is NOT confidential (PKCE protects the flow), so shipping
-    // it is expected. Source/dev builds can override via google_oauth.json next to the app.
+    // Baked-in OAuth *client id* for the shipped IPasswrd build (created ONCE in the author's Google
+    // Cloud project). A client id is not a secret — it is visible in every OAuth redirect — so it is
+    // fine to ship. With it present, end users just click "Sign in with Google", no per-user setup.
+    //
+    // The client SECRET is deliberately NOT in source. Even though a desktop client's secret is not
+    // truly confidential under PKCE, committing it to a public repo gets it auto-flagged (and can be
+    // auto-revoked) by Google's secret scanner, so it is loaded at runtime instead — from the
+    // IPASSWRD_GOOGLE_SECRET environment variable or a local, git-ignored google_oauth.json. If none
+    // is present the token exchange is attempted PKCE-only (no secret), which works for OAuth clients
+    // created as the "iOS"/"Android"/public type. See SECURITY.md → "Google OAuth".
     private const string EmbeddedClientId = "520945928883-8l31pocdehdrgagp3e8dh0sie6ocsjol.apps.googleusercontent.com";
-    private const string EmbeddedClientSecret = "REMOVED-FROM-HISTORY";
 
     private readonly string _dir;               // where token + config live (per-device, not synced)
     private string _clientId = "";
@@ -64,15 +69,14 @@ public sealed class GoogleDriveSync
         _folderName = Environment.GetEnvironmentVariable("IPASSWRD_GDRIVE_FOLDER") is { Length: > 0 } gf ? gf : "IPasswrd";
         _fileName = Environment.GetEnvironmentVariable("IPASSWRD_GDRIVE_FILE") is { Length: > 0 } gn ? gn : "vault.ipvault";
         (_clientId, _clientSecret) = LoadConfig(dataDir);
-        if (_clientId.Length == 0 || _clientSecret.Length == 0)   // no override file → use the shipped client
-        {
-            _clientId = EmbeddedClientId;
-            _clientSecret = EmbeddedClientSecret;
-        }
+        if (_clientId.Length == 0) _clientId = EmbeddedClientId;   // no override → shipped client id
+        if (_clientSecret.Length == 0)                              // secret is never baked into source
+            _clientSecret = Environment.GetEnvironmentVariable("IPASSWRD_GOOGLE_SECRET")?.Trim() ?? "";
         _refreshToken = LoadToken(dataDir);
     }
 
-    public bool IsConfigured => _clientId.Length > 0 && _clientSecret.Length > 0;
+    // A client id is enough to start the PKCE flow; the secret is optional (see the ctor).
+    public bool IsConfigured => _clientId.Length > 0;
     public bool IsSignedIn => !string.IsNullOrEmpty(_refreshToken);
 
     // ---- app OAuth-client config (Client ID / Secret the user pastes in from their Google Cloud project) ----
@@ -225,11 +229,11 @@ public sealed class GoogleDriveSync
         {
             ["code"] = code,
             ["client_id"] = _clientId,
-            ["client_secret"] = _clientSecret,
             ["redirect_uri"] = redirect,
             ["grant_type"] = "authorization_code",
-            ["code_verifier"] = verifier,
+            ["code_verifier"] = verifier,   // PKCE — this, not the secret, is what proves the client
         };
+        if (_clientSecret.Length > 0) form["client_secret"] = _clientSecret;
         using var tokResp = await Http.PostAsync(TokenEndpoint, new FormUrlEncodedContent(form), ct);
         string tokJson = await tokResp.Content.ReadAsStringAsync(ct);
         if (!tokResp.IsSuccessStatusCode) throw new InvalidOperationException("token_exchange_failed");
@@ -253,10 +257,10 @@ public sealed class GoogleDriveSync
         var form = new Dictionary<string, string>
         {
             ["client_id"] = _clientId,
-            ["client_secret"] = _clientSecret,
             ["refresh_token"] = _refreshToken!,
             ["grant_type"] = "refresh_token",
         };
+        if (_clientSecret.Length > 0) form["client_secret"] = _clientSecret;
         using var resp = await Http.PostAsync(TokenEndpoint, new FormUrlEncodedContent(form), ct);
         string json = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)

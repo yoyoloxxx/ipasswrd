@@ -31,4 +31,16 @@ tools/msix/sdk/
 # Ключ подписи Android — НИКОГДА не коммитить
 /_signing/
 
+# Секрет OAuth Google (локальный оверрайд рядом с приложением) — не коммитить.
+# Секрет больше не хранится в исходниках; кладётся сюда или в переменную IPASSWRD_GOOGLE_SECRET.
+google_oauth.json
+**/google_oauth.json
+
 /test-vault/
+
+# Local backups, scratch and third-party tools - not for the repo
+dist_backup_*/
+dist_prev_*/
+tools/platform-tools/
+_gitlock_trash/
+_trash/

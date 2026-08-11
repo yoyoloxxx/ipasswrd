@@ -1,9 +1,10 @@
 // IPasswrd WebAuthn provider (MAIN world).
 //
 // Overrides navigator.credentials.create/get so IPasswrd can act as a passkey
-// authenticator backed by the encrypted vault. All crypto runs here in WebCrypto;
-// only the private key (as a JWK) and metadata are stored — through the isolated
-// content script → native host → app — inside the vault.
+// authenticator backed by the encrypted vault. Key generation and signing run INSIDE THE APP
+// (BrowserBridge.BridgePasskeyCreate/BridgePasskeySign); this page shim only assembles the
+// WebAuthn structures around a public key + a signature it is handed. The private key is never
+// present in page memory. The rpId→origin rule is enforced in the isolated-world content.js.
 //
 // Non-breaking by design: if the vault is locked, the site excludes ES256, or there
 // is no matching IPasswrd passkey, we fall back to the browser's native authenticator
@@ -139,12 +140,26 @@
 
   const supportsEs256 = (params) => !params || !params.length || params.some((p) => p && p.alg === -7);
 
+  // A real authenticator/browser guarantees the relying party can only ask for its OWN rpId:
+  // it must equal the page's host or be a registrable parent domain of it. Without this check a
+  // page on evil.com could ask IPasswrd to list/sign with a passkey for bank.com. We enforce the
+  // same rule here before touching the vault; anything else falls back to the native authenticator.
+  function rpIdAllowed(rpId, host) {
+    rpId = String(rpId || "").toLowerCase().replace(/\.$/, "");
+    host = String(host || "").toLowerCase().replace(/\.$/, "");
+    if (!rpId || !host) return false;
+    if (rpId === host) return true;
+    // rpId must be a parent DOMAIN of host (has a dot, so never a bare eTLD like "com")
+    return rpId.indexOf(".") > 0 && host.endsWith("." + rpId);
+  }
+
   // ---------- create (registration) ----------
   async function ipwCreate(options) {
     const pk = options && options.publicKey;
     if (!pk || !supportsEs256(pk.pubKeyCredParams)) return origCreate(options);
 
     const rpId = (pk.rp && pk.rp.id) || location.hostname;
+    if (!rpIdAllowed(rpId, location.hostname)) return origCreate(options);   // spoofed rp.id → hands off to the browser
     const status = await request("passkeyList", { rpId });   // also tells us whether the vault is unlocked
     if (!status || !status.ok || !status.unlocked) return origCreate(options);   // locked → native fallback
 
@@ -155,27 +170,24 @@
     const clientData = { type: "webauthn.create", challenge: b64urlEnc(challenge), origin: location.origin, crossOrigin: false };
     const clientDataJSON = TE.encode(JSON.stringify(clientData));
 
-    const kp = await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
-    const jwk = await subtle.exportKey("jwk", kp.privateKey);
-    const pub = await subtle.exportKey("jwk", kp.publicKey);
-    const x = b64urlDec(pub.x), y = b64urlDec(pub.y);
-    const spki = new Uint8Array(await subtle.exportKey("spki", kp.publicKey));
+    // The keypair is generated INSIDE THE APP; the private key never exists in this page's memory.
+    // We only receive the credential id and the public key to build the attestation object.
+    const made = await request("passkeyCreate", {
+      rpId,
+      userHandle: b64urlEnc(userId),
+      userName: user.name || user.displayName || "",
+    });
+    if (!made || !made.ok || !made.credId || !made.x || !made.y) return origCreate(options);
 
-    const credId = getRandom(new Uint8Array(16));
+    const credId = b64urlDec(made.credId);
+    const x = b64urlDec(made.x), y = b64urlDec(made.y);
+    const spki = made.spki ? b64urlDec(made.spki) : new Uint8Array(0);
+
     const rpIdHash = await sha256(rpId);
     const aaguid = new Uint8Array(16);   // zeroes — anonymous authenticator
     const attData = cat(aaguid, u16(credId.length), credId, coseEc2(x, y));
     const authData = cat(rpIdHash, new Uint8Array([0x45]), u32(0), attData);   // flags UP|UV|AT
     const attestationObject = attObjNone(authData);
-
-    const save = await request("passkeySave", {
-      rpId,
-      credId: b64urlEnc(credId),
-      userHandle: b64urlEnc(userId),
-      userName: user.name || user.displayName || "",
-      privJwk: JSON.stringify(jwk),
-    });
-    if (!save || !save.ok) return origCreate(options);   // couldn't persist → don't claim success
 
     return {
       id: b64urlEnc(credId),
@@ -201,6 +213,7 @@
     if (options.mediation === "conditional") return origGet(options);   // autofill UI → let the browser drive
 
     const rpId = pk.rpId || location.hostname;
+    if (!rpIdAllowed(rpId, location.hostname)) return origGet(options);   // spoofed rpId → hands off to the browser
     const list = await request("passkeyList", { rpId });
     if (!list || !list.ok || !list.unlocked) return origGet(options);   // locked → native fallback
 
@@ -223,9 +236,11 @@
     const authData = cat(rpIdHash, new Uint8Array([0x05]), u32(0));   // flags UP|UV
     const clientHash = await sha256(clientDataJSON);
 
-    const key = await subtle.importKey("jwk", JSON.parse(it.privJwk), { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
-    const raw = new Uint8Array(await subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, cat(authData, clientHash)));
-    const signature = rawSigToDer(raw);
+    // Signing happens INSIDE THE APP — the private key never leaves the vault process. We send the
+    // exact bytes to sign (authData || clientDataHash) and get back a raw r||s signature.
+    const signed = await request("passkeySign", { rpId, credId: it.credId, data: b64urlEnc(cat(authData, clientHash)) });
+    if (!signed || !signed.ok || !signed.signature) return origGet(options);
+    const signature = rawSigToDer(b64urlDec(signed.signature));
     const userHandle = it.userHandle ? b64urlDec(it.userHandle) : null;
 
     return {

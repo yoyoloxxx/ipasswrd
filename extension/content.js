@@ -32,15 +32,37 @@
   });
 
   // ---------- WebAuthn relay (MAIN-world inject.js ⇄ vault) ----------
-  // inject.js does all the crypto; we only shuttle passkey list/save between it and the app.
+  // Crypto now lives in the app; we shuttle passkey list/create/sign between the page and the vault.
+  //
+  // TRUST BOUNDARY: the rpId→origin rule is enforced HERE, in the isolated world, because a hostile
+  // page can post an "ipw->cs" message DIRECTLY (bypassing inject.js's check, which runs in the
+  // page-tamperable MAIN world). Without this, evil.com could ask the vault for bank.com's passkey.
+  function rpIdAllowed(rpId, host) {
+    rpId = String(rpId || "").toLowerCase().replace(/\.$/, "");
+    host = String(host || "").toLowerCase().replace(/\.$/, "");
+    if (!rpId || !host) return false;
+    if (rpId === host) return true;
+    // Registrable parent domain only, and never a bare public suffix ("com", "co.uk") — matches the
+    // WebAuthn registrable-domain-suffix rule so a page cannot claim an eTLD-wide rpId.
+    return rpId.indexOf(".") > 0 && host.endsWith("." + rpId) && !TWO_LEVEL.has(rpId);
+  }
   window.addEventListener("message", async (e) => {
     const d = e.data;
     if (e.source !== window || !d || d.dir !== "ipw->cs") return;
     let res;
     try {
-      if (d.cmd === "passkeyList") res = await send({ cmd: "passkeyList", rpId: (d.data && d.data.rpId) || "" });
-      else if (d.cmd === "passkeySave") res = await send(Object.assign({ cmd: "passkeySave" }, d.data || {}));
-      else res = { ok: false, error: "unknown_cmd" };
+      const rpId = (d.data && d.data.rpId) || "";
+      if (!rpIdAllowed(rpId, location.hostname)) {
+        res = { ok: false, error: "rpId_forbidden" };            // cross-origin request → refused at the boundary
+      } else if (d.cmd === "passkeyList") {
+        res = await send({ cmd: "passkeyList", rpId });
+      } else if (d.cmd === "passkeyCreate") {
+        res = await send({ cmd: "passkeyCreate", rpId, userHandle: (d.data && d.data.userHandle) || "", userName: (d.data && d.data.userName) || "" });
+      } else if (d.cmd === "passkeySign") {
+        res = await send({ cmd: "passkeySign", rpId, credId: (d.data && d.data.credId) || "", data: (d.data && d.data.data) || "" });
+      } else {
+        res = { ok: false, error: "unknown_cmd" };
+      }
     } catch (err) { res = { ok: false, error: String(err) }; }
     window.postMessage({ dir: "ipw->page", id: d.id, res }, location.origin);
   });
@@ -107,7 +129,9 @@
     // и mail, а не по «почт»: «Почтовый адрес» — это как раз куда везти.
     if ((ac.includes("street-address") || ac.includes("address-line") ||
          /улиц|(^|[^а-яё])адрес|street|address|\baddr\b|addr[1-2]?\b/.test(t)) &&
-        !/электронн|e[-\s]?mail|\bmail\b/.test(t)) return "id-street";
+        // «адрес эл. почты» и «телефон или адрес…» — это поле ВХОДА, а не улица. Исключаем
+        // электронную почту (в т.ч. сокращение «эл. почт») и телефон, оставляя «почтовый адрес».
+        !/электронн|эл\.?\s?почт|e[-\s]?mail|\bmail\b|телефон|\bphone\b|\btel\b/.test(t)) return "id-street";
 
     if (type === "email" || type === "tel" || ac.includes("username") || ac.includes("email") ||
         /\b(user(name)?|login|e[-\s]?mail|phone|tel|account|identifier)\b/.test(t) ||

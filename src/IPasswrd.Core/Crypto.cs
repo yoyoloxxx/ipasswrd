@@ -12,6 +12,31 @@ public readonly record struct KdfConfig(int MemoryKiB, int Iterations, int Paral
 
     /// <summary>Deliberately weak — unit tests only, never for real vaults.</summary>
     public static readonly KdfConfig Fast = new(8192, 1, 1);
+
+    // Ceiling so a tampered vault header can't ask Argon2 for absurd memory/time and wedge the app
+    // on unlock (resource-exhaustion DoS) before any authentication happens.
+    private const int MaxMemoryKiB = 1 << 21;   // 2 GiB
+    private const int MaxIterations = 40;
+    private const int MaxParallelism = 16;
+
+    /// <summary>
+    /// Cap cost read from an untrusted vault header to a sane ceiling, so a bloated header cannot
+    /// exhaust memory/CPU on unlock (DoS). Does NOT raise a legitimately-lower cost, so it never
+    /// changes the key derived for an existing vault — safe on every load / unlock / merge path.
+    /// </summary>
+    public KdfConfig Capped() => new(
+        Math.Clamp(MemoryKiB <= 0 ? Default.MemoryKiB : MemoryKiB, 1, MaxMemoryKiB),
+        Math.Clamp(Iterations <= 0 ? Default.Iterations : Iterations, 1, MaxIterations),
+        Math.Clamp(Parallelism <= 0 ? Default.Parallelism : Parallelism, 1, MaxParallelism));
+
+    /// <summary>
+    /// Floor to the strong baseline AND cap. Used only when a NEW wrap is created (recovery reset),
+    /// so a tampered/downgraded header can never weaken the KDF that will protect the reset vault.
+    /// </summary>
+    public KdfConfig Sanitized() => new(
+        Math.Clamp(MemoryKiB <= 0 ? Default.MemoryKiB : MemoryKiB, Default.MemoryKiB, MaxMemoryKiB),
+        Math.Clamp(Iterations <= 0 ? Default.Iterations : Iterations, Default.Iterations, MaxIterations),
+        Math.Clamp(Parallelism <= 0 ? Default.Parallelism : Parallelism, Default.Parallelism, MaxParallelism));
 }
 
 /// <summary>

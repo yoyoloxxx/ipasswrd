@@ -18,7 +18,7 @@ while (true)
     string req = Encoding.UTF8.GetString(msg);
     Log("req cmd=" + CmdOf(req));
     string resp = Forward(req);
-    Log("resp=" + Head(resp));
+    Log("resp " + StatusOf(resp));   // ok / error only — never the response body (it carries secrets)
     WriteMessage(stdout, Encoding.UTF8.GetBytes(resp));
 }
 
@@ -37,7 +37,18 @@ static string CmdOf(string json)
     catch { return "unparsed"; }
 }
 
-static string Head(string s) => s.Length <= 60 ? s : s[..60];
+// Coarse status of a response — "ok" or "err:<code>" — so the diagnostic log never carries a
+// response body (which for a credentials/passkey reply contains secrets).
+static string StatusOf(string json)
+{
+    try
+    {
+        using var d = System.Text.Json.JsonDocument.Parse(json);
+        if (d.RootElement.TryGetProperty("ok", out var o) && o.ValueKind == System.Text.Json.JsonValueKind.True) return "ok";
+        return d.RootElement.TryGetProperty("error", out var e) ? "err:" + (e.GetString() ?? "?") : "err";
+    }
+    catch { return "unparsed"; }
+}
 
 static byte[]? ReadMessage(Stream s)
 {

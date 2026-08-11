@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Threading;
 using System.IO.Pipes;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -77,6 +78,7 @@ public partial class MainWindow
 
     private async Task<string> HandleBridgeRequest(string json)
     {
+        if (!_extEverConnected) { _extEverConnected = true; try { SaveSettings(); } catch { } try { Avalonia.Threading.Dispatcher.UIThread.Post(RefreshOnboardAfterExtension); } catch { } }   // onboarding: the extension is live — tick its step immediately
         try
         {
             using var doc = JsonDocument.Parse(json);
@@ -110,11 +112,15 @@ public partial class MainWindow
                     string rpId = Get("rpId");
                     return await OnUi(() => BridgePasskeyList(rpId));
                 }
-                case "passkeySave":
+                case "passkeyCreate":
                 {
-                    string rpId = Get("rpId"), credId = Get("credId"), userHandle = Get("userHandle"),
-                           userName = Get("userName"), privJwk = Get("privJwk");
-                    return await OnUi(() => BridgePasskeySave(rpId, credId, userHandle, userName, privJwk));
+                    string rpId = Get("rpId"), userHandle = Get("userHandle"), userName = Get("userName");
+                    return await OnUi(() => BridgePasskeyCreate(rpId, userHandle, userName));
+                }
+                case "passkeySign":
+                {
+                    string rpId = Get("rpId"), credId = Get("credId"), data = Get("data");
+                    return await OnUi(() => BridgePasskeySign(rpId, credId, data));
                 }
                 case "focus":
                     return await OnUi(() => { BridgeFocus(); return Resp(new { ok = true }); });
@@ -336,8 +342,8 @@ public partial class MainWindow
         catch (Exception ex) { return Resp(new { ok = false, error = ex.GetType().Name }); }
 
         ResetLockout();
-        SaveQuickUnlock();
         EnterVault();
+        _ = ArmQuickUnlockAsync();   // arm quick unlock (may ask for one Hello gesture); never blocks
         return Resp(new { ok = true });
     }
 
@@ -407,37 +413,91 @@ public partial class MainWindow
                 credId = x.Item.Fields.GetValueOrDefault("credId", ""),
                 userHandle = x.Item.Fields.GetValueOrDefault("userHandle", ""),
                 userName = x.Item.Fields.GetValueOrDefault("username", ""),
-                privJwk = x.Item.Fields.GetValueOrDefault("privJwk", ""),
+                // privJwk is deliberately NOT returned: the private key never leaves this process.
+                // Signing happens in BridgePasskeySign; returning the key here would expose it to page JS.
             })
             .ToList();
         return Resp(new { ok = true, unlocked = true, items });
     }
 
-    private string BridgePasskeySave(string rpId, string credId, string userHandle, string userName, string privJwk)
+    // Registration: the APP generates the P-256 keypair and stores the private key. Only the
+    // credential id and the PUBLIC key ever leave this process — the private key is never handed to
+    // page JS, so a page (or XSS on it) cannot exfiltrate it. Replaces the old page-provides-privJwk path.
+    private string BridgePasskeyCreate(string rpId, string userHandle, string userName)
     {
         if (_vault is null) return Resp(new { ok = false, error = "locked" });
-        if (string.IsNullOrWhiteSpace(rpId) || string.IsNullOrWhiteSpace(credId) || string.IsNullOrWhiteSpace(privJwk))
-            return Resp(new { ok = false, error = "bad_request" });
+        if (string.IsNullOrWhiteSpace(rpId)) return Resp(new { ok = false, error = "bad_request" });
 
-        var item = new VaultItem
+        byte[] credId = RandomNumberGenerator.GetBytes(16);
+        byte[] spki;
+        string x, y, jwk;
+        using (var ec = ECDsa.Create(ECCurve.NamedCurves.nistP256))
         {
-            Type = "passkey",
-            Title = rpId,                                 // name after the site only; the login lives in "username" (shown as the subtitle)
-        };
+            var p = ec.ExportParameters(includePrivateParameters: true);
+            x = B64Url(p.Q.X!); y = B64Url(p.Q.Y!);
+            jwk = JsonSerializer.Serialize(new { kty = "EC", crv = "P-256", d = B64Url(p.D!), x, y });
+            spki = ec.ExportSubjectPublicKeyInfo();
+        }
+
+        var item = new VaultItem { Type = "passkey", Title = rpId };
         item.Fields["rpId"] = rpId;
         item.Fields["url"] = rpId;                       // detail view shows this as "Сайт"
         if (!string.IsNullOrWhiteSpace(userName)) item.Fields["username"] = userName;
         item.Fields["device"] = "Ключ доступа";
-        item.Fields["credId"] = credId;
+        item.Fields["credId"] = B64Url(credId);
         item.Fields["userHandle"] = userHandle ?? "";
         item.Fields["alg"] = "-7";                       // ES256
-        item.Fields["privJwk"] = privJwk;
+        item.Fields["privJwk"] = jwk;
         item.Fields["created"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
 
         string id = _vault.Add(item);
         Save();
         if (VaultScreen.IsVisible) { LoadEntries(selectFirst: false); RenderSidebar(); }
-        return Resp(new { ok = true, id });
+        return Resp(new { ok = true, id, credId = B64Url(credId), x, y, spki = B64Url(spki) });
+    }
+
+    // Authentication: sign authData||clientDataHash with the stored P-256 private key, in-process.
+    // The extension sends only the bytes to sign (b64url) and receives a raw r||s signature — the
+    // key stays in the vault process. Works for keys created here and for legacy WebCrypto JWKs.
+    private string BridgePasskeySign(string rpId, string credId, string dataB64Url)
+    {
+        if (_vault is null) return Resp(new { ok = false, error = "locked" });
+        if (string.IsNullOrWhiteSpace(rpId) || string.IsNullOrWhiteSpace(credId) || string.IsNullOrWhiteSpace(dataB64Url))
+            return Resp(new { ok = false, error = "bad_request" });
+
+        var rec = _vault.Items().FirstOrDefault(z => z.Item.Type == "passkey"
+            && string.Equals(z.Item.Fields.GetValueOrDefault("rpId", ""), rpId, StringComparison.OrdinalIgnoreCase)
+            && z.Item.Fields.GetValueOrDefault("credId", "") == credId
+            && !string.IsNullOrEmpty(z.Item.Fields.GetValueOrDefault("privJwk", "")));
+        if (rec is null) return Resp(new { ok = false, error = "no_credential" });
+
+        try
+        {
+            using var jwk = JsonDocument.Parse(rec.Item.Fields["privJwk"]);
+            var root = jwk.RootElement;
+            var ecp = new ECParameters
+            {
+                Curve = ECCurve.NamedCurves.nistP256,
+                D = B64UrlDec(root.GetProperty("d").GetString() ?? ""),
+                Q = new ECPoint
+                {
+                    X = B64UrlDec(root.GetProperty("x").GetString() ?? ""),
+                    Y = B64UrlDec(root.GetProperty("y").GetString() ?? ""),
+                },
+            };
+            using var ec = ECDsa.Create(ecp);
+            byte[] sig = ec.SignData(B64UrlDec(dataB64Url), HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+            return Resp(new { ok = true, signature = B64Url(sig) });
+        }
+        catch { return Resp(new { ok = false, error = "sign_failed" }); }
+    }
+
+    private static string B64Url(byte[] b) => Convert.ToBase64String(b).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    private static byte[] B64UrlDec(string s)
+    {
+        s = s.Replace('-', '+').Replace('_', '/');
+        switch (s.Length % 4) { case 2: s += "=="; break; case 3: s += "="; break; }
+        return Convert.FromBase64String(s);
     }
 
     private void BridgeFocus()
@@ -451,6 +511,9 @@ public partial class MainWindow
         // browser. Repeat the foreground pass shortly after so it reliably comes out on top.
         DispatcherTimer.RunOnce(ForceForeground, TimeSpan.FromMilliseconds(250));
         DispatcherTimer.RunOnce(ForceForeground, TimeSpan.FromMilliseconds(700));
+        // Surfaced by the user (via the extension) → offer Hello unlock if the vault is locked.
+        if (_vault is null && !Creating && !IsLocked && HasHelloCache())
+            _ = TryQuickUnlockHelloAsync();
     }
 
     private void ForceForeground()
@@ -478,6 +541,7 @@ public partial class MainWindow
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr h);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr h, int n);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);

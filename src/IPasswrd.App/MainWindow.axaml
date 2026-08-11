@@ -36,7 +36,11 @@
                      FontFamily="Cascadia Code, Consolas, monospace" KeyDown="OnMasterKeyDown"/>
             <TextBox x:Name="MasterBox2" PasswordChar="●" Watermark="Повторите пароль"
                      FontFamily="Cascadia Code, Consolas, monospace" IsVisible="False" KeyDown="OnMasterKeyDown"/>
+            <!-- живая шкала надёжности: только при создании сейфа, ничего не блокирует -->
+            <ContentControl x:Name="MasterMeter" IsVisible="False"/>
             <TextBlock x:Name="UnlockError" Foreground="{DynamicResource IpBad}" TextWrapping="Wrap" IsVisible="False"/>
+            <Button x:Name="HelloButton" Content="Войти через Windows Hello" Click="OnHelloUnlockClick" IsVisible="False"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="10"/>
             <Button x:Name="UnlockButton" Classes="primary" Content="Открыть" Click="OnUnlockClick"
                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="10"/>
             <Button x:Name="ForgotButton" Content="Забыли мастер-пароль?" Click="OnForgotClick" IsVisible="False"
@@ -56,6 +60,7 @@
                        FontFamily="Cascadia Code, Consolas, monospace" KeyDown="OnRecoveryKeyDown"/>
               <TextBox x:Name="RecoveryPw1" PasswordChar="●" Watermark="Новый мастер-пароль (минимум 8)"
                        FontFamily="Cascadia Code, Consolas, monospace" KeyDown="OnRecoveryKeyDown"/>
+              <ContentControl x:Name="RecoveryMeter" IsVisible="False"/>
               <TextBox x:Name="RecoveryPw2" PasswordChar="●" Watermark="Повторите новый пароль"
                        FontFamily="Cascadia Code, Consolas, monospace" KeyDown="OnRecoveryKeyDown"/>
               <Button x:Name="RecoverButton" Classes="primary" Content="Восстановить доступ" Click="OnRecoverClick"
@@ -103,7 +108,13 @@
       </Border>
 
       <!-- ===== vault ===== -->
-      <Grid x:Name="VaultScreen" IsVisible="False" ColumnDefinitions="232,332,*">
+      <Grid x:Name="VaultScreen" IsVisible="False" RowDefinitions="Auto,*">
+
+        <!-- onboarding progress strip — content built in code (RefreshOnboardStrip); hidden once setup is complete -->
+        <Border x:Name="OnboardStrip" Grid.Row="0" IsVisible="False"
+                Background="{DynamicResource IpBg}" BorderBrush="{DynamicResource IpHair}" BorderThickness="0,0,0,1"/>
+
+        <Grid Grid.Row="1" ColumnDefinitions="232,332,*">
 
         <!-- sidebar -->
         <DockPanel Grid.Column="0" Background="{DynamicResource IpBgDeep}">
@@ -203,6 +214,7 @@
                       HorizontalScrollBarVisibility="Disabled" IsVisible="False">
           <StackPanel x:Name="ToolHost" Margin="34,28" MaxWidth="720" HorizontalAlignment="Stretch"/>
         </ScrollViewer>
+        </Grid>
       </Grid>
 
       <!-- ===== editor ===== -->
@@ -217,6 +229,13 @@
           <StackPanel x:Name="EditorForm" MaxWidth="560" Margin="24" Spacing="12"/>
         </ScrollViewer>
       </Grid>
+
+      <!-- ===== welcome / first-run onboarding (full-screen; sits above everything) ===== -->
+      <Border x:Name="WelcomeScreen" IsVisible="False" Background="{DynamicResource IpBg}">
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+          <StackPanel x:Name="WelcomeHost" MaxWidth="560" Margin="24,44" HorizontalAlignment="Center"/>
+        </ScrollViewer>
+      </Border>
 
     </Grid>
   </Grid>
