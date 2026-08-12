@@ -24,7 +24,10 @@ internal static class AutofillVaultWriter
             if (e.Item.Type != "account") continue;
             string itemDomain = Dedup.RegistrableDomain(e.Item.Fields.GetValueOrDefault("url", ""));
             string itemUser = e.Item.Fields.GetValueOrDefault("username", "");
-            bool sameSite = reg.Length > 0 && string.Equals(itemDomain, reg, StringComparison.OrdinalIgnoreCase);
+            string itemPkg = e.Item.Fields.GetValueOrDefault("androidPackage", "");
+            bool sameSite = reg.Length > 0
+                ? string.Equals(itemDomain, reg, StringComparison.OrdinalIgnoreCase)
+                : packageName.Length > 0 && string.Equals(itemPkg, packageName, StringComparison.OrdinalIgnoreCase);
             bool sameUser = username.Length == 0 || string.Equals(itemUser, username, StringComparison.OrdinalIgnoreCase);
             if (sameSite && sameUser) { existing = e; break; }
         }
@@ -45,6 +48,7 @@ internal static class AutofillVaultWriter
                 Title = TitleFor(reg, packageName),
             };
             if (url.Length > 0) item.Fields["url"] = url;
+            else if (packageName.Length > 0) item.Fields["androidPackage"] = packageName;   // native-app association, for exact-match autofill
             if (username.Length > 0) item.Fields["username"] = username;
             item.Fields["password"] = password;
             vault.Add(item);

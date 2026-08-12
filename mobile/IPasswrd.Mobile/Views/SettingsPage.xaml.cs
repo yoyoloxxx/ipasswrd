@@ -140,7 +140,7 @@ public partial class SettingsPage : ContentPage
             {
                 try
                 {
-                    v.MergeFrom(bytes);
+                    Svc.State.MergeExternal(bytes);
                     await Svc.State.SaveAsync();
                 }
                 catch (IPasswrd.Core.VaultIntegrityException)

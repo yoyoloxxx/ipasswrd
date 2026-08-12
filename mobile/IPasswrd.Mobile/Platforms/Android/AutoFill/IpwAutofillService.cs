@@ -72,7 +72,10 @@ public class IpwAutofillService : AutofillService
 
         if (vault is not null)
         {
-            foreach (AutofillCandidate c in AutofillMatcher.Matches(vault, fields.WebDomain, fields.PackageName))
+            bool isBrowser = AutofillMatcher.IsBrowser(fields.PackageName);
+            string? web = isBrowser ? fields.WebDomain : null;    // trust a reported web domain only from a real browser
+            string? pkg = isBrowser ? null : fields.PackageName;  // otherwise match the native app by its exact package
+            foreach (AutofillCandidate c in AutofillMatcher.Matches(vault, web, pkg))
             {
                 if (added >= MaxInlineDatasets) break;
                 Dataset? ds = BuildDataset(vault, fields, c);
@@ -178,7 +181,7 @@ public class IpwAutofillService : AutofillService
 
             if (pass.Length == 0) { callback.OnSuccess(); return; }
 
-            string domain = fields.WebDomain ?? "";
+            string domain = AutofillMatcher.IsBrowser(fields.PackageName) ? (fields.WebDomain ?? "") : "";
             string pkg = fields.PackageName ?? "";
 
             if (Svc.State.IsUnlocked)

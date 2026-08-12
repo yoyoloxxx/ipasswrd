@@ -180,7 +180,7 @@ public partial class UnlockPage : ContentPage
                 "Я записал(а)", null, "Скопировать");
             if (action == "Скопировать")
             {
-                await Clipboard.Default.SetTextAsync(pretty);
+                await IPasswrd.Mobile.Services.SecureClipboard.CopyAsync(pretty);
                 continue;
             }
             return;
