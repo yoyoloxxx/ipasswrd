@@ -150,7 +150,7 @@ public partial class MainWindow
             }
             string json = Encoding.UTF8.GetString(body, 0, got);
 
-            string resp = await HandleBridgeRequest(json);  // exact same dispatcher as the pipe
+            string resp = await HandleBridgeRequest(json, viaHttp: true);  // same dispatcher, but HTTP callers must be paired for secret commands
             await Send("200 OK", resp, cors: true);
         }
         catch { /* client went away / malformed — drop quietly */ }

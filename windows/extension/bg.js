@@ -12,6 +12,12 @@ const HTTP_BRIDGE = "http://127.0.0.1:38799/";
 
 let transport = "native"; // "native" | "http" — sticky until it fails
 
+// Per-session bearer for the HTTP fallback. The trusted native (pipe) path hands it to us in
+// `status`; on the HTTP-only path we get it via a one-time `pair` the user approves in the app.
+let bridgeToken = null;
+try { chrome.storage.session.get("ipwToken").then((o) => { if (o && o.ipwToken) bridgeToken = o.ipwToken; }).catch(() => {}); } catch (e) {}
+function rememberToken(resp) { if (resp && resp.token) { bridgeToken = resp.token; try { chrome.storage.session.set({ ipwToken: bridgeToken }); } catch (e) {} } }
+
 function callViaHost(msg) {
   return new Promise((resolve) => {
     try {
@@ -19,6 +25,7 @@ function callViaHost(msg) {
         if (chrome.runtime.lastError) {
           resolve({ ok: false, error: "host_unreachable", detail: chrome.runtime.lastError.message });
         } else {
+          rememberToken(resp);
           resolve(resp || { ok: false, error: "empty_response" });
         }
       });
@@ -35,26 +42,37 @@ async function callViaHttp(msg) {
     const r = await fetch(HTTP_BRIDGE, {
       method: "POST",
       headers: { "content-type": "text/plain" },   // simple request — no preflight
-      body: JSON.stringify(msg),
+      body: JSON.stringify(bridgeToken ? { ...msg, token: bridgeToken } : msg),
       signal: ctl.signal,
     });
     clearTimeout(t);
     if (!r.ok) return { ok: false, error: "host_unreachable", detail: "http_" + r.status };
-    return await r.json();
+    const j = await r.json();
+    rememberToken(j);
+    return j;
   } catch (e) {
     return { ok: false, error: "host_unreachable", detail: "http_fail" };
   }
 }
 
+async function httpCall(msg) {
+  let h = await callViaHttp(msg);
+  if (h && h.error === "unpaired") {                  // secret command over HTTP without a token yet
+    const pr = await callViaHttp({ cmd: "pair" });    // prompts the app once; returns a token on allow
+    if (pr && pr.ok && bridgeToken) h = await callViaHttp(msg);   // retry once, now paired
+  }
+  return h;
+}
+
 async function callNative(msg) {
   if (transport === "http") {
-    const h = await callViaHttp(msg);
+    const h = await httpCall(msg);
     if (!h || h.error === "host_unreachable") transport = "native"; // app restarted? retry the normal route
     else return h;
   }
   const n = await callViaHost(msg);
   if (!n || n.error !== "host_unreachable") return n;
-  const h2 = await callViaHttp(msg);                 // native host blocked → loopback fallback
+  const h2 = await httpCall(msg);                    // native host blocked → loopback fallback
   if (h2 && h2.error !== "host_unreachable") { transport = "http"; return h2; }
   n.detail = (n.detail || "") + " | " + (h2 && h2.detail || "http?");   // both down — show both reasons
   return n;
