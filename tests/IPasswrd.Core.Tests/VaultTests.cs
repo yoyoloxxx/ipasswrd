@@ -61,6 +61,7 @@ public class VaultTests
         {
             var rec = root["records"]!.AsArray()[0]!.AsObject();
             rec["ciphertext"] = FlipByte((string)rec["ciphertext"]!, 5);
+            root.Remove("mac");   // legacy (unauthenticated) file: detection falls to the per-record AES-GCM tag
         });
 
         var v2 = Vault.Unlock(tampered, Pw);
@@ -115,6 +116,7 @@ public class VaultTests
             string n0 = (string)r0["nonce"]!, n1 = (string)r1["nonce"]!;
             r0["ciphertext"] = c1; r1["ciphertext"] = c0;   // swap payloads, keep ids
             r0["nonce"] = n1; r1["nonce"] = n0;
+            root.Remove("mac");   // legacy file: the AAD-to-id binding is what must catch the swap
         });
 
         var v2 = Vault.Unlock(swapped, Pw);

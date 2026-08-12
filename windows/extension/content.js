@@ -30,53 +30,21 @@
   // collapse to one "site" and IPasswrd could hand one tenant's saved password to another.
   // Longest matching suffix + one more label = the registrable domain. Kept in sync with
   // IPasswrd.Core.Dedup.PublicSuffixes; for full coverage swap in the official Public Suffix List.
-  const PUBLIC_SUFFIXES = new Set([
-    "co.uk","org.uk","gov.uk","ac.uk","me.uk","ltd.uk","plc.uk","net.uk","sch.uk","nhs.uk","police.uk","com.au",
-    "net.au","org.au","edu.au","gov.au","id.au","asn.au","co.jp","or.jp","ne.jp","ac.jp","go.jp","gr.jp",
-    "ed.jp","lg.jp","ad.jp","co.kr","or.kr","ne.kr","re.kr","pe.kr","go.kr","ac.kr","hs.kr","ms.kr","com.br",
-    "net.br","org.br","gov.br","edu.br","art.br","blog.br","com.cn","net.cn","org.cn","gov.cn","edu.cn","ac.cn",
-    "com.tw","net.tw","org.tw","idv.tw","gov.tw","edu.tw","com.hk","net.hk","org.hk","edu.hk","gov.hk","idv.hk",
-    "com.sg","net.sg","org.sg","edu.sg","gov.sg","per.sg","com.my","net.my","org.my","gov.my","edu.my","co.in",
-    "net.in","org.in","gen.in","firm.in","ind.in","gov.in","ac.in","edu.in","com.tr","net.tr","org.tr","gov.tr",
-    "edu.tr","bel.tr","com.ua","net.ua","org.ua","in.ua","kiev.ua","com.ru","net.ru","org.ru","msk.ru","spb.ru",
-    "com.mx","com.ar","com.co","net.co","nom.co","com.pe","com.ve","com.ec","com.uy","com.py","com.bo","com.cl",
-    "co.il","org.il","net.il","ac.il","gov.il","muni.il","co.za","org.za","net.za","web.za","gov.za","ac.za",
-    "co.nz","net.nz","org.nz","govt.nz","ac.nz","geek.nz","school.nz","co.th","in.th","ac.th","go.th","or.th",
-    "net.th","com.vn","net.vn","org.vn","gov.vn","edu.vn","com.ph","net.ph","org.ph","gov.ph","com.pl","net.pl",
-    "org.pl","gov.pl","waw.pl","edu.pl","com.pt","com.es","org.es","com.eg","com.sa","com.ng","com.gh","com.kw",
-    "com.qa","com.bh","com.pk","com.bd","co.id","or.id","web.id","ac.id","go.id","my.id","biz.id","co.ke",
-    "co.tz","co.ug","co.zw","co.mz","github.io","githubusercontent.com","gitlab.io","pages.dev","workers.dev",
-    "r2.dev","web.app","firebaseapp.com","appspot.com","cloudfunctions.net","run.app","vercel.app","now.sh",
-    "netlify.app","netlify.com","onrender.com","render.com","herokuapp.com","herokudns.com","fly.dev",
-    "railway.app","up.railway.app","azurewebsites.net","azurestaticapps.net","cloudapp.net",
-    "cloudapp.azure.com","trafficmanager.net","blob.core.windows.net","web.core.windows.net","azureedge.net",
-    "amazonaws.com","s3.amazonaws.com","s3-website.amazonaws.com","elasticbeanstalk.com","cloudfront.net",
-    "amplifyapp.com","awsapprunner.com","execute-api.amazonaws.com","blogspot.com","wordpress.com","tumblr.com",
-    "weebly.com","wixsite.com","editorx.io","myshopify.com","squarespace.com","webflow.io","framer.app",
-    "framer.website","framer.media","glitch.me","repl.co","replit.dev","replit.app","surge.sh","bubbleapps.io",
-    "softr.app","translate.goog","googleusercontent.com","readthedocs.io","gitbook.io","notion.site",
-    "super.site","carrd.co","substack.com","sharepoint.com","atlassian.net","zendesk.com","freshdesk.com",
-    "myjetbrains.com","statuspage.io","pythonanywhere.com","codeberg.page","stackblitz.io","vercel.sh",
-    "deno.dev",
-  ]);
+  // ---- Public Suffix List ----
+  // Delegated to psl.js (the full official Public Suffix List), loaded as a content script
+  // immediately before this one in the SAME world. This boundary is what stops evil.duckdns.org
+  // from ever being treated as the same site as alice.duckdns.org. Kept identical to the app's
+  // IPasswrd.Core.PublicSuffix. Degraded fallbacks (psl.js somehow absent) never collapse a host,
+  // i.e. they fail closed rather than leaking across tenants.
   function isPublicSuffix(d) {
+    if (self.__ipwPsl) return self.__ipwPsl.isPublicSuffix(d);
     d = String(d || "").toLowerCase().replace(/\.$/, "");
-    if (!d) return true;
-    if (d.indexOf(".") < 0) return true;                 // bare TLD ("com", "io", "ru")
-    return PUBLIC_SUFFIXES.has(d);
+    return !d || d.indexOf(".") < 0;
   }
 
   function baseDomain(host) {
-    host = (host || "").toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return host;
-    const l = host.split(".").filter(Boolean);
-    if (l.length <= 1) return host;
-    let suffixLabels = 1;                                 // default: last label is the TLD
-    for (let i = l.length - 1; i >= 1; i--)
-      if (PUBLIC_SUFFIXES.has(l.slice(i).join("."))) suffixLabels = l.length - i;
-    const take = suffixLabels + 1;
-    if (take > l.length) return host;                    // host IS a public suffix → keep as-is
-    return l.slice(l.length - take).join(".");
+    if (self.__ipwPsl) return self.__ipwPsl.registrableDomain(host);
+    return String(host || "").toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
   }
 
   const send = (msg) => new Promise((res) => {
@@ -491,35 +459,30 @@
     listCache = null; filledOnce = false; lockBubbleShown = false;
     if (lockBubbleEl) { try { lockBubbleEl.remove(); } catch (e) { /* ignore */ } lockBubbleEl = null; }
     attachFieldHandlers(); autofill(); maybeOfferOtp();
+    runUnlockCallbacks();   // resume whatever the user was doing when the vault opened (app/popup unlock)
   }
 
-  // Inline master-password unlock (Kaspersky-style): the password goes bg -> native host ->
-  // the app's CurrentUserOnly pipe; the APP WINDOW NEVER OPENS, nothing is stored or logged.
+  // The master password is entered ONLY on a surface a web page cannot draw over: the toolbar
+  // popup (the IPasswrd icon) or the app's own window — never in the page itself, where a hostile
+  // site could paint a look-alike box and harvest it. This prompt points there and steps aside;
+  // the instant the vault opens, the app/popup broadcast and the status poll bring autofill back.
+  let pendingUnlockCbs = [];
+  function onUnlockOnce(cb) { if (cb) pendingUnlockCbs = [cb]; }   // only the most recent prompt resumes
+  function runUnlockCallbacks() {
+    const cbs = pendingUnlockCbs; pendingUnlockCbs = [];
+    for (const cb of cbs) { try { cb(); } catch (e) { /* ignore */ } }
+  }
   function mkUnlockForm(onDone) {
+    onUnlockOnce(onDone);
     const w = document.createElement("div");
     w.className = "uform";
     w.innerHTML = `<div class="ut">Сейф заблокирован</div>
-      <input type="password" placeholder="Мастер-пароль" autocomplete="off">
-      <div class="ue"></div>
-      <div class="row" style="margin-top:2px"><button class="pri">Разблокировать</button></div>`;
-    const inp = w.querySelector("input"), err = w.querySelector(".ue");
-    const showErr = (m) => { err.textContent = m; err.style.display = "block"; };
-    async function submit() {
-      const pw = inp.value;
-      if (!pw) { inp.focus(); return; }
-      const r = await send({ cmd: "unlock", password: pw });
-      inp.value = "";
-      if (r && r.ok) { unlocked = true; queried = false; onDone && onDone(); return; }
-      if (r && r.error === "wrong_password")
-        showErr(r.attemptsLeft > 0 ? `Неверный пароль. Осталось попыток: ${r.attemptsLeft}` : "Неверный пароль. Следующая попытка заблокирует вход.");
-      else if (r && r.error === "locked_out") showErr(`Слишком много попыток. Подождите ${r.wait || ""}`);
-      else if (r && r.error === "no_vault") showErr("Сейф ещё не создан — откройте приложение.");
-      else showErr("Нет связи с приложением.");
-      inp.focus();
-    }
-    w.querySelector(".pri").addEventListener("click", submit);
-    inp.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); submit(); } });
-    setTimeout(() => { try { inp.focus(); } catch (e) { /* ignore */ } }, 30);
+      <div class="ue" style="display:block;opacity:.75;font-size:12px;line-height:1.35">Мастер-пароль вводится только в приложении IPasswrd — на панели браузера (значок IPasswrd) или в окне программы. На странице сайта пароль не вводится.</div>
+      <div class="row" style="margin-top:6px"><button class="pri">Открыть приложение</button></div>`;
+    w.querySelector(".pri").addEventListener("click", (e) => {
+      e.preventDefault();
+      try { send({ cmd: "focus" }); } catch (e2) { /* ignore */ }   // raise the app's own unlock screen (a trusted surface)
+    });
     return w;
   }
 

@@ -75,7 +75,7 @@ public partial class MainWindow
             string h = Convert.ToHexString(SHA256.HashData(remote));
             if (h == _vaultHash) return;                                                 // identical content
 
-            int changed = _vault.MergeFrom(remote);                                      // may throw on a foreign vault
+            int changed = _vault.MergeFrom(remote, VaultAuthRequired());                                      // may throw on a foreign vault
             _gSuppressPush = true;
             try { Save(); } finally { _gSuppressPush = false; }
             await _gdrive.PushAsync(_vault.Serialize());                                  // push the union back up
@@ -110,7 +110,7 @@ public partial class MainWindow
                 string h = Convert.ToHexString(SHA256.HashData(remote));
                 if (h != _vaultHash)
                 {
-                    _vault.MergeFrom(remote);
+                    _vault.MergeFrom(remote, VaultAuthRequired());
                     _gSuppressPush = true;
                     try { Save(); } finally { _gSuppressPush = false; }
                     if (VaultScreen.IsVisible) { LoadEntries(selectFirst: false); RenderSidebar(); }
@@ -144,7 +144,7 @@ public partial class MainWindow
             byte[]? remote = await g.PullAsync();
             if (remote is not null)
             {
-                try { _vault.MergeFrom(remote); }
+                try { _vault.MergeFrom(remote, VaultAuthRequired()); }
                 catch (VaultIntegrityException)
                 {
                     g.SignOut();

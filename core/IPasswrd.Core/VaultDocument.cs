@@ -25,6 +25,16 @@ internal sealed class VaultDocumentDto
     /// </summary>
     [JsonPropertyName("masterChangedAt")] public string MasterChangedAt { get; set; } = "";
 
+    /// <summary>
+    /// Base64 HMAC-SHA256 over the vault's authenticated metadata — the key envelope plus every
+    /// record's id / updatedAt / deleted / nonce / ciphertext — keyed by a subkey derived from the
+    /// DEK. It stops a storage-level attacker (a cloud or account that can rewrite the synced file
+    /// but does not know the master password) from rolling a record back to an old password, forging
+    /// a deletion, or swapping the key envelope to lock the owner out. null on files written by
+    /// builds that predate the field; those are treated as unauthenticated. See Vault.MergeFrom.
+    /// </summary>
+    [JsonPropertyName("mac")] public string? Mac { get; set; }
+
     [JsonPropertyName("records")] public List<RecordDto> Records { get; set; } = new();
 }
 

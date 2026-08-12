@@ -28,6 +28,7 @@ public partial class MainWindow
     private CancellationTokenSource? _bridgeCts;
     private string? _bridgeToken;   // per-session bearer for the loopback-HTTP fallback (the named pipe is trusted)
     private string BridgeToken() => _bridgeToken ??= Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
+    private static string PairFlagPath() => System.IO.Path.Combine(LocalDataDir(), "ext-paired.flag");   // remembers a one-time extension approval
 
     private void StartBrowserBridge()
     {
@@ -97,8 +98,8 @@ public partial class MainWindow
             // per-session token, which the extension gets from the trusted pipe's `status` or via a
             // one-time `pair` the user approves in the app window.
             string token = Get("token");
-            bool tokenOk = !viaHttp || (_bridgeToken is not null && string.Equals(token, _bridgeToken, StringComparison.Ordinal));
-            bool secret = cmd is "credentials" or "save" or "unlock" or "list" or "passkeyList" or "passkeyCreate" or "passkeySign";
+            bool tokenOk = !viaHttp || (_bridgeToken is not null && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(token ?? ""), System.Text.Encoding.UTF8.GetBytes(_bridgeToken)));
+            bool secret = cmd is "credentials" or "save" or "unlock" or "list" or "passkeyList" or "passkeyCreate" or "passkeySign" or "focus";
             if (viaHttp && secret && !tokenOk) return Resp(new { ok = false, error = "unpaired" });
 
             switch (cmd)
@@ -110,7 +111,7 @@ public partial class MainWindow
                         : Resp(new { ok = false, error = "denied" });
                 case "status":
                     return await OnUi(() => viaHttp
-                        ? Resp(new { ok = true, unlocked = _vault is not null, paired = tokenOk })
+                        ? Resp(new { ok = true, unlocked = tokenOk && _vault is not null, paired = tokenOk })
                         : Resp(new { ok = true, unlocked = _vault is not null, token = BridgeToken() }));
                 case "credentials":
                 {
@@ -161,6 +162,11 @@ public partial class MainWindow
     /// path never needs this — it is CurrentUserOnly and already trusted.</summary>
     private async Task<bool> RequestExtensionPairAsync()
     {
+        // Approve ONCE: after the user allows the extension the first time, remember it and never
+        // prompt again, across restarts. HttpBridge has already pinned the loopback Origin to our
+        // extension id, so this stays a one-time human gate. (A same-user process forging that Origin
+        // is out of scope per SECURITY.md regardless.)
+        try { if (System.IO.File.Exists(PairFlagPath())) return true; } catch { }
         return await Dispatcher.UIThread.InvokeAsync(async () =>
         {
             try { BringToFront(); } catch { /* best effort */ }
@@ -173,7 +179,7 @@ public partial class MainWindow
             if (res is null) return false;
             var (dim, ok) = res.Value;
             var tcs = new TaskCompletionSource<bool>();
-            ok.Click += (_, _) => { tcs.TrySetResult(true); CloseCard(dim); };
+            ok.Click += (_, _) => { try { System.IO.Directory.CreateDirectory(LocalDataDir()); System.IO.File.WriteAllText(PairFlagPath(), "1"); } catch { } tcs.TrySetResult(true); CloseCard(dim); };
             dim.DetachedFromVisualTree += (_, _) => tcs.TrySetResult(false);   // cancel / Esc / after allow
             var done = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(45)));
             if (done != tcs.Task) { try { CloseCard(dim); } catch { } tcs.TrySetResult(false); }
@@ -239,22 +245,21 @@ public partial class MainWindow
         if (string.IsNullOrEmpty(baseDom)) return Resp(new { ok = true, unlocked = true, items = Array.Empty<object>(), smsCodes = FreshSmsCodes() });
         string nu = NormUrl(url);
 
-        // "family" = domains that count as this page (auto-fillable); "related" = a redirect target on an
-        // untrusted page (offered in the menu, never auto-filled).
+        // "family" = registrable domains safe to auto-fill on this page: the current page
+        // registrable domain, plus (ONLY on a curated, trusted SSO hub) the redirect target it
+        // names. On any OTHER page a redirect/continue parameter is attacker-controllable
+        // (evil.com/?redirect_uri=bank.com), so it is IGNORED: a page can never obtain a
+        // credential for a registrable domain other than its own.
         var family = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseDom };
-        var related = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        bool trustedHub = TrustedAuthHubs.Contains(HostOf(url));
-        foreach (var rd in RedirectTargets(url))
-        {
-            if (family.Contains(rd)) continue;
-            if (trustedHub) family.Add(rd); else related.Add(rd);
-        }
+        if (TrustedAuthHubs.Contains(HostOf(url)))
+            foreach (var rd in RedirectTargets(url))
+                family.Add(rd);
 
         var items = _vault.Items()
             .Where(x => x.Item.Type == "account")
             .Select(x => new { e = x, dom = Dedup.RegistrableDomain(x.Item.Fields.GetValueOrDefault("url", "")) })
-            .Where(a => a.dom.Length > 0 && (family.Contains(a.dom) || related.Contains(a.dom)))
-            .OrderBy(a => a.dom == baseDom ? 0 : family.Contains(a.dom) ? 1 : 2)          // exact site, then trusted redirect, then menu-only
+            .Where(a => a.dom.Length > 0 && family.Contains(a.dom))
+            .OrderBy(a => a.dom == baseDom ? 0 : 1)                                       // exact site first, then a trusted-hub redirect target
             .ThenBy(a => NormUrl(a.e.Item.Fields.GetValueOrDefault("url", "")) == nu ? 0 : 1)
             .ThenBy(a => Dedup.HostDepth(a.e.Item.Fields.GetValueOrDefault("url", "")))
             .ThenBy(a => a.e.Item.Fields.GetValueOrDefault("username", ""), StringComparer.OrdinalIgnoreCase)
@@ -266,7 +271,7 @@ public partial class MainWindow
                 password = a.e.Item.Fields.GetValueOrDefault("password", ""),
                 url = a.e.Item.Fields.GetValueOrDefault("url", ""),
                 totp = TotpNow(a.e.Item.Fields.GetValueOrDefault("totp", "")),
-                related = !family.Contains(a.dom),                                        // menu-only: excluded from silent autofill
+                related = false,                                                          // only same-domain / trusted-hub creds are ever returned
             })
             .ToList();
         var codes = _vault.Items()
@@ -369,7 +374,7 @@ public partial class MainWindow
 
         try
         {
-            _vault = Vault.Unlock(System.IO.File.ReadAllBytes(VaultPath()), password);
+            _vault = UnlockFromFile(password);
         }
         catch (WrongMasterPasswordException)
         {
@@ -532,8 +537,18 @@ public partial class MainWindow
                     Y = B64UrlDec(root.GetProperty("y").GetString() ?? ""),
                 },
             };
+            byte[] toSign = B64UrlDec(dataB64Url);
+            // Defence in depth: only ever sign a genuine WebAuthn assertion for THIS rp, never
+            // arbitrary bytes. A real assertion input is authData || clientDataHash, and authData
+            // begins with SHA-256(rpId). Verifying that binds what we sign to the credential's own
+            // rpId and stops a tampered page from using the app as a blind signing oracle.
+            byte[] rpIdHash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rpId));
+            if (toSign.Length < 37 + 32 || toSign.Length > 2048
+                || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(toSign.AsSpan(0, 32), rpIdHash))
+                return Resp(new { ok = false, error = "bad_assertion" });
+
             using var ec = ECDsa.Create(ecp);
-            byte[] sig = ec.SignData(B64UrlDec(dataB64Url), HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+            byte[] sig = ec.SignData(toSign, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
             return Resp(new { ok = true, signature = B64Url(sig) });
         }
         catch { return Resp(new { ok = false, error = "sign_failed" }); }

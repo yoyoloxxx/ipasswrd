@@ -56,6 +56,9 @@ internal static class Crypto
     public static readonly byte[] AadRecoveryKey = Encoding.ASCII.GetBytes("ipasswrd/recovery-key/v1");
     private static readonly byte[] AadRecordPrefix = Encoding.ASCII.GetBytes("ipasswrd/record/v1/");
 
+    /// <summary>Domain tag (HKDF info) for the document-integrity MAC key.</summary>
+    public static readonly byte[] AadDocMac = Encoding.ASCII.GetBytes("ipasswrd/doc-mac/v1");
+
     public static byte[] RecordAad(string id)
     {
         byte[] idBytes = Encoding.ASCII.GetBytes(id);
@@ -66,6 +69,18 @@ internal static class Crypto
     }
 
     public static byte[] RandomBytes(int n) => RandomNumberGenerator.GetBytes(n);
+
+    /// <summary>Key for the document-integrity MAC, derived from the DEK so it needs no password and
+    /// stays stable across master-password changes (the DEK is unchanged when the password changes).</summary>
+    public static byte[] DeriveDocMacKey(byte[] dek) =>
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, dek, KeyLen, salt: null, info: AadDocMac);
+
+    /// <summary>HMAC-SHA256(key, data).</summary>
+    public static byte[] HmacSha256(byte[] key, byte[] data)
+    {
+        using var h = new HMACSHA256(key);
+        return h.ComputeHash(data);
+    }
 
     /// <summary>Argon2id(password, salt, params) → 32-byte key.</summary>
     public static byte[] DeriveKey(string password, byte[] salt, KdfConfig cfg)
