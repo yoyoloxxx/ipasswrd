@@ -258,6 +258,7 @@ public partial class MainWindow : Window
         // browser extension install
         ["Расширение для браузера"] = "Browser extension", ["Автозаполнение в Chrome, Edge и других"] = "Autofill in Chrome, Edge and others",
         ["Расширение подключено"] = "Extension connected", ["Расширение не подключено"] = "Extension not connected",
+        ["Быстрый вход по Windows Hello"] = "Quick unlock with Windows Hello", ["Открывать сейф отпечатком, лицом или PIN. Мастер-пароль остаётся запасным."] = "Open the vault with fingerprint, face or PIN. The master password stays as a fallback.",
         ["Установить"] = "Install", ["Скрыть"] = "Hide",
         ["Открыть папку расширения"] = "Open the extension folder", ["Открыть страницу расширений"] = "Open the extensions page",
         ["1. Откройте страницу расширений браузера (кнопка ниже)."] = "1. Open the browser's extensions page (button below).",
@@ -713,6 +714,9 @@ public partial class MainWindow : Window
         public int BreachEveryDays { get; set; } = 7;
         public string? BreachLastCheckAt { get; set; }
         public int BreachFound { get; set; }
+
+        /// <summary>Быстрый вход через Windows Hello включён. Отсутствие поля (старые настройки) = включено.</summary>
+        public bool? HelloQuickUnlock { get; set; }
     }
 
     private void LoadSettings()
@@ -722,7 +726,7 @@ public partial class MainWindow : Window
             string p = SettingsPath();
             if (!System.IO.File.Exists(p)) return;
             var s = JsonSerializer.Deserialize<AppSettings>(System.IO.File.ReadAllText(p));
-            if (s is not null) { _autolockMinutes = s.AutolockMinutes; _light = s.Light; _lang = string.IsNullOrEmpty(s.Lang) ? "ru" : s.Lang; _syncPath = s.SyncPath; _siteNames = s.SiteNames is null ? new(StringComparer.Ordinal) : new(s.SiteNames, StringComparer.Ordinal); _keepAsIs = s.KeepAsIs is null ? new(StringComparer.Ordinal) : new(s.KeepAsIs, StringComparer.Ordinal); _syncProvider = s.SyncProvider ?? ""; _clipboardClearSeconds = s.ClipboardClearSeconds; _extraExtensionId = s.ExtraExtensionId; _lanClipDownEnabled = s.LanClipboardDownload; _extEverConnected = s.ExtConnected; _obMobileDone = s.MobileStepDone; _quickStartHidden = s.QuickStartHidden; _captureShieldOff = s.CaptureShieldOff; _breachEveryDays = s.BreachEveryDays; _breachFound = s.BreachFound; if (!string.IsNullOrEmpty(s.BreachLastCheckAt)) DateTime.TryParse(s.BreachLastCheckAt, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out _breachLastUtc); }
+            if (s is not null) { _autolockMinutes = s.AutolockMinutes; _light = s.Light; _lang = string.IsNullOrEmpty(s.Lang) ? "ru" : s.Lang; _syncPath = s.SyncPath; _siteNames = s.SiteNames is null ? new(StringComparer.Ordinal) : new(s.SiteNames, StringComparer.Ordinal); _keepAsIs = s.KeepAsIs is null ? new(StringComparer.Ordinal) : new(s.KeepAsIs, StringComparer.Ordinal); _syncProvider = s.SyncProvider ?? ""; _clipboardClearSeconds = s.ClipboardClearSeconds; _extraExtensionId = s.ExtraExtensionId; _lanClipDownEnabled = s.LanClipboardDownload; _extEverConnected = s.ExtConnected; _obMobileDone = s.MobileStepDone; _quickStartHidden = s.QuickStartHidden; _captureShieldOff = s.CaptureShieldOff; _breachEveryDays = s.BreachEveryDays; _breachFound = s.BreachFound; if (!string.IsNullOrEmpty(s.BreachLastCheckAt)) DateTime.TryParse(s.BreachLastCheckAt, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out _breachLastUtc); _helloEnabled = s.HelloQuickUnlock ?? true; }
         }
         catch { /* ignore */ }
     }
@@ -733,7 +737,7 @@ public partial class MainWindow : Window
         {
             string p = SettingsPath();
             System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(p)!);
-            System.IO.File.WriteAllText(p, JsonSerializer.Serialize(new AppSettings { AutolockMinutes = _autolockMinutes, Light = _light, Lang = _lang, SyncPath = _syncPath, SiteNames = _siteNames.Count > 0 ? _siteNames : null, KeepAsIs = _keepAsIs.Count > 0 ? _keepAsIs : null, SyncProvider = string.IsNullOrEmpty(_syncProvider) ? null : _syncProvider, ClipboardClearSeconds = _clipboardClearSeconds, ExtraExtensionId = string.IsNullOrWhiteSpace(_extraExtensionId) ? null : _extraExtensionId, LanClipboardDownload = _lanClipDownEnabled, ExtConnected = _extEverConnected, MobileStepDone = _obMobileDone, QuickStartHidden = _quickStartHidden, CaptureShieldOff = _captureShieldOff, BreachEveryDays = _breachEveryDays, BreachLastCheckAt = _breachLastUtc == default ? null : _breachLastUtc.ToString("o"), BreachFound = _breachFound }));
+            System.IO.File.WriteAllText(p, JsonSerializer.Serialize(new AppSettings { AutolockMinutes = _autolockMinutes, Light = _light, Lang = _lang, SyncPath = _syncPath, SiteNames = _siteNames.Count > 0 ? _siteNames : null, KeepAsIs = _keepAsIs.Count > 0 ? _keepAsIs : null, SyncProvider = string.IsNullOrEmpty(_syncProvider) ? null : _syncProvider, ClipboardClearSeconds = _clipboardClearSeconds, ExtraExtensionId = string.IsNullOrWhiteSpace(_extraExtensionId) ? null : _extraExtensionId, LanClipboardDownload = _lanClipDownEnabled, ExtConnected = _extEverConnected, MobileStepDone = _obMobileDone, QuickStartHidden = _quickStartHidden, CaptureShieldOff = _captureShieldOff, BreachEveryDays = _breachEveryDays, BreachLastCheckAt = _breachLastUtc == default ? null : _breachLastUtc.ToString("o"), BreachFound = _breachFound, HelloQuickUnlock = _helloEnabled }));
         }
         catch { /* best effort */ }
         SavePrefsToVault();   // mirror the syncable prefs (site names + keep-marks) into the vault
@@ -929,6 +933,7 @@ public partial class MainWindow : Window
     private byte[]? _helloChallenge;   // the challenge whose Hello signature yields _helloKey
     private bool? _helloAvailable;     // cached result of WindowsHello.IsAvailableAsync()
     private bool _helloInFlight;       // a Hello prompt is already open — do not stack a second one
+    private bool _helloEnabled = true; // quick unlock via Hello is opt-in; the master password is always accepted
 
     // Per-install DPAPI entropy: a random value stored (itself DPAPI-protected) next to the cache,
     // instead of a hardcoded string that anyone can read in the public source and script against.
@@ -992,6 +997,17 @@ public partial class MainWindow : Window
         {
             bool avail = await WindowsHello.IsAvailableAsync();
             _helloAvailable = avail;
+
+            // Quick unlock is opt-in. When it is off, the master password is the only way in and no
+            // key cache is left on disk.
+            if (!_helloEnabled) { WipeQuickUnlock(); return; }
+
+            // Already armed and the cached key is still valid → nothing to do. In particular, DON'T pop
+            // a second Hello gesture right after a master-password unlock: the existing cache already
+            // makes the next open a gesture. (This was the "type the password AND then do Hello"
+            // annoyance.) We mint a key only when there is none yet — first enrolment or a weekly re-arm.
+            if (avail && _helloKey is null && HasHelloCache()) return;
+
             byte[] dek = _vault.ExportSessionKey();
             long exp = QuickUnlockExpiry();
 
@@ -1002,8 +1018,8 @@ public partial class MainWindow : Window
                     byte[] challenge = _helloChallenge ?? System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
                     await PrepareForHelloAsync();                              // bring us to front…
                     NudgeCredentialDialogToFront();                            // …and pull the system dialog forward once it appears
-                    byte[]? secret = await WindowsHello.SignAsync(challenge);   // Hello prompt
-                    if (secret is null) { WipeQuickUnlock(); return; }          // declined → no quick unlock
+                    byte[]? secret = await WindowsHello.SignAsync(challenge);   // the single, deliberate Hello gesture
+                    if (secret is null) { System.Security.Cryptography.CryptographicOperations.ZeroMemory(dek); WipeQuickUnlock(); return; }   // declined → no quick unlock
                     _helloChallenge = challenge;
                     _helloKey = System.Security.Cryptography.SHA256.HashData(secret);
                 }
@@ -4645,6 +4661,8 @@ public partial class MainWindow : Window
 
         g.Children.Add(SetRowControl("Автоблокировка", "Заблокировать сейф после простоя", AutolockControl()));
         g.Children.Add(Hairline());
+        g.Children.Add(SetRowControl("Быстрый вход по Windows Hello", "Открывать сейф отпечатком, лицом или PIN. Мастер-пароль остаётся запасным.", HelloQuickUnlockControl()));
+        g.Children.Add(Hairline());
         g.Children.Add(SetRowControl("Очистка буфера обмена", "Стирать скопированный пароль через заданное время", ClipboardClearControl()));
         g.Children.Add(Hairline());
         g.Children.Add(SetRowControl("Скрывать от записи экрана", "В скриншотах и трансляциях окно будет пустым. Отключите на время, если нужно показать приложение.", CaptureShieldControl()));
@@ -5211,6 +5229,21 @@ public partial class MainWindow : Window
         var ts = new ToggleSwitch { IsChecked = IsAutostartOn(), OnContent = "", OffContent = "", VerticalAlignment = VerticalAlignment.Center };
         ts.Checked += (_, _) => SetAutostart(true);
         ts.Unchecked += (_, _) => SetAutostart(false);
+        return ts;
+    }
+
+    private Control HelloQuickUnlockControl()
+    {
+        var ts = new ToggleSwitch { IsChecked = _helloEnabled, OnContent = "", OffContent = "", VerticalAlignment = VerticalAlignment.Center };
+        ts.IsCheckedChanged += (_, _) =>
+        {
+            bool on = ts.IsChecked == true;
+            if (on == _helloEnabled) return;
+            _helloEnabled = on;
+            SaveSettings();
+            if (on) _ = ArmQuickUnlockAsync();   // one Hello gesture now to enrol the quick-unlock key
+            else WipeQuickUnlock();              // back to master-password only
+        };
         return ts;
     }
 
