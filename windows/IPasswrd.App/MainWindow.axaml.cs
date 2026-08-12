@@ -1180,6 +1180,17 @@ public partial class MainWindow : Window
     /// never prompts. A Hello-mode cache returns false here and is handled by
     /// <see cref="TryQuickUnlockHelloAsync"/>. A cache written by an older build fails to decrypt
     /// under the new per-install entropy and is simply discarded (one extra password entry).</summary>
+    /// <summary>A tampered / rolled-back vault file must fail identically on EVERY unlock path.
+    /// Mirrors the master-password handler: show the integrity error on the unlock screen and offer
+    /// restore-from-backup. The quick-unlock cache is NOT wiped - the cached key is fine, the FILE is
+    /// what failed; wiping it would only mute the alarm the user needs to hear.</summary>
+    private void ShowIntegrityFailure(Exception ex)
+    {
+        UnlockError.Text = Tr("Ошибка: " + ex.Message);
+        UnlockError.IsVisible = true;
+        if (VaultBackups.List(VaultPath()).Count > 0) RestoreBackupButton.IsVisible = true;
+    }
+
     private bool TryQuickUnlock()
     {
         try
@@ -1196,6 +1207,7 @@ public partial class MainWindow : Window
             _helloAvailable = false;
             return true;
         }
+        catch (VaultIntegrityException ex) { ShowIntegrityFailure(ex); return false; }   // tampered vault: shout, keep the cache
         catch { WipeQuickUnlock(); return false; }
     }
 
@@ -1245,7 +1257,8 @@ public partial class MainWindow : Window
             ResetLockout();
             EnterVault();
         }
-        catch { /* best effort — password path remains */ }
+        catch (VaultIntegrityException ex) { ShowIntegrityFailure(ex); }   // tampered vault must shout on the Hello path too
+        catch { /* best effort - password path remains */ }
         finally { _helloInFlight = false; }
     }
 
