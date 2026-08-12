@@ -111,6 +111,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       await new Promise((r) => setTimeout(r, 500));
       resp = await callNative(msg);
     }
+    if (msg && msg.cmd === "unlock" && resp && resp.ok) {     // popup unlocked the vault → tell open tabs at once
+      try { chrome.tabs.query({}, (tabs) => { for (const t of tabs) { if (t && t.id != null) { try { chrome.tabs.sendMessage(t.id, { cmd: "_ipwUnlocked" }); } catch (e) {} } } }); } catch (e) {}
+    }
     sendResponse(resp);
   })();
   return true; // async sendResponse

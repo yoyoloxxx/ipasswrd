@@ -412,6 +412,7 @@
   let lastTyped = { u: "", p: "" };
   let lastStashed = "";
   let lockBubbleShown = false;
+  let lockBubbleEl = null;      // the "vault locked" bubble, so we can drop it the instant the vault unlocks
   let listCache = null;
   const tracked = new Map();   // field -> { badge, kind }
   let menuField = null;
@@ -479,11 +480,17 @@
   }
   function onScrollClose() { closeMenu(); }
 
-  function armUnlockRefresh() {
-    window.addEventListener("focus", async function h() {
-      const r = await query();
-      if (r && r.unlocked) { window.removeEventListener("focus", h); listCache = null; filledOnce = false; autofill(); }
-    });
+  // Keep this page in step with the app's lock state. There is no push channel (the extension always
+  // asks), so we re-ask whenever the tab comes back to the user — e.g. right after the vault was
+  // unlocked in the desktop app — and when the toolbar popup unlocks it (bg pings us). The extension
+  // is unlocked exactly when the vault is: on a fresh unlock we drop any "locked" bubble and autofill.
+  async function syncLockState() {
+    if (unlocked) return;                    // this tab already sees the vault open — nothing to refresh
+    const r = await query();                 // refreshes `unlocked` + this site's `items`
+    if (!r || !r.ok || !unlocked) return;
+    listCache = null; filledOnce = false; lockBubbleShown = false;
+    if (lockBubbleEl) { try { lockBubbleEl.remove(); } catch (e) { /* ignore */ } lockBubbleEl = null; }
+    attachFieldHandlers(); autofill(); maybeOfferOtp();
   }
 
   // Inline master-password unlock (Kaspersky-style): the password goes bg -> native host ->
@@ -669,14 +676,15 @@
     const c = document.createElement("div");
     c.className = "card";
     c.innerHTML = `<div class="hd"><span class="key">⚿</span> IPasswrd</div>`;
-    c.appendChild(mkUnlockForm(() => { c.remove(); filledOnce = false; autofill(); maybeOfferOtp(); }));
+    c.appendChild(mkUnlockForm(() => { c.remove(); lockBubbleEl = null; filledOnce = false; autofill(); maybeOfferOtp(); }));
     const later = document.createElement("div");
     later.className = "sub";
     later.style.cssText = "margin:6px 0 0;cursor:pointer;text-align:right";
     later.textContent = "Позже";
-    later.addEventListener("click", () => c.remove());
+    later.addEventListener("click", () => { c.remove(); lockBubbleEl = null; });
     c.appendChild(later);
     root().appendChild(c);
+    lockBubbleEl = c;
   }
 
   // ---------- capture at submit ----------
@@ -941,6 +949,12 @@
   window.addEventListener("scroll", repositionAll, true);
   window.addEventListener("resize", repositionAll, true);
   setInterval(repositionAll, 250);
+
+  // Reflect the app's lock state without a click: re-check when the tab returns to the user, and the
+  // moment the toolbar popup reports an unlock (bg broadcasts "_ipwUnlocked" to every tab).
+  window.addEventListener("focus", syncLockState);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) syncLockState(); });
+  try { chrome.runtime.onMessage.addListener((m) => { if (m && m.cmd === "_ipwUnlocked") syncLockState(); }); } catch (e) { /* ignore */ }
 
   boot();
   maybeOfferSave();
