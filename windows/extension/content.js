@@ -11,19 +11,60 @@
   const KEY_SVG = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="${BRASS}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L19 4m-3.5 3.5L18 10"/></svg>`;
   const TRAY_IMG = "data:image/png;base64,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";
 
-  // ---------- registrable domain (mirrors Dedup.cs) ----------
-  const TWO_LEVEL = new Set(["co.uk","org.uk","gov.uk","ac.uk","me.uk","com.br","com.au","net.au","org.au",
-    "co.jp","or.jp","co.kr","com.tr","co.in","com.ua","net.ua","org.ua","net.ru","org.ru",
-    "co.il","com.mx","co.nz","com.tw","com.sg","com.cn","com.hk","com.pl","com.pt","com.es",
-    "com.ar","co.za","com.my","co.th","com.vn","com.ph","com.co"]);
+  // ---------- registrable domain (mirrors Dedup.cs — proper public-suffix rule) ----------
+  // A "public suffix" is a level under which independent parties register names, so two names
+  // below it are DIFFERENT sites. The set MUST include the private multi-tenant registries
+  // (github.io, *.web.app, herokuapp.com, …); otherwise every tenant of such a host would
+  // collapse to one "site" and IPasswrd could hand one tenant's saved password to another.
+  // Longest matching suffix + one more label = the registrable domain. Kept in sync with
+  // IPasswrd.Core.Dedup.PublicSuffixes; for full coverage swap in the official Public Suffix List.
+  const PUBLIC_SUFFIXES = new Set([
+    "co.uk","org.uk","gov.uk","ac.uk","me.uk","ltd.uk","plc.uk","net.uk","sch.uk","nhs.uk","police.uk","com.au",
+    "net.au","org.au","edu.au","gov.au","id.au","asn.au","co.jp","or.jp","ne.jp","ac.jp","go.jp","gr.jp",
+    "ed.jp","lg.jp","ad.jp","co.kr","or.kr","ne.kr","re.kr","pe.kr","go.kr","ac.kr","hs.kr","ms.kr","com.br",
+    "net.br","org.br","gov.br","edu.br","art.br","blog.br","com.cn","net.cn","org.cn","gov.cn","edu.cn","ac.cn",
+    "com.tw","net.tw","org.tw","idv.tw","gov.tw","edu.tw","com.hk","net.hk","org.hk","edu.hk","gov.hk","idv.hk",
+    "com.sg","net.sg","org.sg","edu.sg","gov.sg","per.sg","com.my","net.my","org.my","gov.my","edu.my","co.in",
+    "net.in","org.in","gen.in","firm.in","ind.in","gov.in","ac.in","edu.in","com.tr","net.tr","org.tr","gov.tr",
+    "edu.tr","bel.tr","com.ua","net.ua","org.ua","in.ua","kiev.ua","com.ru","net.ru","org.ru","msk.ru","spb.ru",
+    "com.mx","com.ar","com.co","net.co","nom.co","com.pe","com.ve","com.ec","com.uy","com.py","com.bo","com.cl",
+    "co.il","org.il","net.il","ac.il","gov.il","muni.il","co.za","org.za","net.za","web.za","gov.za","ac.za",
+    "co.nz","net.nz","org.nz","govt.nz","ac.nz","geek.nz","school.nz","co.th","in.th","ac.th","go.th","or.th",
+    "net.th","com.vn","net.vn","org.vn","gov.vn","edu.vn","com.ph","net.ph","org.ph","gov.ph","com.pl","net.pl",
+    "org.pl","gov.pl","waw.pl","edu.pl","com.pt","com.es","org.es","com.eg","com.sa","com.ng","com.gh","com.kw",
+    "com.qa","com.bh","com.pk","com.bd","co.id","or.id","web.id","ac.id","go.id","my.id","biz.id","co.ke",
+    "co.tz","co.ug","co.zw","co.mz","github.io","githubusercontent.com","gitlab.io","pages.dev","workers.dev",
+    "r2.dev","web.app","firebaseapp.com","appspot.com","cloudfunctions.net","run.app","vercel.app","now.sh",
+    "netlify.app","netlify.com","onrender.com","render.com","herokuapp.com","herokudns.com","fly.dev",
+    "railway.app","up.railway.app","azurewebsites.net","azurestaticapps.net","cloudapp.net",
+    "cloudapp.azure.com","trafficmanager.net","blob.core.windows.net","web.core.windows.net","azureedge.net",
+    "amazonaws.com","s3.amazonaws.com","s3-website.amazonaws.com","elasticbeanstalk.com","cloudfront.net",
+    "amplifyapp.com","awsapprunner.com","execute-api.amazonaws.com","blogspot.com","wordpress.com","tumblr.com",
+    "weebly.com","wixsite.com","editorx.io","myshopify.com","squarespace.com","webflow.io","framer.app",
+    "framer.website","framer.media","glitch.me","repl.co","replit.dev","replit.app","surge.sh","bubbleapps.io",
+    "softr.app","translate.goog","googleusercontent.com","readthedocs.io","gitbook.io","notion.site",
+    "super.site","carrd.co","substack.com","sharepoint.com","atlassian.net","zendesk.com","freshdesk.com",
+    "myjetbrains.com","statuspage.io","pythonanywhere.com","codeberg.page","stackblitz.io","vercel.sh",
+    "deno.dev",
+  ]);
+  function isPublicSuffix(d) {
+    d = String(d || "").toLowerCase().replace(/\.$/, "");
+    if (!d) return true;
+    if (d.indexOf(".") < 0) return true;                 // bare TLD ("com", "io", "ru")
+    return PUBLIC_SUFFIXES.has(d);
+  }
 
   function baseDomain(host) {
     host = (host || "").toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
     if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return host;
     const l = host.split(".").filter(Boolean);
-    if (l.length <= 2) return host;
-    const lastTwo = l.slice(-2).join(".");
-    return TWO_LEVEL.has(lastTwo) ? l.slice(-3).join(".") : lastTwo;
+    if (l.length <= 1) return host;
+    let suffixLabels = 1;                                 // default: last label is the TLD
+    for (let i = l.length - 1; i >= 1; i--)
+      if (PUBLIC_SUFFIXES.has(l.slice(i).join("."))) suffixLabels = l.length - i;
+    const take = suffixLabels + 1;
+    if (take > l.length) return host;                    // host IS a public suffix → keep as-is
+    return l.slice(l.length - take).join(".");
   }
 
   const send = (msg) => new Promise((res) => {
@@ -41,10 +82,12 @@
     rpId = String(rpId || "").toLowerCase().replace(/\.$/, "");
     host = String(host || "").toLowerCase().replace(/\.$/, "");
     if (!rpId || !host) return false;
+    // WebAuthn registrable-domain-suffix rule: rpId must be the page host or a registrable parent
+    // of it, and NEVER a bare public suffix (github.io, co.uk, com) — else a page could claim an
+    // rpId that spans every tenant of a shared suffix.
+    if (isPublicSuffix(rpId)) return false;
     if (rpId === host) return true;
-    // Registrable parent domain only, and never a bare public suffix ("com", "co.uk") — matches the
-    // WebAuthn registrable-domain-suffix rule so a page cannot claim an eTLD-wide rpId.
-    return rpId.indexOf(".") > 0 && host.endsWith("." + rpId) && !TWO_LEVEL.has(rpId);
+    return host.endsWith("." + rpId);
   }
   window.addEventListener("message", async (e) => {
     const d = e.data;

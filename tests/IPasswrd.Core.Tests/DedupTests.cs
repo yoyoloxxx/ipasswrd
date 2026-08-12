@@ -16,9 +16,24 @@ public class DedupTests
     [InlineData("https://foo.bar.example.co.uk/x", "example.co.uk")]
     [InlineData("http://10.90.90.2/24online/webpages/client.jsp", "10.90.90.2")]   // IP: never trimmed
     [InlineData("https://192.168.1.1/", "192.168.1.1")]
-    [InlineData("", "")]
+    [InlineData("https://victim.github.io/repo", "victim.github.io")]   // multi-tenant suffix: tenants stay separate
+    [InlineData("https://a.victim.github.io", "victim.github.io")]
+    [InlineData("https://myapp.web.app", "myapp.web.app")]
+    [InlineData("https://site.herokuapp.com/x", "site.herokuapp.com")]
+    [InlineData("https://foo.s3.amazonaws.com", "foo.s3.amazonaws.com")]
+    [InlineData("https://github.io", "github.io")]   // bare public suffix: returned as-is, never collapsed
     public void RegistrableDomain_Collapses_Subdomains(string url, string expected)
         => Assert.Equal(expected, Dedup.RegistrableDomain(url));
+
+    [Fact]   // security: two tenants on a shared public suffix must NOT be the same registrable domain
+    public void SharedPublicSuffix_Tenants_AreDistinct()
+    {
+        Assert.NotEqual(Dedup.RegistrableDomain("https://victim.github.io"),
+                        Dedup.RegistrableDomain("https://attacker.github.io"));
+        Assert.False(Dedup.RegistrableDomain("https://attacker.github.io") == "github.io");
+        Assert.True(Dedup.IsPublicSuffix("github.io"));
+        Assert.False(Dedup.IsPublicSuffix("victim.github.io"));
+    }
 
     [Fact]
     public void SameBase_SameLogin_SamePassword_AreDuplicates()
