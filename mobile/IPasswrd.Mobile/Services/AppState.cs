@@ -83,6 +83,38 @@ public sealed class AppState
 
     public int FreeAttemptsLeft => Lockout.AttemptsLeft(Fails);
 
+    // ================= anti-downgrade sentinel (parity with the desktop app-private flag) =================
+    // The vault's document MAC (Core) is verified whenever present, which already blocks a forged
+    // updatedAt, a fabricated tombstone, or a swapped key envelope. To also stop an attacker STRIPPING
+    // the MAC so a forgery "looks legacy", once this install has produced a MAC-authenticated vault of a
+    // given lineage we refuse an un-sealed copy of that lineage. The marker lives in app-private
+    // Preferences, which the sync cloud (iCloud/Drive) never sees.
+    private const string AuthVaultIdPref = "vault.authenticatedId";
+
+    private static void MarkVaultAuthenticated(Vault? v)
+    {
+        try { if (v is not null) Preferences.Set(AuthVaultIdPref, v.VaultId); } catch { /* best-effort */ }
+    }
+
+    /// <summary>True if the blob belongs to a vault this install knows to be MAC-protected, so a
+    /// missing seal on it can only be a downgrade attempt.</summary>
+    private static bool RequireAuth(byte[] blob)
+    {
+        try
+        {
+            string id = IPasswrd.Core.Vault.VaultIdOf(blob);
+            return id.Length > 0 && Preferences.Get(AuthVaultIdPref, "") == id;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Merge-side check: the open vault's lineage id is already known.</summary>
+    private bool RequireAuthLocal()
+    {
+        try { return _vault is not null && Preferences.Get(AuthVaultIdPref, "") == _vault.VaultId; }
+        catch { return false; }
+    }
+
     // ================= создание / разблокировка =================
 
     public async Task CreateAsync(string masterPassword)
@@ -115,7 +147,7 @@ public sealed class AppState
 
         try
         {
-            _vault = await Task.Run(() => IPasswrd.Core.Vault.Unlock(blob, masterPassword));
+            _vault = await Task.Run(() => IPasswrd.Core.Vault.Unlock(blob, masterPassword, RequireAuth(blob)));
         }
         catch (WrongMasterPasswordException)
         {
@@ -164,6 +196,7 @@ public sealed class AppState
 
     private void AfterUnlock()
     {
+        if (_vault?.IsAuthenticated == true) MarkVaultAuthenticated(_vault);   // opened a sealed vault: keep the anti-downgrade marker current
         SecureClipboard.ClearSeconds = ClipboardClearSeconds;   // применить настройку авто-очистки буфера
         if (BiometricUnlockEnabled) SaveQuickUnlock();
         ShareForAutoFill();
@@ -233,8 +266,18 @@ public sealed class AppState
         public long ExpiresAt { get; set; }
     }
 
+    /// <summary>A hardware biometric CRYPTO gate is used when the device has a strong biometric or a
+    /// device credential; otherwise the (audited-adequate) un-gated quick unlock is kept, so no device
+    /// loses the feature. Only the vault session key is gated — the sync refresh token stays silent.</summary>
+    private static bool UseBioCrypto => Svc.BiometricSecret.IsAvailable;
+
+    /// <summary>Plain marker that a quick-unlock secret was stored (in whichever backing store), so the
+    /// unlock screen can offer biometrics without probing the biometric store.</summary>
+    private const string QuickUnlockPresentPref = "quickunlock.present";
+
     public bool QuickUnlockAvailable =>
-        BiometricUnlockEnabled && Svc.Biometric.IsAvailable && Svc.KeyStore.Load(QuickUnlockKey) is not null && HasLocalVault;
+        BiometricUnlockEnabled && HasLocalVault && Preferences.Get(QuickUnlockPresentPref, false)
+        && (UseBioCrypto ? Svc.BiometricSecret.IsAvailable : Svc.Biometric.IsAvailable);
 
     private void SaveQuickUnlock()
     {
@@ -246,12 +289,20 @@ public sealed class AppState
                 Dek = Convert.ToBase64String(_vault.ExportSessionKey()),
                 ExpiresAt = DateTimeOffset.UtcNow.AddDays(QuickUnlockDays).ToUnixTimeSeconds(),
             };
-            Svc.KeyStore.Save(QuickUnlockKey, JsonSerializer.SerializeToUtf8Bytes(data));
+            byte[] json = JsonSerializer.SerializeToUtf8Bytes(data);
+            if (UseBioCrypto) _ = Svc.BiometricSecret.ProtectAsync(QuickUnlockKey, json);   // hardware-gated (silent public-key encrypt)
+            else Svc.KeyStore.Save(QuickUnlockKey, json);
+            Preferences.Set(QuickUnlockPresentPref, true);
         }
         catch { /* необязательный путь: мастер-пароль всегда работает */ }
     }
 
-    private void WipeQuickUnlock() => Svc.KeyStore.Delete(QuickUnlockKey);
+    private void WipeQuickUnlock()
+    {
+        try { Svc.KeyStore.Delete(QuickUnlockKey); } catch { }
+        try { Svc.BiometricSecret.Delete(QuickUnlockKey); } catch { }
+        try { Preferences.Remove(QuickUnlockPresentPref); } catch { }
+    }
 
     /// <summary>null — успех; "" — тихий отказ (нет ключа/отмена Face ID); иначе текст ошибки.</summary>
     public async Task<string?> TryQuickUnlockAsync()
@@ -259,8 +310,20 @@ public sealed class AppState
         if (LockoutRemaining > TimeSpan.Zero)
             return $"Слишком много попыток. Подождите {Fmt.Duration(LockoutRemaining)}.";
 
-        byte[]? raw = Svc.KeyStore.Load(QuickUnlockKey);
-        if (raw is null || !HasLocalVault) return "";
+        if (!HasLocalVault || !Preferences.Get(QuickUnlockPresentPref, false)) return "";
+
+        byte[]? raw;
+        if (UseBioCrypto)
+        {
+            // The crypto-gated store prompts biometrics as it releases the key.
+            raw = await Svc.BiometricSecret.RevealAsync(QuickUnlockKey, "Открыть сейф IPasswrd");
+            if (raw is null) return "";   // cancelled / unavailable / not present -> master password, silently
+        }
+        else
+        {
+            raw = Svc.KeyStore.Load(QuickUnlockKey);
+            if (raw is null) { WipeQuickUnlock(); return ""; }
+        }
 
         QuickUnlockData? d;
         try { d = JsonSerializer.Deserialize<QuickUnlockData>(raw); }
@@ -272,12 +335,13 @@ public sealed class AppState
             return "Пора ввести мастер-пароль (прошло 30 дней).";
         }
 
-        if (!await Svc.Biometric.AuthenticateAsync("Открыть сейф IPasswrd")) return "";
+        // Un-gated path still needs its biometric UI gate; the crypto-gated path already prompted on reveal.
+        if (!UseBioCrypto && !await Svc.Biometric.AuthenticateAsync("Открыть сейф IPasswrd")) return "";
 
         try
         {
             byte[] blob = File.ReadAllBytes(LocalVaultPath);
-            _vault = await Task.Run(() => IPasswrd.Core.Vault.UnlockWithSessionKey(blob, Convert.FromBase64String(d.Dek)));
+            _vault = await Task.Run(() => IPasswrd.Core.Vault.UnlockWithSessionKey(blob, Convert.FromBase64String(d.Dek), RequireAuth(blob)));
         }
         catch
         {
@@ -312,6 +376,15 @@ public sealed class AppState
 
     // ================= сохранение и синхронизация =================
 
+    /// <summary>Merge an externally-supplied vault copy (a user-picked sync file, or a pulled cloud
+    /// copy) into the open vault, enforcing the anti-downgrade rule: a stripped MAC on a vault this
+    /// device already knows to be protected is rejected as tampering.</summary>
+    public int MergeExternal(byte[] otherBlob)
+    {
+        if (_vault is null) throw new InvalidOperationException("vault is locked");
+        return _vault.MergeFrom(otherBlob, RequireAuthLocal());
+    }
+
     public async Task SaveAsync()
     {
         if (_vault is null) return;
@@ -321,6 +394,7 @@ public sealed class AppState
             Directory.CreateDirectory(Path.GetDirectoryName(LocalVaultPath)!);
             VaultBackups.Snapshot(LocalVaultPath);   // копия того, что сейчас будет перезаписано — как на ПК
             File.WriteAllBytes(LocalVaultPath, data);
+            MarkVaultAuthenticated(_vault);   // this write carries a MAC; refuse un-sealed copies of this lineage hereafter
         }
         catch (Exception ex)
         {
@@ -377,7 +451,7 @@ public sealed class AppState
             {
                 int changed;
                 string envBefore = v.MasterPasswordChangedAt;
-                try { changed = v.MergeFrom(ext); }
+                try { changed = v.MergeFrom(ext, RequireAuthLocal()); }
                 catch (VaultIntegrityException)
                 {
                     LastSyncStatus = $"В {where} лежит другой сейф. Сначала решите, какой оставить.";
@@ -435,7 +509,7 @@ public sealed class AppState
             byte[]? remote = await GoogleDrive.PullAsync();
             if (remote is { Length: > 0 })
             {
-                v.MergeFrom(remote);                          // может бросить VaultIntegrityException
+                v.MergeFrom(remote, RequireAuthLocal());                          // может бросить VaultIntegrityException
                 File.WriteAllBytes(LocalVaultPath, v.Serialize());
                 ShareForAutoFill();
                 MainThread.BeginInvokeOnMainThread(() => VaultChanged?.Invoke());
@@ -516,7 +590,7 @@ public sealed class AppState
         Vault restored;
         try
         {
-            restored = await Task.Run(() => IPasswrd.Core.Vault.UnlockWithRecoveryCode(blob, recoveryCode));
+            restored = await Task.Run(() => IPasswrd.Core.Vault.UnlockWithRecoveryCode(blob, recoveryCode, RequireAuth(blob)));
         }
         catch (RecoveryNotEnabledException)
         {

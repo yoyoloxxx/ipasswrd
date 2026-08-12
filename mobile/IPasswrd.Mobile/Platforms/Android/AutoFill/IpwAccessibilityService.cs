@@ -332,9 +332,27 @@ public sealed class IpwAccessibilityService : AccessibilityService
             try
             {
                 var cm = (global::Android.Content.ClipboardManager?)GetSystemService(ClipboardService);
-                if (cm is not null) cm.PrimaryClip = global::Android.Content.ClipData.NewPlainText("ipw", value);
-                node.PerformAction(global::Android.Views.Accessibility.Action.Focus);
-                node.PerformAction(global::Android.Views.Accessibility.Action.Paste);
+                if (cm is not null)
+                {
+                    var clip = global::Android.Content.ClipData.NewPlainText("ipw", value);
+                    try
+                    {
+                        // Android 13+: keep the password out of the clipboard preview and history.
+                        using var extras = new global::Android.OS.PersistableBundle();
+                        extras.PutBoolean("android.content.extra.IS_SENSITIVE", true);
+                        if (clip!.Description is not null) clip.Description.Extras = extras;
+                    }
+                    catch (Exception) { }
+                    cm.PrimaryClip = clip;
+                    node.PerformAction(global::Android.Views.Accessibility.Action.Focus);
+                    node.PerformAction(global::Android.Views.Accessibility.Action.Paste);
+                    // Wipe the password from the clipboard right after the paste, so it is never left
+                    // behind for other apps or the clipboard history to pick up.
+                    new Handler(Looper.MainLooper!).PostDelayed(() =>
+                    {
+                        try { cm.PrimaryClip = global::Android.Content.ClipData.NewPlainText("", ""); } catch (Exception) { }
+                    }, 900);
+                }
             }
             catch (Exception) { }
         }
@@ -395,7 +413,6 @@ public sealed class IpwAccessibilityService : AccessibilityService
     {
         if (root is null) return null;
         string? byId = null;
-        string? byText = null;
         string dbgIds = "";
 
         void Walk(AccessibilityNodeInfo? node)
@@ -412,10 +429,13 @@ public sealed class IpwAccessibilityService : AccessibilityService
                     string? d = ExtractDomain(text);
                     if (d is not null && d.Contains('.'))
                     {
+                        // Trust ONLY a node the browser labels as its address bar. Page CONTENT that merely
+                        // looks like a domain (a phishing page printing "paypal.com") must never set the fill
+                        // target, or one site could get another site's login offered over the a11y path.
                         bool urlish = id.Contains("url") || id.Contains("omnibox") || id.Contains("address")
-                            || id.Contains("location") || id.Contains("host") || id.Contains("domain");
-                        if (urlish) { if (byId is null) { byId = d; dbgIds = id; } }
-                        else byText ??= d;
+                            || id.Contains("location") || id.Contains("host") || id.Contains("domain")
+                            || id.Contains("urlbar") || id.Contains("editurl");
+                        if (urlish && byId is null) { byId = d; dbgIds = id; }
                     }
                 }
             }
@@ -425,8 +445,8 @@ public sealed class IpwAccessibilityService : AccessibilityService
         }
 
         Walk(root);
-        string? result = byId ?? byText;
-        Console.WriteLine($"[IPW-A11Y] domain byId={byId}({dbgIds}) byText={byText} -> {result} pkg={_pkg}");
+        string? result = byId;
+        Console.WriteLine($"[IPW-A11Y] domain byId={byId}({dbgIds}) -> {result} pkg={_pkg}");
         return result;
     }
 

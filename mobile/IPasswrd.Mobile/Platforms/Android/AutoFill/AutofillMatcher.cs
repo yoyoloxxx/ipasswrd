@@ -22,7 +22,7 @@ internal static class AutofillMatcher
     public static List<AutofillCandidate> Rank(Vault vault, string? webDomain, string? packageName)
     {
         string wantDomain = Dedup.RegistrableDomain(Normalize(webDomain));
-        string[] pkgParts = PackageParts(packageName);
+        string wantPkg = (packageName ?? "").Trim();
 
         var list = new List<AutofillCandidate>();
         foreach (VaultEntry e in vault.Items())
@@ -31,26 +31,22 @@ internal static class AutofillMatcher
 
             string url = e.Item.Fields.GetValueOrDefault("url", "");
             string dom = Dedup.RegistrableDomain(url);
+            string itemPkg = e.Item.Fields.GetValueOrDefault("androidPackage", "").Trim();
             int score = 0;
 
-            if (wantDomain.Length > 0 && dom.Length > 0)
-            {
-                if (string.Equals(dom, wantDomain, StringComparison.OrdinalIgnoreCase)) score = 100;
-                else if (dom.EndsWith("." + wantDomain, StringComparison.OrdinalIgnoreCase)
-                      || wantDomain.EndsWith("." + dom, StringComparison.OrdinalIgnoreCase)) score = 80;
-            }
+            // Browser target: strict registrable-domain equality on the full Public Suffix List. No
+            // subdomain or substring fallback — a saved login is offered to a page ONLY when its eTLD+1
+            // matches exactly, so a sibling tenant or a look-alike domain never collects it.
+            if (wantDomain.Length > 0 && dom.Length > 0
+                && string.Equals(dom, wantDomain, StringComparison.OrdinalIgnoreCase))
+                score = 100;
 
-            if (score == 0 && pkgParts.Length > 0)
-            {
-                string brand = BrandOf(dom);
-                if (brand.Length >= 3 && pkgParts.Contains(brand, StringComparer.OrdinalIgnoreCase)) score = 70;
-                else
-                {
-                    string titleBrand = BrandOf(e.Item.Title.ToLowerInvariant());
-                    if (titleBrand.Length >= 3 && pkgParts.Contains(titleBrand, StringComparer.OrdinalIgnoreCase))
-                        score = 60;
-                }
-            }
+            // Native-app target: EXACT stored package association only (recorded when the login was
+            // saved from that very app). No brand/name guessing, so an app can no longer pose as another
+            // (e.g. com.paypal.evil matching paypal.com) to be handed its credential.
+            else if (wantPkg.Length > 0 && itemPkg.Length > 0
+                && string.Equals(itemPkg, wantPkg, StringComparison.OrdinalIgnoreCase))
+                score = 90;
 
             list.Add(new AutofillCandidate(e.Id, e.Item, score));
         }
@@ -94,20 +90,23 @@ internal static class AutofillMatcher
         return d.Contains("://", StringComparison.Ordinal) ? d : "https://" + d;
     }
 
-    private static string[] PackageParts(string? packageName)
+    /// <summary>Package names of browsers whose reported web domain we trust for autofill. A non-browser
+    /// app is never one of these, so it cannot present a fake web domain to harvest another site's login;
+    /// unknown packages are matched by their exact stored package association instead. Conservative on
+    /// purpose: a browser not on the list simply degrades to manual selection, never a wrong-site fill.</summary>
+    private static readonly HashSet<string> KnownBrowsers = new(StringComparer.OrdinalIgnoreCase)
     {
-        if (string.IsNullOrWhiteSpace(packageName)) return Array.Empty<string>();
-        // com.vk.vkapp → [com, vk, vkapp]; служебные части браузеров отбрасываем
-        return packageName.Split('.', StringSplitOptions.RemoveEmptyEntries)
-            .Where(p => p is not ("com" or "org" or "net" or "ru" or "app" or "android" or "mobile"))
-            .ToArray();
-    }
+        "com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary",
+        "org.mozilla.firefox", "org.mozilla.firefox_beta", "org.mozilla.fenix", "org.mozilla.focus",
+        "com.microsoft.emmx", "com.sec.android.app.sbrowser", "com.sec.android.app.sbrowser.beta",
+        "com.opera.browser", "com.opera.mini.native", "com.opera.gx", "com.brave.browser",
+        "com.yandex.browser", "com.yandex.browser.beta", "com.yandex.browser.alpha",
+        "com.duckduckgo.mobile.android", "com.vivaldi.browser", "com.kiwibrowser.browser",
+        "com.UCMobile.intl", "com.huawei.browser", "com.mi.globalbrowser", "com.android.browser",
+        "com.ecosia.android", "org.torproject.torbrowser", "com.cloudmosa.puffinFree",
+    };
 
-    private static string BrandOf(string domainOrTitle)
-    {
-        if (string.IsNullOrEmpty(domainOrTitle)) return "";
-        int dot = domainOrTitle.IndexOf('.');
-        string head = dot > 0 ? domainOrTitle[..dot] : domainOrTitle;
-        return new string(head.Where(char.IsLetterOrDigit).ToArray());
-    }
+    /// <summary>Is this the package of a known web browser, so its reported web domain can be trusted?</summary>
+    public static bool IsBrowser(string? packageName) =>
+        !string.IsNullOrEmpty(packageName) && KnownBrowsers.Contains(packageName!);
 }

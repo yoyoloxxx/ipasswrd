@@ -16,6 +16,19 @@ public interface IBiometricAuth
     Task<bool> AuthenticateAsync(string reason);
 }
 
+/// <summary>Secret whose retrieval is gated by a biometric / device-credential CRYPTO gate: the key
+/// that protects it is released by the hardware only after the user passes biometrics (or the device
+/// credential). Storing is silent; revealing prompts. Any failure returns null/false so the caller
+/// falls back to the master password. Used for the vault session key (desktop TPM/Hello parity).</summary>
+public interface IBiometricSecret
+{
+    /// <summary>True only when a real hardware crypto gate is usable on this device.</summary>
+    bool IsAvailable { get; }
+    Task<bool> ProtectAsync(string name, byte[] data);
+    Task<byte[]?> RevealAsync(string name, string reason);
+    void Delete(string name);
+}
+
 /// <summary>Защищённое хранилище маленьких секретов (Keychain на iOS).</summary>
 public interface ISecureKeyStore
 {
@@ -48,15 +61,18 @@ public static class Svc
     public static IQrScanner Qr { get; private set; } = new NullQrScanner();
     public static IBiometricAuth Biometric { get; private set; } = new NullBiometric();
     public static ISecureKeyStore KeyStore { get; private set; } = new PrefsKeyStore();
+    public static IBiometricSecret BiometricSecret { get; private set; } = new NullBiometricSecret();
     public static IExternalVaultFile External { get; private set; } = new NullExternalVaultFile();
     public static IImageShrink Shrink { get; private set; } = new NullImageShrink();
     public static AppState State { get; } = new();
 
     public static void Init(IQrScanner qr, IBiometricAuth biometric, ISecureKeyStore keyStore,
-                            IExternalVaultFile external, IImageShrink? shrink = null)
+                            IExternalVaultFile external, IImageShrink? shrink = null,
+                            IBiometricSecret? biometricSecret = null)
     {
         Qr = qr; Biometric = biometric; KeyStore = keyStore; External = external;
         if (shrink is not null) Shrink = shrink;
+        if (biometricSecret is not null) BiometricSecret = biometricSecret;
     }
 }
 
@@ -72,6 +88,14 @@ public sealed class NullBiometric : IBiometricAuth
     public bool IsAvailable => false;
     public string Kind => "Биометрия";
     public Task<bool> AuthenticateAsync(string reason) => Task.FromResult(false);
+}
+
+public sealed class NullBiometricSecret : IBiometricSecret
+{
+    public bool IsAvailable => false;
+    public Task<bool> ProtectAsync(string name, byte[] data) => Task.FromResult(false);
+    public Task<byte[]?> RevealAsync(string name, string reason) => Task.FromResult<byte[]?>(null);
+    public void Delete(string name) { }
 }
 
 /// <summary>Небезопасный запасной вариант (только для отладки вне iOS).</summary>
