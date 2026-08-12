@@ -40,6 +40,7 @@ public sealed class Vault
     private string _recoveryRevokedAt;
     private string _masterChangedAt;
     private bool? _hasAttachments;   // null = not worked out yet
+    private bool _authenticated;   // a valid document MAC was present when this vault was loaded
 
     private static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never };
 
@@ -61,17 +62,35 @@ public sealed class Vault
     }
 
     /// <summary>Deserialise and reject layouts this build does not understand.</summary>
+    /// <summary>Ceilings applied to an UNTRUSTED vault blob before it is parsed, so a tampered or
+    /// oversized file cannot exhaust memory on unlock (a legitimate vault stays far below both).</summary>
+    private const int MaxBlobBytes = 256 * 1024 * 1024;
+    private const int MaxRecords = 200_000;
+
     private static VaultDocumentDto Parse(byte[] blob)
     {
+        if (blob.Length > MaxBlobBytes) throw new NotSupportedException("vault blob too large");
         VaultDocumentDto doc = JsonSerializer.Deserialize<VaultDocumentDto>(blob, Json)
                                ?? throw new FormatException("empty vault blob");
         if (doc.Format is < FormatBase or > FormatAttachments)
             throw new NotSupportedException($"unsupported vault format: {doc.Format}");
+        if (doc.Records is { Count: > MaxRecords }) throw new NotSupportedException("vault has too many records");
         return doc;
     }
 
     /// <summary>Stable clear-text id of this vault's lineage (survives password changes; used to guard sync merges).</summary>
     public string VaultId => _vaultId;
+
+    /// <summary>True when the loaded blob carried a valid document-integrity MAC. A freshly created
+    /// vault is false until it has been serialised and re-opened.</summary>
+    public bool IsAuthenticated => _authenticated;
+
+    /// <summary>Clear-text lineage id straight from a serialised blob (no password needed), or "" if it
+    /// cannot be read. Lets the app tell whether a file belongs to a vault it knows to be MAC-protected.</summary>
+    public static string VaultIdOf(byte[] blob)
+    {
+        try { return Parse(blob).VaultId ?? ""; } catch { return ""; }
+    }
 
     // ---- lifecycle ----
 
@@ -91,7 +110,7 @@ public sealed class Vault
     }
 
     /// <summary>Unlock a serialised vault. Throws <see cref="WrongMasterPasswordException"/> on a bad password.</summary>
-    public static Vault Unlock(byte[] blob, string masterPassword)
+    public static Vault Unlock(byte[] blob, string masterPassword, bool requireAuthenticated = false)
     {
         VaultDocumentDto doc = Parse(blob);
 
@@ -99,9 +118,10 @@ public sealed class Vault
         byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
         byte[] kek = Crypto.DeriveKey(masterPassword, salt, cfg);
         byte[] dek = Unwrap(kek, doc.WrappedKey);   // throws WrongMasterPasswordException
+        bool authed = VerifyDocMac(doc, dek, requireAuthenticated);   // throws on a tampered/forged file
         string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
         var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
-                          doc.MasterChangedAt);
+                          doc.MasterChangedAt) { _authenticated = authed };
         CryptographicOperations.ZeroMemory(dek);   // the vault holds its own (shielded) copy now
         CryptographicOperations.ZeroMemory(kek);
         return v;
@@ -187,7 +207,7 @@ public sealed class Vault
     /// The key is verified against the first live record; a wrong key throws
     /// <see cref="WrongMasterPasswordException"/>. An empty vault is accepted as-is.
     /// </summary>
-    public static Vault UnlockWithSessionKey(byte[] blob, byte[] dek)
+    public static Vault UnlockWithSessionKey(byte[] blob, byte[] dek, bool requireAuthenticated = false)
     {
         VaultDocumentDto doc = Parse(blob);
 
@@ -206,6 +226,9 @@ public sealed class Vault
             catch (VaultIntegrityException) { throw new WrongMasterPasswordException(); }
             break;
         }
+        // The key is proven above (a wrong one already threw as WrongMasterPassword); now confirm the
+        // sync metadata was not forged. A MAC mismatch here therefore means a tampered file, not a bad key.
+        v._authenticated = VerifyDocMac(doc, dek, requireAuthenticated);
         return v;
     }
 
@@ -234,6 +257,7 @@ public sealed class Vault
             // so folder-sync (iCloud/Drive) converges instead of ping-ponging re-uploads
             Records = _records.OrderBy(r => r.Id, StringComparer.Ordinal).ToList(),
         };
+        doc.Mac = WithDek(d => Convert.ToBase64String(ComputeDocMac(d, doc)));
         return JsonSerializer.SerializeToUtf8Bytes(doc, Json);
     }
 
@@ -348,8 +372,13 @@ public sealed class Vault
     {
         var list = new List<VaultEntry>();
         foreach (RecordDto rec in _records)
-            if (!rec.Deleted)
-                list.Add(new VaultEntry(rec.Id, DecryptRecord(rec), rec.UpdatedAt));
+        {
+            if (rec.Deleted) continue;
+            // A record that fails authentication (e.g. one injected by a tampered sync copy) must not
+            // take the whole vault down: skip it rather than throwing out of the entire listing.
+            try { list.Add(new VaultEntry(rec.Id, DecryptRecord(rec), rec.UpdatedAt)); }
+            catch (VaultIntegrityException) { }
+        }
         return list;
     }
 
@@ -364,8 +393,13 @@ public sealed class Vault
     public IEnumerable<VaultEntry> Stream()
     {
         foreach (RecordDto rec in _records)
-            if (!rec.Deleted)
-                yield return new VaultEntry(rec.Id, DecryptRecord(rec), rec.UpdatedAt);
+        {
+            if (rec.Deleted) continue;
+            VaultEntry entry;
+            try { entry = new VaultEntry(rec.Id, DecryptRecord(rec), rec.UpdatedAt); }
+            catch (VaultIntegrityException) { continue; }   // skip a poison record, keep streaming the rest
+            yield return entry;
+        }
     }
 
     public VaultItem Get(string id)
@@ -391,12 +425,19 @@ public sealed class Vault
     /// of records that were added or replaced from <paramref name="otherBlob"/> (an adopted
     /// envelope is not counted — compare <see cref="MasterPasswordChangedAt"/> to detect it).
     /// </summary>
-    public int MergeFrom(byte[] otherBlob)
+    public int MergeFrom(byte[] otherBlob, bool requireAuthenticated = false)
     {
         VaultDocumentDto other = Parse(otherBlob);
         if (!string.IsNullOrEmpty(other.VaultId) && !string.IsNullOrEmpty(_vaultId)
             && !string.Equals(other.VaultId, _vaultId, StringComparison.Ordinal))
             throw new VaultIntegrityException("refusing to merge a different vault");
+
+        // Authenticate the incoming copy against OUR DEK (same lineage => same MAC key). A forged
+        // updatedAt, a fabricated tombstone, or a swapped key envelope all break this check, so a
+        // cloud or account that cannot derive the DEK can neither roll us back, delete our records,
+        // nor brick the vault. A file with no MAC is legacy: tolerated unless the caller knows this
+        // vault is already protected (requireAuthenticated), which turns a stripped MAC into a refusal.
+        WithDek(d => { VerifyDocMac(other, d, requireAuthenticated); return 0; });
 
         var byId = new Dictionary<string, RecordDto>(StringComparer.Ordinal);
         foreach (RecordDto r in _records) byId[r.Id] = r;
@@ -581,7 +622,7 @@ public sealed class Vault
     /// </summary>
     /// <exception cref="RecoveryNotEnabledException">No code was ever issued for this vault.</exception>
     /// <exception cref="WrongRecoveryCodeException">The code is malformed or simply wrong.</exception>
-    public static Vault UnlockWithRecoveryCode(byte[] blob, string recoveryCode)
+    public static Vault UnlockWithRecoveryCode(byte[] blob, string recoveryCode, bool requireAuthenticated = false)
     {
         VaultDocumentDto doc = Parse(blob);
         RecoveryDto rec = doc.Recovery ?? throw new RecoveryNotEnabledException();
@@ -596,8 +637,9 @@ public sealed class Vault
         var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism).Capped();
         byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
         string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
+        bool authed = VerifyDocMac(doc, dek, requireAuthenticated);   // throws on a tampered/forged file
         var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
-                          doc.MasterChangedAt);
+                          doc.MasterChangedAt) { _authenticated = authed };
         CryptographicOperations.ZeroMemory(dek);   // the vault holds its own (shielded) copy now
         CryptographicOperations.ZeroMemory(rek);
         return v;
@@ -628,6 +670,79 @@ public sealed class Vault
 
     private static byte[] Unwrap(byte[] kek, BlobDto wrapped) =>
         TryUnwrap(kek, wrapped, Crypto.AadVaultKey) ?? throw new WrongMasterPasswordException();
+
+    // ---- document integrity MAC (anti-rollback / anti-tamper for the clear-text sync metadata) ----
+
+    /// <summary>
+    /// HMAC over the vault's authenticated metadata: the key envelope (kdf + wrappedKey + recovery +
+    /// their stamps + vaultId) and, per record, id / updatedAt / deleted / nonce / ciphertext — the
+    /// clear-text that AES-GCM does not already cover. Keyed by a DEK-derived subkey, so only a holder
+    /// of the master password (or recovery code) can produce or verify it. Records are folded in a
+    /// fixed order and every field is length-prefixed, so the input is canonical and unambiguous.
+    /// </summary>
+    private static byte[] ComputeDocMac(byte[] dek, VaultDocumentDto doc)
+    {
+        byte[] key = Crypto.DeriveDocMacKey(dek);
+        try
+        {
+            using var ms = new System.IO.MemoryStream();
+            using (var w = new System.IO.BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                void W(string? s) { byte[] b = System.Text.Encoding.UTF8.GetBytes(s ?? ""); w.Write(b.Length); w.Write(b); }
+                void Kdf(KdfDto k) { W(k.Algorithm); w.Write(k.MemoryKiB); w.Write(k.Iterations); w.Write(k.Parallelism); W(k.Salt); }
+
+                W("ipasswrd/doc-mac/v1");
+                w.Write(doc.Format);
+                W(doc.VaultId);
+                W(doc.MasterChangedAt);
+                W(doc.RecoveryRevokedAt);
+                Kdf(doc.Kdf);
+                W(doc.WrappedKey.Nonce); W(doc.WrappedKey.Ciphertext);
+
+                w.Write(doc.Recovery is not null);
+                if (doc.Recovery is not null)
+                {
+                    Kdf(doc.Recovery.Kdf);
+                    W(doc.Recovery.WrappedKey.Nonce); W(doc.Recovery.WrappedKey.Ciphertext);
+                    W(doc.Recovery.CreatedAt);
+                }
+
+                var recs = doc.Records.OrderBy(r => r.Id, StringComparer.Ordinal).ToList();
+                w.Write(recs.Count);
+                foreach (RecordDto r in recs)
+                {
+                    W(r.Id); W(r.UpdatedAt); w.Write(r.Deleted); W(r.Nonce); W(r.Ciphertext);
+                }
+            }
+            return Crypto.HmacSha256(key, ms.ToArray());
+        }
+        finally { CryptographicOperations.ZeroMemory(key); }
+    }
+
+    /// <summary>
+    /// Verify a parsed document's MAC with <paramref name="dek"/>. Returns true if a valid MAC was
+    /// present, false if none was (a legacy, pre-MAC file). Throws <see cref="VaultIntegrityException"/>
+    /// when a MAC is present but wrong (tampered / corrupted), or when it is absent while
+    /// <paramref name="requireAuthenticated"/> is set — a downgrade, since the caller knows this vault
+    /// is MAC-protected, so a missing seal can only be an attacker stripping it.
+    /// </summary>
+    private static bool VerifyDocMac(VaultDocumentDto doc, byte[] dek, bool requireAuthenticated)
+    {
+        if (string.IsNullOrEmpty(doc.Mac))
+        {
+            if (requireAuthenticated)
+                throw new VaultIntegrityException("vault integrity seal is missing (possible downgrade or tampering)");
+            return false;
+        }
+        byte[] expected = ComputeDocMac(dek, doc);
+        byte[] actual;
+        try { actual = Convert.FromBase64String(doc.Mac); }
+        catch (FormatException) { throw new VaultIntegrityException("vault integrity seal is malformed"); }
+        bool ok = CryptographicOperations.FixedTimeEquals(expected, actual);
+        CryptographicOperations.ZeroMemory(expected);
+        if (!ok) throw new VaultIntegrityException("vault integrity check failed (tampered or corrupted)");
+        return true;
+    }
 
     /// <summary>Lowest layout version that can represent what this vault currently holds.</summary>
     private int FormatNeeded()

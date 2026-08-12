@@ -436,7 +436,9 @@ public partial class MainWindow
     /// </summary>
     private IEnumerable<string> TrustedExtensionIds()
     {
-        yield return DevExtensionId;
+#if DEBUG
+        yield return DevExtensionId;                              // unpacked dev build only — never trusted in a Release build
+#endif
         if (StoreExtensionId.Length > 0) yield return StoreExtensionId;
         if (!string.IsNullOrWhiteSpace(_extraExtensionId)) yield return _extraExtensionId.Trim();
     }

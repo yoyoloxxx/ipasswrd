@@ -832,6 +832,65 @@ public partial class MainWindow : Window
 
     private bool Creating => !System.IO.File.Exists(VaultPath());
 
+    // ---- sync-integrity trust anchor (anti-downgrade) ----------------------------------------
+    //
+    // The vault's document MAC (Vault / VaultDocumentDto.Mac) is verified whenever it is present,
+    // which already blocks a forged updatedAt, a fabricated tombstone, or a swapped key envelope.
+    // The one thing a raw MAC cannot stop on its own is an attacker STRIPPING it so a forgery looks
+    // like a legacy (pre-MAC) file. We close that with a flag kept in app-private local data — the
+    // folder iCloud/Drive never see — recording that this install has produced a MAC-protected copy
+    // of a given vault lineage. Once set, an un-sealed copy of that lineage is refused, not trusted.
+
+    private static string AuthFlagPath() => System.IO.Path.Combine(LocalDataDir(), "vault-auth.flag");
+
+    private void MarkVaultAuthenticated()
+    {
+        try
+        {
+            if (_vault is null) return;
+            System.IO.Directory.CreateDirectory(LocalDataDir());
+            System.IO.File.WriteAllText(AuthFlagPath(), _vault.VaultId);
+        }
+        catch { /* best-effort; a present seal is still verified regardless */ }
+    }
+
+    /// <summary>True if this install knows the vault in <paramref name="blob"/> to be MAC-protected,
+    /// so a missing seal on it can only be a downgrade attempt.</summary>
+    private static bool VaultAuthRequired(byte[] blob)
+    {
+        try
+        {
+            string id = Vault.VaultIdOf(blob);
+            return id.Length > 0 && System.IO.File.ReadAllText(AuthFlagPath()).Trim() == id;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Merge-side check: the open vault's lineage id is already known.</summary>
+    private bool VaultAuthRequired()
+    {
+        try { return _vault is not null && System.IO.File.ReadAllText(AuthFlagPath()).Trim() == _vault.VaultId; }
+        catch { return false; }
+    }
+
+    private Vault UnlockFromFile(string pw)
+    {
+        byte[] blob = System.IO.File.ReadAllBytes(VaultPath());
+        return Vault.Unlock(blob, pw, VaultAuthRequired(blob));
+    }
+
+    private Vault UnlockFromFileWithSessionKey(byte[] dek)
+    {
+        byte[] blob = System.IO.File.ReadAllBytes(VaultPath());
+        return Vault.UnlockWithSessionKey(blob, dek, VaultAuthRequired(blob));
+    }
+
+    private Vault RecoverFromFile(string code)
+    {
+        byte[] blob = System.IO.File.ReadAllBytes(VaultPath());
+        return Vault.UnlockWithRecoveryCode(blob, code, VaultAuthRequired(blob));
+    }
+
     private void Save()
     {
         string p = VaultPath();
@@ -841,6 +900,7 @@ public partial class MainWindow : Window
         System.IO.File.WriteAllBytes(p, data);
         try { _vaultStamp = System.IO.File.GetLastWriteTimeUtc(p); } catch { _vaultStamp = default; }
         _vaultHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data));
+        MarkVaultAuthenticated();   // this write carries a MAC; refuse un-sealed copies of this vault hereafter
         GooglePushKick();   // if Google sync is on, mirror this write up to Drive (best-effort, async)
     }
 
@@ -1131,7 +1191,7 @@ public partial class MainWindow : Window
             if (string.IsNullOrEmpty(d.Dek)) { WipeQuickUnlock(); return false; }
             if (d.ExpiresAt != 0 && DateTimeOffset.UtcNow.ToUnixTimeSeconds() > d.ExpiresAt) { WipeQuickUnlock(); return false; }
             byte[] softDek = Convert.FromBase64String(d.Dek);
-            _vault = Vault.UnlockWithSessionKey(System.IO.File.ReadAllBytes(VaultPath()), softDek);
+            _vault = UnlockFromFileWithSessionKey(softDek);
             System.Security.Cryptography.CryptographicOperations.ZeroMemory(softDek);   // сейф держит свою (заслонённую) копию
             _helloAvailable = false;
             return true;
@@ -1178,7 +1238,7 @@ public partial class MainWindow : Window
             }
             catch { WipeQuickUnlock(); return; }   // wrong Hello identity / tampered file
 
-            _vault = Vault.UnlockWithSessionKey(System.IO.File.ReadAllBytes(VaultPath()), dek);
+            _vault = UnlockFromFileWithSessionKey(dek);
             System.Security.Cryptography.CryptographicOperations.ZeroMemory(dek);   // сейф держит свою (заслонённую) копию
             _helloChallenge = challenge;
             _helloKey = key;
@@ -1417,7 +1477,7 @@ public partial class MainWindow : Window
             else
             {
                 if (pw.Length == 0) { Err("Введите мастер-пароль."); return; }
-                _vault = Vault.Unlock(System.IO.File.ReadAllBytes(VaultPath()), pw);
+                _vault = UnlockFromFile(pw);
             }
         }
         catch (WrongMasterPasswordException)
@@ -1499,7 +1559,7 @@ public partial class MainWindow : Window
         Vault restored;
         try
         {
-            restored = Vault.UnlockWithRecoveryCode(System.IO.File.ReadAllBytes(VaultPath()), code);
+            restored = RecoverFromFile(code);
         }
         catch (WrongRecoveryCodeException)
         {
@@ -3502,7 +3562,7 @@ public partial class MainWindow : Window
                         }
                         else
                         {
-                            int changed = _vault.MergeFrom(bytes);
+                            int changed = _vault.MergeFrom(bytes, VaultAuthRequired());
                             _vaultStamp = m;
                             Save();                        // canonical union back to the file
                             if (changed > 0 && VaultScreen.IsVisible)
@@ -5054,7 +5114,7 @@ public partial class MainWindow : Window
             try
             {
                 // cheapest honest check that this really is the owner: re-open the saved vault
-                Vault.Unlock(System.IO.File.ReadAllBytes(VaultPath()), pw);
+                UnlockFromFile(pw);
             }
             catch (WrongMasterPasswordException) { SetStatus("Мастер-пароль неверный.", true); return; }
             catch (Exception ex) { SetStatus("Ошибка: " + ex.Message, true); return; }
@@ -5432,7 +5492,7 @@ public partial class MainWindow : Window
 
             if (System.IO.File.Exists(target))
             {
-                try { _vault.MergeFrom(System.IO.File.ReadAllBytes(target)); }   // union with the copy from another device
+                try { _vault.MergeFrom(System.IO.File.ReadAllBytes(target), VaultAuthRequired()); }   // union with the copy from another device
                 catch (VaultIntegrityException) { return Tr("В iCloud уже лежит другой сейф. Сначала решите, какой оставить."); }
             }
 

@@ -108,7 +108,7 @@ static bool TryStartApp()
     {
         // dist-host\IPasswrd.Host.exe → ..\dist\IPasswrd.App.exe (repo layout), else the known path.
         string exe = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "dist", "IPasswrd.App.exe"));
-        if (!File.Exists(exe)) exe = @"D:\MyProjects\IPasswrd\dist\IPasswrd.App.exe";
+        if (!File.Exists(exe)) exe = Path.Combine(AppContext.BaseDirectory, "IPasswrd.App.exe");   // installed layout: app sits next to the host
         if (!File.Exists(exe)) return false;
         // Start HIDDEN in the tray: the browser talks over the pipe; no window pops up.
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, "--tray") { UseShellExecute = true });

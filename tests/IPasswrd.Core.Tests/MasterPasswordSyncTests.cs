@@ -37,13 +37,7 @@ public class MasterPasswordSyncTests
     {
         var root = JsonNode.Parse(blob)!.AsObject();
         root.Remove("masterChangedAt");
-        return Encoding.UTF8.GetBytes(root.ToJsonString());
-    }
-
-    private static byte[] WithStamp(byte[] blob, string ts)
-    {
-        var root = JsonNode.Parse(blob)!.AsObject();
-        root["masterChangedAt"] = ts;
+        root.Remove("mac");                 // a genuine pre-stamp build wrote neither field
         return Encoding.UTF8.GetBytes(root.ToJsonString());
     }
 
@@ -102,10 +96,10 @@ public class MasterPasswordSyncTests
     public void TwoConcurrentChanges_NewestWins_OlderIsIgnored()
     {
         var (a, b) = TwoDevices();
-        a.ChangeMasterPassword(OldPw, "passphrase set on device A");
-        b.ChangeMasterPassword(OldPw, "passphrase set on device B");
-        byte[] aBlob = WithStamp(a.Serialize(), "2999-01-01T00:00:00.0000000Z");   // A decisively newer
-        byte[] bBlob = b.Serialize();                           // B's change, before it ever sees A's
+        b.ChangeMasterPassword(OldPw, "passphrase set on device B");   // older change first
+        a.ChangeMasterPassword(OldPw, "passphrase set on device A");   // later in real time -> newer stamp
+        byte[] aBlob = a.Serialize();                          // A decisively newer, MAC valid
+        byte[] bBlob = b.Serialize();                          // B's change, before it ever sees A's
 
         b.MergeFrom(aBlob);                                     // newer stamp arrives → adopt
         Assert.NotNull(Vault.Unlock(b.Serialize(), "passphrase set on device A"));
@@ -172,10 +166,11 @@ public class MasterPasswordSyncTests
         pc.ChangeMasterPassword(OldPw, NewPw);
         pc.Add(Sample("Added on PC"));
         var root = JsonNode.Parse(pc.Serialize())!.AsObject();
-        root["kdf"]!["salt"] = "*** not base64 ***";            // a broken wrapping must never replace a working one
+        root.Remove("mac");                                    // a legacy peer with no integrity seal...
+        root["kdf"]!["salt"] = "*** not base64 ***";            // ...and a broken wrapping must never replace a working one
         byte[] damaged = Encoding.UTF8.GetBytes(root.ToJsonString());
 
-        int changed = phone.MergeFrom(damaged);
+        int changed = phone.MergeFrom(damaged);                 // requireAuthenticated defaults false -> legacy tolerated
 
         Assert.Equal(1, changed);                               // the record still arrived
         Assert.NotNull(Vault.Unlock(phone.Serialize(), OldPw)); // envelope stayed local

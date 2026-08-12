@@ -19,4 +19,9 @@
     <PackageReference Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Official Public Suffix List (publicsuffix.org). Embedded; parsed by PublicSuffix.cs. -->
+    <EmbeddedResource Include="public_suffix_list.dat" />
+  </ItemGroup>
+
 </Project>

@@ -147,40 +147,14 @@
   // Same public-suffix set as content.js / Dedup.cs. inject.js runs in the page-tamperable MAIN
   // world, so content.js re-checks this in the isolated world — but we enforce it here too, so a
   // bare-suffix rpId (github.io, co.uk) is rejected before we ever touch the vault.
-  const PUBLIC_SUFFIXES = new Set([
-    "co.uk","org.uk","gov.uk","ac.uk","me.uk","ltd.uk","plc.uk","net.uk","sch.uk","nhs.uk","police.uk","com.au",
-    "net.au","org.au","edu.au","gov.au","id.au","asn.au","co.jp","or.jp","ne.jp","ac.jp","go.jp","gr.jp",
-    "ed.jp","lg.jp","ad.jp","co.kr","or.kr","ne.kr","re.kr","pe.kr","go.kr","ac.kr","hs.kr","ms.kr","com.br",
-    "net.br","org.br","gov.br","edu.br","art.br","blog.br","com.cn","net.cn","org.cn","gov.cn","edu.cn","ac.cn",
-    "com.tw","net.tw","org.tw","idv.tw","gov.tw","edu.tw","com.hk","net.hk","org.hk","edu.hk","gov.hk","idv.hk",
-    "com.sg","net.sg","org.sg","edu.sg","gov.sg","per.sg","com.my","net.my","org.my","gov.my","edu.my","co.in",
-    "net.in","org.in","gen.in","firm.in","ind.in","gov.in","ac.in","edu.in","com.tr","net.tr","org.tr","gov.tr",
-    "edu.tr","bel.tr","com.ua","net.ua","org.ua","in.ua","kiev.ua","com.ru","net.ru","org.ru","msk.ru","spb.ru",
-    "com.mx","com.ar","com.co","net.co","nom.co","com.pe","com.ve","com.ec","com.uy","com.py","com.bo","com.cl",
-    "co.il","org.il","net.il","ac.il","gov.il","muni.il","co.za","org.za","net.za","web.za","gov.za","ac.za",
-    "co.nz","net.nz","org.nz","govt.nz","ac.nz","geek.nz","school.nz","co.th","in.th","ac.th","go.th","or.th",
-    "net.th","com.vn","net.vn","org.vn","gov.vn","edu.vn","com.ph","net.ph","org.ph","gov.ph","com.pl","net.pl",
-    "org.pl","gov.pl","waw.pl","edu.pl","com.pt","com.es","org.es","com.eg","com.sa","com.ng","com.gh","com.kw",
-    "com.qa","com.bh","com.pk","com.bd","co.id","or.id","web.id","ac.id","go.id","my.id","biz.id","co.ke",
-    "co.tz","co.ug","co.zw","co.mz","github.io","githubusercontent.com","gitlab.io","pages.dev","workers.dev",
-    "r2.dev","web.app","firebaseapp.com","appspot.com","cloudfunctions.net","run.app","vercel.app","now.sh",
-    "netlify.app","netlify.com","onrender.com","render.com","herokuapp.com","herokudns.com","fly.dev",
-    "railway.app","up.railway.app","azurewebsites.net","azurestaticapps.net","cloudapp.net",
-    "cloudapp.azure.com","trafficmanager.net","blob.core.windows.net","web.core.windows.net","azureedge.net",
-    "amazonaws.com","s3.amazonaws.com","s3-website.amazonaws.com","elasticbeanstalk.com","cloudfront.net",
-    "amplifyapp.com","awsapprunner.com","execute-api.amazonaws.com","blogspot.com","wordpress.com","tumblr.com",
-    "weebly.com","wixsite.com","editorx.io","myshopify.com","squarespace.com","webflow.io","framer.app",
-    "framer.website","framer.media","glitch.me","repl.co","replit.dev","replit.app","surge.sh","bubbleapps.io",
-    "softr.app","translate.goog","googleusercontent.com","readthedocs.io","gitbook.io","notion.site",
-    "super.site","carrd.co","substack.com","sharepoint.com","atlassian.net","zendesk.com","freshdesk.com",
-    "myjetbrains.com","statuspage.io","pythonanywhere.com","codeberg.page","stackblitz.io","vercel.sh",
-    "deno.dev",
-  ]);
+  // Public Suffix List: use the full official list from psl.js, loaded into this MAIN world
+  // immediately before inject.js at document_start (before any page script runs, so the page
+  // cannot clobber the reference). Captured once. content.js re-checks in the isolated world too.
+  const IPWPSL = self.__ipwPsl || null;
   const isPublicSuffix = (d) => {
+    if (IPWPSL) return IPWPSL.isPublicSuffix(d);
     d = String(d || "").toLowerCase().replace(/\.$/, "");
-    if (!d) return true;
-    if (d.indexOf(".") < 0) return true;
-    return PUBLIC_SUFFIXES.has(d);
+    return !d || d.indexOf(".") < 0;
   };
   function rpIdAllowed(rpId, host) {
     rpId = String(rpId || "").toLowerCase().replace(/\.$/, "");

@@ -413,7 +413,7 @@ public partial class MainWindow
                     string ssid = CurrentSsid();
                     string val = ssid.Length > 0 ? ssid : "(нет Wi-Fi)";
                     string ip  = BestLanIPv4();
-                    string url = ip.Length > 0 ? $"http://{ip}:{SmsRelayPort}/clip?t={_smsToken}" : "";
+                    string url = ip.Length > 0 ? $"http://{ip}:{SmsRelayPort}/clip" : "";
                     string stamp = val + "|" + url;
                     if (stamp != last)
                     {

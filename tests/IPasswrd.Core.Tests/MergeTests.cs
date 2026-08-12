@@ -28,14 +28,6 @@ public class MergeTests
         return (Vault.Unlock(blob, Pw), Vault.Unlock(blob, Pw));
     }
 
-    private static byte[] SetUpdatedAt(byte[] blob, string id, string ts)
-    {
-        var root = JsonNode.Parse(blob)!.AsObject();
-        foreach (var rec in root["records"]!.AsArray())
-            if ((string?)rec!["id"] == id) rec["updatedAt"] = ts;
-        return Encoding.UTF8.GetBytes(root.ToJsonString());
-    }
-
     [Fact]
     public void NewRecordFromOtherDevice_IsAdded()
     {
@@ -54,10 +46,10 @@ public class MergeTests
     public void NewerEdit_WinsAndDecrypts()
     {
         var (a, b) = TwoDevices(out string id);
+        System.Threading.Thread.Sleep(1100);                       // stamps are second-resolution; make B genuinely newer
         b.Update(id, Sample("Seed", "edited-on-b"));
-        byte[] newer = SetUpdatedAt(b.Serialize(), id, "2999-01-01T00:00:00Z");
 
-        int changed = a.MergeFrom(newer);
+        int changed = a.MergeFrom(b.Serialize());                  // a real, MAC-authenticated newer copy
 
         Assert.Equal(1, changed);
         Assert.Equal("edited-on-b", a.Get(id).Fields["password"]);  // remote content, decrypts with shared DEK
@@ -67,23 +59,24 @@ public class MergeTests
     public void OlderEdit_IsIgnored()
     {
         var (a, b) = TwoDevices(out string id);
-        b.Update(id, Sample("Seed", "edited-on-b"));
-        byte[] older = SetUpdatedAt(b.Serialize(), id, "2000-01-01T00:00:00Z");
+        System.Threading.Thread.Sleep(1100);
+        a.Update(id, Sample("Seed", "edited-on-a"));               // A moves ahead in time; B stays at the seed
+        byte[] older = b.Serialize();
 
         int changed = a.MergeFrom(older);
 
         Assert.Equal(0, changed);
-        Assert.Equal("k4!Vr#92mQzL&wPn", a.Get(id).Fields["password"]);  // local copy kept
+        Assert.Equal("edited-on-a", a.Get(id).Fields["password"]);  // A's newer local copy kept
     }
 
     [Fact]
     public void Deletion_PropagatesViaTombstone()
     {
         var (a, b) = TwoDevices(out string id);
-        b.Delete(id);
-        byte[] newer = SetUpdatedAt(b.Serialize(), id, "2999-01-01T00:00:00Z");
+        System.Threading.Thread.Sleep(1100);
+        b.Delete(id);                                              // tombstone stamped genuinely later than the seed
 
-        a.MergeFrom(newer);
+        a.MergeFrom(b.Serialize());
 
         Assert.Empty(a.Items());
         Assert.Throws<KeyNotFoundException>(() => a.Get(id));

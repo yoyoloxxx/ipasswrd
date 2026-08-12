@@ -30,6 +30,12 @@ public static class Csv
     private static string Field(string? value)
     {
         string s = value ?? "";
+        // CSV formula/DDE-injection defence (on EXPORT): a value a spreadsheet would evaluate as a
+        // formula (leading = + - @, or a leading TAB/CR Excel trims to reach one) is prefixed with a
+        // single quote so Excel / Google Sheets / LibreOffice treat it as literal text. Without this an
+        // attacker-planted =IMPORTDATA(...) / =HYPERLINK(...) could exfiltrate other rows on open.
+        if (s.Length > 0 && (s[0] is '=' or '+' or '-' or '@' or '\t' or '\r'))
+            s = "'" + s;
         if (s.IndexOfAny(new[] { ',', '"', '\n', '\r' }) < 0) return s;
         return '"' + s.Replace("\"", "\"\"") + '"';
     }
