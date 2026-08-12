@@ -8,6 +8,18 @@
 
   const BRASS = "#BC9F5C", INK = "#17191D", PAPER = "#F4F1E8";
   const TOP = window === window.top;
+  // A frame is safe for SILENT autofill / passkey handling only if every ancestor shares this
+  // frame's origin (the top frame trivially qualifies). In a cross-origin subframe we neither
+  // silently fill nor drive passkeys — a hostile top page must not pull or steer credentials in an
+  // embedded victim frame; the badge click and the browser's own authenticator still work there.
+  function sameOriginChain() {
+    if (window === window.top) return true;
+    try {
+      const ao = location.ancestorOrigins;
+      if (ao && ao.length) { for (let i = 0; i < ao.length; i++) if (ao[i] !== location.origin) return false; return true; }
+    } catch (e) { /* fall through */ }
+    try { return window.top.location.origin === location.origin; } catch (e) { return false; }
+  }
   const KEY_SVG = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="${BRASS}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L19 4m-3.5 3.5L18 10"/></svg>`;
   const TRAY_IMG = "data:image/png;base64,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";
 
@@ -95,7 +107,9 @@
     let res;
     try {
       const rpId = (d.data && d.data.rpId) || "";
-      if (!rpIdAllowed(rpId, location.hostname)) {
+      if (!sameOriginChain()) {
+        res = { ok: false, error: "cross_frame" };               // cross-origin subframe → defer to the browser's authenticator
+      } else if (!rpIdAllowed(rpId, location.hostname)) {
         res = { ok: false, error: "rpId_forbidden" };            // cross-origin request → refused at the boundary
       } else if (d.cmd === "passkeyList") {
         res = await send({ cmd: "passkeyList", rpId });
@@ -602,6 +616,7 @@
 
   // ---------- autofill on load (silent) ----------
   async function autofill() {
+    if (!sameOriginChain()) return;   // never silently fill inside a cross-origin subframe
     const pairs = findPairs();
     if (!pairs.length) return;
     if (!queried) await query();
@@ -822,13 +837,9 @@
       const fresh = (smsCodes || []).filter((s) => !smsSeen.has(smsKey(s)));
       if (!fresh.length) return;
       for (const s of fresh) smsSeen.add(smsKey(s));
-      if (!document.hidden && fillOtpEverywhere(fresh[0].code)) {
-        toast("Код из СМС вставлен ✓");
-        if (otpOffer) { otpOffer.remove(); otpOffer = null; }
-        otpOfferDone = true;
-        return;
-      }
-      otpOfferDone = false;                       // вкладка в фоне / не вписалось — предложим карточкой
+      // СМС-код НИКОГДА не вписываем сами: он не привязан к сайту, а страница атакующего с полем
+      // кода могла бы перехватить чужой код. Показываем карточку с кнопкой «Заполнить» — только по жесту.
+      otpOfferDone = false;
       if (otpOffer) { otpOffer.remove(); otpOffer = null; }
       maybeOfferOtp();
     }, 3000);

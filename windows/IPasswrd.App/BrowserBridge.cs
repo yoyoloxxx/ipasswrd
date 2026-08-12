@@ -26,6 +26,8 @@ public partial class MainWindow
 {
     private const string BridgePipeName = "ipasswrd.browser";
     private CancellationTokenSource? _bridgeCts;
+    private string? _bridgeToken;   // per-session bearer for the loopback-HTTP fallback (the named pipe is trusted)
+    private string BridgeToken() => _bridgeToken ??= Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
 
     private void StartBrowserBridge()
     {
@@ -76,7 +78,7 @@ public partial class MainWindow
         catch { /* client went away — normal */ }
     }
 
-    private async Task<string> HandleBridgeRequest(string json)
+    private async Task<string> HandleBridgeRequest(string json, bool viaHttp = false)
     {
         bool extFirstSighting = _extLastSeenUtc == default;
         _extLastSeenUtc = DateTime.UtcNow;
@@ -89,10 +91,27 @@ public partial class MainWindow
             string cmd = root.TryGetProperty("cmd", out var c) ? (c.GetString() ?? "") : "";
             string Get(string name) => root.TryGetProperty(name, out var v) ? (v.GetString() ?? "") : "";
 
+            // The named pipe is CurrentUserOnly, hence trusted. The loopback-HTTP fallback (port 38799)
+            // is only Origin-checked, so a second browser extension that forges our Origin could
+            // otherwise pump the vault. Secret-returning commands over HTTP therefore require a
+            // per-session token, which the extension gets from the trusted pipe's `status` or via a
+            // one-time `pair` the user approves in the app window.
+            string token = Get("token");
+            bool tokenOk = !viaHttp || (_bridgeToken is not null && string.Equals(token, _bridgeToken, StringComparison.Ordinal));
+            bool secret = cmd is "credentials" or "save" or "unlock" or "list" or "passkeyList" or "passkeyCreate" or "passkeySign";
+            if (viaHttp && secret && !tokenOk) return Resp(new { ok = false, error = "unpaired" });
+
             switch (cmd)
             {
+                case "pair":
+                    if (!viaHttp || tokenOk) return Resp(new { ok = true, token = BridgeToken() });
+                    return await RequestExtensionPairAsync()
+                        ? Resp(new { ok = true, token = BridgeToken() })
+                        : Resp(new { ok = false, error = "denied" });
                 case "status":
-                    return await OnUi(() => Resp(new { ok = true, unlocked = _vault is not null }));
+                    return await OnUi(() => viaHttp
+                        ? Resp(new { ok = true, unlocked = _vault is not null, paired = tokenOk })
+                        : Resp(new { ok = true, unlocked = _vault is not null, token = BridgeToken() }));
                 case "credentials":
                 {
                     string url = Get("url");
@@ -135,6 +154,31 @@ public partial class MainWindow
         {
             return Resp(new { ok = false, error = ex.GetType().Name });
         }
+    }
+
+    /// <summary>Ask the user, in the app window, to approve a browser-extension pairing over the
+    /// loopback-HTTP fallback. Runs on the UI thread; returns false on deny/timeout. The named-pipe
+    /// path never needs this — it is CurrentUserOnly and already trusted.</summary>
+    private async Task<bool> RequestExtensionPairAsync()
+    {
+        return await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            try { BringToFront(); } catch { /* best effort */ }
+            var msg = new TextBlock
+            {
+                Text = Tr("Браузерное расширение просит доступ к сейфу через локальный мост. Разрешайте только если вы сейчас сами подключаете расширение IPasswrd."),
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap, Foreground = Text2, MaxWidth = 360,
+            };
+            var res = ShowCard(Tr("Разрешить доступ расширению?"), new Control[] { msg }, Tr("Разрешить"), danger: false);
+            if (res is null) return false;
+            var (dim, ok) = res.Value;
+            var tcs = new TaskCompletionSource<bool>();
+            ok.Click += (_, _) => { tcs.TrySetResult(true); CloseCard(dim); };
+            dim.DetachedFromVisualTree += (_, _) => tcs.TrySetResult(false);   // cancel / Esc / after allow
+            var done = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(45)));
+            if (done != tcs.Task) { try { CloseCard(dim); } catch { } tcs.TrySetResult(false); }
+            return await tcs.Task;
+        });
     }
 
     private static string Resp(object o) => JsonSerializer.Serialize(o);
