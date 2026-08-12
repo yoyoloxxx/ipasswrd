@@ -257,6 +257,7 @@ public partial class MainWindow : Window
         ["Открыть ключ доступа"] = "Open passkey",
         // browser extension install
         ["Расширение для браузера"] = "Browser extension", ["Автозаполнение в Chrome, Edge и других"] = "Autofill in Chrome, Edge and others",
+        ["Расширение подключено"] = "Extension connected", ["Расширение не подключено"] = "Extension not connected",
         ["Установить"] = "Install", ["Скрыть"] = "Hide",
         ["Открыть папку расширения"] = "Open the extension folder", ["Открыть страницу расширений"] = "Open the extensions page",
         ["1. Откройте страницу расширений браузера (кнопка ниже)."] = "1. Open the browser's extensions page (button below).",
@@ -615,6 +616,8 @@ public partial class MainWindow : Window
 
     // Onboarding quick-start state (persisted in settings.json).
     private bool _extEverConnected;   // the browser extension has connected at least once
+    private DateTime _extLastSeenUtc; // last request from the extension in THIS session (default = never)
+    private event Action? ExtensionSeen; // raised on the UI thread when the extension proves it is alive
     private bool _obMobileDone;       // user ticked the "mobile app" step
     private bool _quickStartHidden;   // user hid the quick-start checklist
     private bool _armHelloAfterWelcome; // first run: arm quick unlock only once the welcome is dismissed (never over it)
