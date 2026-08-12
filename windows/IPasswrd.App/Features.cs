@@ -419,6 +419,9 @@ public partial class MainWindow
     /// </summary>
     private const string StoreExtensionId = "dpagdbbdjphchgihnheiiibgmnndhchd";
 
+    /// <summary>The extension's public page in the Chrome Web Store — the only install path we offer.</summary>
+    private const string StoreExtensionUrl = "https://chromewebstore.google.com/detail/" + StoreExtensionId;
+
     private const string NativeHostName = "com.yoyoloxxx.ipasswrd";
 
     /// <summary>
@@ -439,23 +442,6 @@ public partial class MainWindow
     }
 
     private static string? FirstExisting(params string[] paths) => paths.FirstOrDefault(File.Exists);
-
-    /// <summary>Locate the unpacked extension folder (contains manifest.json).</summary>
-    private static string? ResolveExtensionDir()
-    {
-        string b = AppContext.BaseDirectory;
-        foreach (var cand in new[]
-        {
-            Path.Combine(b, "extension"),
-            Path.GetFullPath(Path.Combine(b, "..", "extension")),
-            Path.GetFullPath(Path.Combine(b, "..", "..", "extension")),
-            @"D:\MyProjects\IPasswrd\windows\extension",
-        })
-        {
-            if (File.Exists(Path.Combine(cand, "manifest.json"))) return cand;
-        }
-        return null;
-    }
 
     /// <summary>Locate IPasswrd.Host.exe (the native-messaging bridge).</summary>
     private static string? ResolveHostExe()
@@ -565,122 +551,50 @@ public partial class MainWindow
         var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         left.Children.Add(new TextBlock { Text = Tr("Расширение для браузера"), Foreground = Text, FontSize = 13.5, FontWeight = FontWeight.SemiBold });
         left.Children.Add(new TextBlock { Text = Tr("Автозаполнение в Chrome, Edge и других"), Foreground = Text3, FontSize = 11.5 });
+        var status = new TextBlock { FontSize = 11.5, Margin = new Thickness(0, 2, 0, 0) };
+        left.Children.Add(status);
         Grid.SetColumn(left, 0);
-        var toggle = new Button { Content = Tr("Установить"), Padding = new Thickness(13, 6) };
-        Grid.SetColumn(toggle, 1);
+
+        var install = new Button { Content = Tr("Установить"), Padding = new Thickness(13, 6), VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(install, 1);
+
         var rowGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(17, 13) };
         rowGrid.Children.Add(left);
-        rowGrid.Children.Add(toggle);
+        rowGrid.Children.Add(install);
         sp.Children.Add(rowGrid);
 
-        var status = new TextBlock { IsVisible = false, TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 2, 0, 0) };
-        var steps = new StackPanel { Spacing = 7 };
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 4, 0, 0) };
-        var panel = new StackPanel { Spacing = 8, Margin = new Thickness(17, 0, 17, 14), IsVisible = false };
-        panel.Children.Add(steps);
-        panel.Children.Add(actions);
-        panel.Children.Add(status);
-        sp.Children.Add(panel);
-
-        void SetStatus(string m, bool error)
+        // Honest status: green ONLY when the extension has actually talked to this app in the
+        // current session. No optimistic "everything is connected" while nothing is installed.
+        void Refresh()
         {
-            status.Text = m;
-            status.Foreground = error ? Bad : Ok;
-            status.IsVisible = true;
+            bool alive = _extLastSeenUtc != default;
+            status.Text = Tr(alive ? "Расширение подключено" : "Расширение не подключено");
+            status.Foreground = alive ? Ok : Text3;
         }
+        Refresh();
 
-        toggle.Click += (_, _) =>
+        // Flip to green the moment the extension first phones in (see HandleBridgeRequest).
+        Action onSeen = Refresh;
+        ExtensionSeen += onSeen;
+        sp.DetachedFromVisualTree += (_, _) => ExtensionSeen -= onSeen;
+
+        // One click, one action: open the Chrome Web Store listing — the user installs the
+        // extension there like any other. The native-messaging side is registered here (and on
+        // every launch anyway), so the freshly installed extension connects on its own; the
+        // status above turns green only once it really does.
+        install.Click += (_, _) =>
         {
-            if (panel.IsVisible) { panel.IsVisible = false; toggle.Content = Tr("Установить"); return; }
-
-            steps.Children.Clear();
-            actions.Children.Clear();
-            status.IsVisible = false;
-
-            string? extDir = ResolveExtensionDir();
-            string? hostExe = ResolveHostExe();
-
-            if (hostExe is not null)
-            {
-                try { RegisterNativeHost(hostExe); }
-                catch (Exception ex) { SetStatus(Tr("Не удалось зарегистрировать связь с браузером: ") + ex.Message, true); }
-            }
-            else
-            {
-                SetStatus(Tr("Не найден файл IPasswrd.Host.exe рядом с приложением. Переустановите IPasswrd целиком."), true);
-            }
-
-            // numbered instructions
-            string[] lines =
-            {
-                Tr("1. Откройте страницу расширений браузера (кнопка ниже)."),
-                Tr("2. Включите «Режим разработчика» в правом верхнем углу."),
-                Tr("3. Нажмите «Загрузить распакованное» и выберите папку расширения (кнопка ниже — путь уже скопирован)."),
-                Tr("4. Готово: значок IPasswrd появится на панели браузера."),
-            };
-            foreach (var l in lines)
-                steps.Children.Add(new TextBlock { Text = l, Foreground = Text2, FontSize = 12.5, TextWrapping = TextWrapping.Wrap });
-
-            if (extDir is not null)
-            {
-                try { if (Clipboard is { } cb) _ = cb.SetTextAsync(extDir); } catch { /* ignore */ }
-
-                var openFolder = new Button { Content = Tr("Открыть папку расширения"), Padding = new Thickness(13, 6) };
-                openFolder.Click += (_, _) =>
-                {
-                    try
-                    {
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                        { FileName = "explorer.exe", Arguments = "\"" + extDir + "\"", UseShellExecute = true });
-                    }
-                    catch { /* ignore */ }
-                };
-                actions.Children.Add(openFolder);
-            }
-            else
-            {
-                SetStatus(Tr("Не найдена папка расширения рядом с приложением."), true);
-            }
-
-            var openExts = new Button { Content = Tr("Открыть страницу расширений"), Padding = new Thickness(13, 6) };
-            openExts.Click += (_, _) => OpenExtensionsPage();
-            actions.Children.Add(openExts);
-
-            if (!status.IsVisible && hostExe is not null && extDir is not null)
-                SetStatus(Tr("Связь с браузером настроена. Осталось загрузить папку расширения по шагам выше."), false);
-
-            panel.IsVisible = true;
-            toggle.Content = Tr("Скрыть");
-        };
-
-        if (_openExtensionSetup)
-        {
-            _openExtensionSetup = false;
-            toggle.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-        }
-
-        return sp;
-    }
-
-    /// <summary>Open the extensions management page in whichever Chromium browser is available.</summary>
-    private static void OpenExtensionsPage()
-    {
-        // Each browser uses its own internal scheme for the extensions page.
-        foreach (var (exe, url) in new[]
-        {
-            ("chrome", "chrome://extensions"),
-            ("msedge", "edge://extensions"),
-            ("chromium", "chrome://extensions"),
-            ("browser", "browser://extensions"),   // Yandex
-        })
-        {
+            try { if (ResolveHostExe() is { } hostExe) RegisterNativeHost(hostExe); } catch { /* best effort */ }
             try
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                { FileName = exe, Arguments = url, UseShellExecute = true });
-                return;
+                { FileName = StoreExtensionUrl, UseShellExecute = true });
             }
-            catch { /* not installed — try the next */ }
-        }
+            catch { /* no browser handler — nothing sensible left to do */ }
+        };
+
+        if (_openExtensionSetup) _openExtensionSetup = false;   // legacy onboarding flag — the row no longer expands
+
+        return sp;
     }
 }

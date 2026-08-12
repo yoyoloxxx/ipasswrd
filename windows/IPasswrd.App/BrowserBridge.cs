@@ -78,6 +78,9 @@ public partial class MainWindow
 
     private async Task<string> HandleBridgeRequest(string json)
     {
+        bool extFirstSighting = _extLastSeenUtc == default;
+        _extLastSeenUtc = DateTime.UtcNow;
+        if (extFirstSighting) { try { Avalonia.Threading.Dispatcher.UIThread.Post(() => ExtensionSeen?.Invoke()); } catch { } }   // settings row flips to "connected" on real proof of life
         if (!_extEverConnected) { _extEverConnected = true; try { SaveSettings(); } catch { } try { Avalonia.Threading.Dispatcher.UIThread.Post(RefreshOnboardAfterExtension); } catch { } }   // onboarding: the extension is live — tick its step immediately
         try
         {
