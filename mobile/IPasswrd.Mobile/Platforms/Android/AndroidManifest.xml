@@ -4,6 +4,8 @@
   <!-- allowBackup=false: зашифрованный сейф и ключ Keystore не должны уезжать в облачный
        бэкап Google (аналог kSecAttrAccessibleWhenUnlockedThisDeviceOnly на iOS). -->
   <application
+      android:icon="@mipmap/appicon"
+      android:roundIcon="@mipmap/appicon_round"
       android:allowBackup="false"
       android:fullBackupContent="false"
       android:dataExtractionRules="@xml/ipw_data_extraction_rules"
