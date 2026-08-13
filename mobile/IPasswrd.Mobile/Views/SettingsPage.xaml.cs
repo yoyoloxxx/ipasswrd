@@ -25,6 +25,7 @@ public partial class SettingsPage : ContentPage
         base.OnAppearing();
         Refresh();
         RefreshAutofill();
+        RefreshUpdate();
     }
 
     private void Refresh()
@@ -371,6 +372,55 @@ public partial class SettingsPage : ContentPage
         }
         catch (Exception) { }
 #endif
+    }
+    // ================= обновление приложения (Android) =================
+
+    private AppUpdate.UpdateInfo? _update;
+
+    private void RefreshUpdate()
+    {
+        UpdateSection.IsVisible = AppUpdate.Supported;
+        if (!AppUpdate.Supported) return;
+        _update = null;
+        UpdateStatus.Text = "Установлена версия " + AppUpdate.CurrentVersion;
+        UpdateButton.Text = "Проверить обновление";
+    }
+
+    private async void OnCheckUpdate(object? sender, EventArgs e)
+    {
+        if (_update is not null) { await DownloadAndInstallAsync(_update); return; }
+
+        UpdateButton.IsEnabled = false;
+        UpdateStatus.Text = "Проверяю…";
+        AppUpdate.UpdateInfo? info = await AppUpdate.CheckAsync();
+        UpdateButton.IsEnabled = true;
+
+        if (info is null)
+        {
+            UpdateStatus.Text = "Установлена последняя версия (" + AppUpdate.CurrentVersion + ")";
+            return;
+        }
+        _update = info;
+        long mb = info.Size / 1024 / 1024;
+        UpdateStatus.Text = "Есть версия " + info.VersionName + (mb > 0 ? " — " + mb + " МБ" : "");
+        UpdateButton.Text = "Скачать и установить";
+    }
+
+    private async Task DownloadAndInstallAsync(AppUpdate.UpdateInfo info)
+    {
+        UpdateButton.IsEnabled = false;
+        var progress = new Progress<double>(p => UpdateStatus.Text = "Скачиваю… " + (int)(p * 100) + "%");
+        string? apk = await AppUpdate.DownloadAsync(info, progress);
+        UpdateButton.IsEnabled = true;
+
+        if (apk is null)
+        {
+            UpdateStatus.Text = "Не удалось скачать — проверьте связь и попробуйте ещё раз.";
+            return;
+        }
+        UpdateStatus.Text = "Открываю установщик…";
+        if (!AppUpdate.Install(apk))
+            UpdateStatus.Text = "Разрешите установку из IPasswrd на открывшемся экране и нажмите ещё раз.";
     }
     // ================= код восстановления =================
 

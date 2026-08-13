@@ -79,6 +79,33 @@ public partial class VaultListPage : ContentPage
     {
         base.OnAppearing();
         Reload();
+        _ = MaybeOfferUpdateAsync();
+    }
+
+    /// <summary>Раз в сутки тихо спрашиваем GitHub, не вышла ли новая сборка: в Google Play
+    /// приложения нет, и без этого человек остался бы на сборке, которую однажды поставил.</summary>
+    private async Task MaybeOfferUpdateAsync()
+    {
+        try
+        {
+            AppUpdate.UpdateInfo? info = await AppUpdate.CheckQuietlyAsync();
+            if (info is null) return;
+
+            bool yes = await DisplayAlert("Есть обновление",
+                "Вышла версия " + info.VersionName + ". Обновить сейчас? Сейф, отпечаток и настройки останутся на месте.",
+                "Обновить", "Позже");
+            if (!yes) { AppUpdate.Skip(info); return; }
+
+            string? apk = await AppUpdate.DownloadAsync(info);
+            if (apk is null)
+            {
+                await DisplayAlert("Обновление", "Не удалось скачать — попробуйте позже в настройках.", "Ок");
+                return;
+            }
+            if (!AppUpdate.Install(apk))
+                await DisplayAlert("Обновление", "Разрешите установку из IPasswrd на открывшемся экране и повторите в настройках.", "Ок");
+        }
+        catch (Exception) { }
     }
 
     // ===== выбор раздела: одна кнопка с текущим разделом (как в Kaspersky), по тапу — меню =====
