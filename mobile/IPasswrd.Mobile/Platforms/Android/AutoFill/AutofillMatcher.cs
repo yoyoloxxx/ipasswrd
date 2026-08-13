@@ -48,6 +48,15 @@ internal static class AutofillMatcher
                 && string.Equals(itemPkg, wantPkg, StringComparison.OrdinalIgnoreCase))
                 score = 90;
 
+            // Курируемый список официальных приложений: ТОЧНЫЙ package id → его регистрируемый
+            // домен. Идентичность пакета Android гарантирует подписью при установке, поэтому в
+            // отличие от угадывания по имени подделать это нельзя. Явная привязка (запись,
+            // сохранённая из самого приложения) всё равно ранжируется выше.
+            else if (wantPkg.Length > 0 && dom.Length > 0
+                && KnownApps.TryGetValue(wantPkg, out string[]? kdoms)
+                && Array.Exists(kdoms, d2 => string.Equals(d2, dom, StringComparison.OrdinalIgnoreCase)))
+                score = 85;
+
             list.Add(new AutofillCandidate(e.Id, e.Item, score));
         }
 
@@ -89,6 +98,40 @@ internal static class AutofillMatcher
         string d = domain.Trim();
         return d.Contains("://", StringComparison.Ordinal) ? d : "https://" + d;
     }
+
+    /// <summary>Официальные приложения популярных сервисов: точный package id → регистрируемые
+    /// домены. Даёт автозаполнение в TikTok/Instagram и т.п. без ручной привязки, не открывая
+    /// обратно дыру нечёткого сопоставления имён.</summary>
+    private static readonly Dictionary<string, string[]> KnownApps = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["com.zhiliaoapp.musically"] = new[] { "tiktok.com" },
+        ["com.ss.android.ugc.trill"] = new[] { "tiktok.com" },
+        ["com.instagram.android"] = new[] { "instagram.com" },
+        ["com.facebook.katana"] = new[] { "facebook.com" },
+        ["com.facebook.lite"] = new[] { "facebook.com" },
+        ["com.vkontakte.android"] = new[] { "vk.com" },
+        ["com.twitter.android"] = new[] { "x.com", "twitter.com" },
+        ["com.netflix.mediaclient"] = new[] { "netflix.com" },
+        ["com.spotify.music"] = new[] { "spotify.com" },
+        ["com.discord"] = new[] { "discord.com" },
+        ["com.reddit.frontpage"] = new[] { "reddit.com" },
+        ["com.pinterest"] = new[] { "pinterest.com" },
+        ["com.snapchat.android"] = new[] { "snapchat.com" },
+        ["com.linkedin.android"] = new[] { "linkedin.com" },
+        ["com.github.android"] = new[] { "github.com" },
+        ["tv.twitch.android.app"] = new[] { "twitch.tv" },
+        ["com.valvesoftware.android.steam.community"] = new[] { "steampowered.com", "steamcommunity.com" },
+        ["com.epicgames.portal"] = new[] { "epicgames.com" },
+        ["com.amazon.mShop.android.shopping"] = new[] { "amazon.com" },
+        ["com.alibaba.aliexpresshd"] = new[] { "aliexpress.com" },
+        ["com.ebay.mobile"] = new[] { "ebay.com" },
+        ["com.paypal.android.p2pmobile"] = new[] { "paypal.com" },
+        ["ru.ozon.app.android"] = new[] { "ozon.ru" },
+        ["com.wildberries.ru"] = new[] { "wildberries.ru" },
+        ["com.avito.android"] = new[] { "avito.ru" },
+        ["ru.yandex.mail"] = new[] { "yandex.ru" },
+        ["ru.mail.mailapp"] = new[] { "mail.ru" },
+    };
 
     /// <summary>Package names of browsers whose reported web domain we trust for autofill. A non-browser
     /// app is never one of these, so it cannot present a fake web domain to harvest another site's login;

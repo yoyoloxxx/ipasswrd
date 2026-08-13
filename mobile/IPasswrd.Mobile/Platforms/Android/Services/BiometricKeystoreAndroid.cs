@@ -32,6 +32,15 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
     private const int StrongOrCredential =
         (int)(BiometricManager.Authenticators.BiometricStrong | BiometricManager.Authenticators.DeviceCredential);
 
+    /// <summary>API 30+: сильная биометрия или код устройства. Ниже 30 совмещённый запрос не
+    /// поддерживается (BiometricManager отвечает ERROR_UNSUPPORTED) — крипто-гейт молча отключался
+    /// бы на Android 8-10. Поэтому там спрашиваем только сильную биометрию; мастер-пароль и так
+    /// остаётся запасным входом.</summary>
+    private static int AllowedAuth =>
+        OperatingSystem.IsAndroidVersionAtLeast(30)
+            ? StrongOrCredential
+            : (int)BiometricManager.Authenticators.BiometricStrong;
+
     private static readonly object Gate = new();
 
     private static ISharedPreferences? Prefs =>
@@ -47,7 +56,7 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
         {
             try
             {
-                return BiometricManager.From(AndroidApp.Context).CanAuthenticate(StrongOrCredential)
+                return BiometricManager.From(AndroidApp.Context).CanAuthenticate(AllowedAuth)
                     == BiometricManager.BiometricSuccess;
             }
             catch (Exception) { return false; }
@@ -148,11 +157,14 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
 
                 if (Platform.CurrentActivity is not FragmentActivity host) { tcs.TrySetResult(null); return; }
 
-                var info = new BiometricPrompt.PromptInfo.Builder()
+                var ib = new BiometricPrompt.PromptInfo.Builder()
                     .SetTitle("Разблокировка IPasswrd")!
                     .SetSubtitle(reason)!
-                    .SetAllowedAuthenticators(StrongOrCredential)!
-                    .Build();
+                    .SetAllowedAuthenticators(AllowedAuth)!;
+                // Без DeviceCredential (API < 30) BiometricPrompt требует явную негативную кнопку.
+                if (!OperatingSystem.IsAndroidVersionAtLeast(30))
+                    ib = ib.SetNegativeButtonText("Мастер-пароль")!;
+                BiometricPrompt.PromptInfo info = ib.Build()!;
 
                 var callback = new RevealCallback(tcs, ct);
                 var prompt = new BiometricPrompt(host, new MainExecutor(), callback);
