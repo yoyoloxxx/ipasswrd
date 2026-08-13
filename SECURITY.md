@@ -223,8 +223,10 @@ into a sibling's page.
   Releases over HTTPS, but the packages are not signed with a code-signing certificate,
   so the trust root is GitHub + TLS rather than a signature the app itself verifies.
   Anyone able to publish a release (or MITM a client that trusts a rogue CA) could ship a
-  malicious update. Closing this needs an OS code-signing certificate; it is planned, and
-  until then users should confirm releases come from the official repository.
+  malicious update. This is an accepted trade-off of GitHub-based
+  distribution: releases are published only from the official repository over TLS, and
+  users should download from the official page (SmartScreen will warn about an unknown
+  publisher; the download page documents this).
 - **Mobile quick-unlock is hardware-crypto-gated (desktop parity shipped).** On Android the
   cached session key is RSA-wrapped by a hardware-Keystore keypair whose private half requires
   user authentication per use (BiometricPrompt + CryptoObject; explicit OAEP MGF1-SHA1
