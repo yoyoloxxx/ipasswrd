@@ -25,13 +25,40 @@ internal static class Program
         catch { /* если и это не вышло, помочь уже нечем */ }
     }
 
+    /// <summary>Ярлык на рабочем столе — часть нормальной установки. Создаётся один раз при
+    /// установке; обновления его не трогают (удалённый пользователем ярлык не воскресает).
+    /// Любой отказ — не повод ронять установку.</summary>
+    private static void EnsureDesktopShortcut()
+    {
+        try
+        {
+            string exe = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "IPasswrdApp", "current", "IPasswrd.App.exe");
+            string lnk = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "IPasswrd.lnk");
+            Type? t = Type.GetTypeFromProgID("WScript.Shell");
+            if (t is null) return;
+            dynamic shell = Activator.CreateInstance(t)!;
+            dynamic sc = shell.CreateShortcut(lnk);
+            sc.TargetPath = exe;
+            sc.WorkingDirectory = System.IO.Path.GetDirectoryName(exe);
+            sc.IconLocation = exe + ",0";
+            sc.Description = "IPasswrd";
+            sc.Save();
+        }
+        catch { /* best effort */ }
+    }
+
     [STAThread]
     public static void Main(string[] args)
     {
         // Must be the very first thing: on install, update and uninstall Velopack re-runs this
         // exe with its own arguments, does its work and exits. Putting the single-instance
         // guard ahead of it would make those hooks silently no-op whenever a copy is running.
-        VelopackApp.Build().Run();
+        VelopackApp.Build()
+            .OnAfterInstallFastCallback(_ => EnsureDesktopShortcut())   // скачал Setup — и всё на месте
+            .Run();
 
         // Падение менеджера паролей без следов - худший вид падения: человек видит, что окно
         // исчезло, и не может сказать нам ничего полезного. Пишем причину рядом с сейфом.
