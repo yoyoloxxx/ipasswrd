@@ -439,6 +439,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // Иконка окна задаётся программно: XAML-вариант с относительным путём не подхватился,
+        // а без иконки окна панель задач показывает пустышку (у exe и трея свои иконки есть).
+        try { Icon = new WindowIcon(Avalonia.Platform.AssetLoader.Open(new Uri("avares://IPasswrd.App/Assets/ipasswrd_app.ico"))); } catch { }
         LoadSettings();
         MaterializeSyncCopy();
         RequestedThemeVariant = _light ? ThemeVariant.Light : ThemeVariant.Dark;
