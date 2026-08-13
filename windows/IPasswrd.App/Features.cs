@@ -436,9 +436,8 @@ public partial class MainWindow
     /// </summary>
     private IEnumerable<string> TrustedExtensionIds()
     {
-#if DEBUG
-        yield return DevExtensionId;                              // unpacked dev build only — never trusted in a Release build
-#endif
+        yield return DevExtensionId;   // ключ в manifest.json закрепляет этот id на любой машине: распакованная
+                                       // dev-копия и zip с сайта (временно, пока Store на проверке) доверены из коробки
         if (StoreExtensionId.Length > 0) yield return StoreExtensionId;
         if (!string.IsNullOrWhiteSpace(_extraExtensionId)) yield return _extraExtensionId.Trim();
     }
@@ -487,7 +486,7 @@ public partial class MainWindow
             ["type"] = "stdio",
             // all trusted identities at once: the same host serves the unpacked copy and the
             // Store one, and a user may well have both during the switchover
-            ["allowed_origins"] = TrustedExtensionIds().Select(id => $"chrome-extension://{id}/").ToArray(),
+            ["allowed_origins"] = TrustedExtensionIds().Distinct().Select(id => $"chrome-extension://{id}/").ToArray(),
         };
         File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
 

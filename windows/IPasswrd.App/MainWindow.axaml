@@ -53,6 +53,11 @@
                     HorizontalAlignment="Center" Background="Transparent" BorderThickness="0" Padding="4,2"
                     FontSize="12" Foreground="{DynamicResource IpText3}"/>
 
+            <!-- Первый запуск: сейф уже лежит в Google Диске — забрать его, а не создавать новый.
+                 Видна только в режиме создания; после загрузки экран сам переключится на ввод пароля. -->
+            <Button x:Name="GooglePickupButton" Content="У меня уже есть сейф — забрать с Google Диска" Click="OnGooglePickupClick" IsVisible="False"
+                    HorizontalAlignment="Center" Background="Transparent" BorderThickness="0" Padding="4,2"
+                    FontSize="12" Foreground="{DynamicResource IpText3}"/>
             <!-- recovery: enter the written-down code, set a new master password -->
             <StackPanel x:Name="RecoveryPanel" Spacing="12" IsVisible="False">
               <TextBlock Text="Введите код восстановления и придумайте новый мастер-пароль."

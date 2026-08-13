@@ -88,9 +88,19 @@ public sealed class GoogleDriveSync
 
     public static (string id, string secret) LoadConfig(string dir)
     {
+        // Порядок: файл в папке данных (личная настройка) выигрывает у файла, приехавшего рядом
+        // с приложением в релизном пакете. В репозиторий секрет по-прежнему не попадает
+        // (google_oauth.json игнорируется git'ом) — он кладётся в пакет на сборке; для
+        // installed-приложений Google не считает такой секрет конфиденциальным.
+        (string id, string secret) fromData = ReadConfigFile(ConfigPath(dir));
+        if (fromData.id.Length > 0 || fromData.secret.Length > 0) return fromData;
+        return ReadConfigFile(Path.Combine(AppContext.BaseDirectory, "google_oauth.json"));
+    }
+
+    private static (string id, string secret) ReadConfigFile(string p)
+    {
         try
         {
-            string p = ConfigPath(dir);
             if (!File.Exists(p)) return ("", "");
             var c = JsonSerializer.Deserialize<OAuthConfig>(File.ReadAllText(p));
             return (c?.client_id?.Trim() ?? "", c?.client_secret?.Trim() ?? "");

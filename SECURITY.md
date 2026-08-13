@@ -124,6 +124,10 @@ with a 30‑day re‑authentication ceiling.
   website can drive it. Secrets are only returned while the vault is unlocked.
 - Diagnostic logs never contain request/response bodies — only command names and a
   coarse ok/error status.
+- **Trusted extension identities:** the native-host manifest lists the Chrome Web Store
+  id and the key-pinned sideload id (the zip offered on the site while the Store review
+  is pending). The manifest `key` makes the sideload id identical on every machine; it
+  grants nothing beyond what loading an unpacked extension already implies.
 
 The loopback `Origin` check defends against **web pages** (its purpose). It is not
 a boundary against same‑user malware, which is out of scope (§2).
@@ -281,8 +285,12 @@ Google's secret scanner. Therefore:
 
 - The client **id** ships in source (it is public by nature).
 - The client **secret** is loaded at runtime from `IPASSWRD_GOOGLE_SECRET` or a
-  git‑ignored `google_oauth.json`. If absent, the token exchange is attempted
-  PKCE‑only (works for OAuth clients created as the public "iOS/Android" type).
+  `google_oauth.json` beside the data dir or the executable. It stays out of the
+  repository, but since 1.0.42 it **ships inside the release package** so Google
+  sign-in works out of the box: for an installed desktop app the secret is not a
+  secrecy boundary - PKCE and the loopback redirect carry the actual security.
+- If both are absent, the token exchange is attempted PKCE-only (works for OAuth
+  clients created as the public "iOS/Android" type).
 
 Operators should treat any previously committed secret as compromised and rotate it
 in the Google Cloud console.
@@ -300,6 +308,10 @@ support coordinated disclosure and will credit reporters who wish to be named.
 
 ## 6. Recent hardening (changelog)
 
+- **1.0.42**: Google sign-in works out of the box (the OAuth config now ships inside the
+  release package, not the repo); desktop first run gained "fetch my vault from Google
+  Drive"; release builds trust the key-pinned sideload extension id while the Chrome Web
+  Store review is pending (temporary, site-distributed zip); branded Android launcher icon.
 - **Full Public Suffix List** now backs the registrable-domain boundary for autofill and
   passkeys (was a hand-curated subset), closing a cross-tenant credential leak on
   multi-tenant registries (see 3.8).

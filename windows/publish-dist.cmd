@@ -5,3 +5,5 @@ rem Bundle the browser extension and native host next to the app so "Install ext
 rem finds everything in one folder (portable install, e.g. for another PC).
 xcopy /E /I /Y "D:\MyProjects\IPasswrd\windows\extension" "D:\MyProjects\IPasswrd\dist\extension" >> "D:\MyProjects\IPasswrd\dist-publish.log" 2>&1
 if exist "D:\MyProjects\IPasswrd\dist-host\IPasswrd.Host.exe" copy /Y "D:\MyProjects\IPasswrd\dist-host\IPasswrd.Host.exe" "D:\MyProjects\IPasswrd\dist\IPasswrd.Host.exe" >> "D:\MyProjects\IPasswrd\dist-publish.log" 2>&1
+rem Google OAuth keys ride inside the package - Google sign-in needs them out of the box.
+if exist "%LOCALAPPDATA%\IPasswrd\google_oauth.json" copy /Y "%LOCALAPPDATA%\IPasswrd\google_oauth.json" "D:\MyProjects\IPasswrd\dist\google_oauth.json" >> "D:\MyProjects\IPasswrd\dist-publish.log" 2>&1
