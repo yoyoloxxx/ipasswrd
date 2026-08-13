@@ -100,11 +100,20 @@ public sealed class IpwAccessibilityService : AccessibilityService
             }
 
             AccessibilityNodeInfo? root = RootInActiveWindow;
-            AccessibilityNodeInfo? focus = root?.FindFocus(global::Android.Views.Accessibility.NodeFocus.Input);
-            if (focus is null || !focus.Editable)
+            // Источник события надёжнее FindFocus: часть движков (Яндекс) вход по FindFocus не отдаёт.
+            AccessibilityNodeInfo? focus = null;
+            if (e.EventType == EventTypes.ViewFocused && e.Source is AccessibilityNodeInfo s && s.Editable) focus = s;
+            if (focus is null)
             {
-                // фокус ушёл с поля — подсказка не нужна
-                if (_menu is not null) { HideMenu(); _anchorKey = ""; }
+                AccessibilityNodeInfo? f = root?.FindFocus(global::Android.Views.Accessibility.NodeFocus.Input);
+                if (f is not null && f.Editable) focus = f;
+            }
+            if (e.EventType == EventTypes.ViewFocused)
+                Console.WriteLine("[IPW-A11Y] focusEvt ed=" + (focus is not null) + " cls=" + (e.Source?.ClassName ?? "-") + " id=" + (e.Source?.ViewIdResourceName ?? "-"));
+            if (focus is null)
+            {
+                // фокус ушёл с поля — окошко больше не нужно (прячем только на смене фокуса/окна)
+                if (_menu is not null && e.EventType == EventTypes.ViewFocused) { HideMenu(); _anchorKey = ""; }
                 return;
             }
 
@@ -113,8 +122,10 @@ public sealed class IpwAccessibilityService : AccessibilityService
             string key = pkg + "|" + r.Left + "|" + r.Top + "|" + r.Bottom + "|" + (focus.Password ? "1" : "0");
             if (key == _anchorKey) return;   // у этого поля подсказку уже показывали
 
-            // Окошко тянем только к форме входа: само поле — пароль, или пароль есть рядом в окне.
-            if (!focus.Password && !HasPassword(root)) { HideMenu(); _anchorKey = key; return; }
+            // Не липнем к адресной строке и поиску браузера — только к полям страницы.
+            string fid = (focus.ViewIdResourceName ?? "").ToLowerInvariant();
+            if (fid.Contains("url") || fid.Contains("omnibox") || fid.Contains("address") || fid.Contains("location") || fid.Contains("urlbar") || fid.Contains("editurl") || fid.Contains("search"))
+            { HideMenu(); _anchorKey = key; return; }
 
             _domain = FindDomain(root) ?? "";
             HideMenu();
