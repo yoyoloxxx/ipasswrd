@@ -36,8 +36,12 @@ public sealed class BiometricKeychainIos : IBiometricSecret
             // drop any prior copy first
             SecKeyChain.Remove(new SecRecord(SecKind.GenericPassword) { Service = Service, Account = name });
 
+            // BiometryCurrentSet (а не UserPresence): ключ привязан к ТЕКУЩЕМУ набору биометрии —
+            // перезаписали Face ID / добавили палец, и запись умирает; вход уходит на мастер-пароль
+            // и перезаряжается заново. Паритет с Android-инвалидацией. Passcode-фолбэк не нужен:
+            // запасной вход — мастер-пароль уровнем выше.
             using var access = new SecAccessControl(
-                SecAccessible.WhenUnlockedThisDeviceOnly, SecAccessControlCreateFlags.UserPresence);
+                SecAccessible.WhenUnlockedThisDeviceOnly, SecAccessControlCreateFlags.BiometryCurrentSet);
             var rec = new SecRecord(SecKind.GenericPassword)
             {
                 Service = Service,
