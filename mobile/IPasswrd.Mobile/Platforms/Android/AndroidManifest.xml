@@ -9,7 +9,22 @@
       android:allowBackup="false"
       android:fullBackupContent="false"
       android:dataExtractionRules="@xml/ipw_data_extraction_rules"
-      android:supportsRtl="true" />
+      android:supportsRtl="true">
+
+    <!-- Отдаёт скачанный APK системному установщику: обновление ставится из самого
+         приложения, без похода на сайт. Наружу не смотрит: exported=false. -->
+    <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="com.yoyoloxxx.ipasswrd.updateprovider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+      <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/ipw_update_paths" />
+    </provider>
+
+  </application>
+
+  <!-- обновление приложения: APK скачивается с GitHub и ставится системным установщиком -->
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
   <!-- Google Drive, HIBP (проверка утечек) -->
   <uses-permission android:name="android.permission.INTERNET" />

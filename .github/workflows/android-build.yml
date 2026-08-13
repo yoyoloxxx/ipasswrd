@@ -128,4 +128,13 @@ jobs:
           # Скользящий ПРЕРЕЛИЗНЫЙ тег — тот же, что у iOS; «latest» остаётся за Windows-релизом.
           TAG="mobile-latest"
           gh release create "$TAG" --prerelease --repo "$GITHUB_REPOSITORY" --title "IPasswrd mobile (текущая сборка)" --notes "Мобильная сборка: IPA — для AltStore/SideStore (источник https://yoyoloxxx.github.io/ipasswrd/altstore.json), APK — для Android. Версия — в altstore.json." || true
-          gh release upload "$TAG" out/IPasswrd.apk --repo "$GITHUB_REPOSITORY" --clobber
+          # Приложению нужен способ узнать о новой сборке: в Google Play его нет,
+          # поэтому рядом с APK кладём номер версии — его читает проверка обновлений.
+          VER=$(grep -o '<ApplicationDisplayVersion>[^<]*' IPasswrd.Mobile.csproj | cut -d'>' -f2)
+          CODE=$(grep -o '<ApplicationVersion>[^<]*' IPasswrd.Mobile.csproj | cut -d'>' -f2)
+          SIZE=$(stat -c%s out/IPasswrd.apk)
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/IPasswrd.apk"
+          printf '{"versionName":"%s","versionCode":%s,"url":"%s","size":%s,"notes":""}\n' \
+            "$VER" "$CODE" "$URL" "$SIZE" > out/android-latest.json
+          cat out/android-latest.json
+          gh release upload "$TAG" out/IPasswrd.apk out/android-latest.json --repo "$GITHUB_REPOSITORY" --clobber

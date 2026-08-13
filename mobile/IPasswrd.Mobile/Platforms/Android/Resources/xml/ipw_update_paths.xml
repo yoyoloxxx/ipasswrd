@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Скачанный APK лежит в кэше приложения; FileProvider отдаёт его установщику по
+     content-ссылке (file:// на Android 7+ запрещён). Больше ничего наружу не открываем. -->
+<paths>
+  <cache-path name="updates" path="." />
+</paths>
