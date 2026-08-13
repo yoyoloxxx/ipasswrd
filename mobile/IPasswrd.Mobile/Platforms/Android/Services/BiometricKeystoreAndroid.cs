@@ -41,6 +41,8 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
             ? StrongOrCredential
             : (int)BiometricManager.Authenticators.BiometricStrong;
 
+    private static int _lastCanAuth = int.MinValue;   // последний залогированный код canAuthenticate
+
     private static readonly object Gate = new();
 
     private static ISharedPreferences? Prefs =>
@@ -56,8 +58,12 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
         {
             try
             {
-                return BiometricManager.From(AndroidApp.Context).CanAuthenticate(AllowedAuth)
-                    == BiometricManager.BiometricSuccess;
+                int code = BiometricManager.From(AndroidApp.Context).CanAuthenticate(AllowedAuth);
+                if (code != _lastCanAuth) { _lastCanAuth = code; Console.WriteLine("[IPW-BIO] canAuthenticate(" + AllowedAuth + ") = " + code); }
+                // 0 = SUCCESS. -1 = BIOMETRIC_STATUS_UNKNOWN: старый API (EMUI/Android 10) не может
+                // подтвердить «сильность» датчика заранее. Считаем гейт доступным — настоящая проверка
+                // в самом аппаратном ключе: не сработает — RevealAsync вернёт null, вход уйдёт на пароль.
+                return code == BiometricManager.BiometricSuccess || code == -1;
             }
             catch (Exception) { return false; }
         }
