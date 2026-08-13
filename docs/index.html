@@ -61,6 +61,12 @@
     background:var(--surface);border:1px solid var(--hair);color:var(--accent);font-weight:700;font-size:14px;
     display:flex;align-items:center;justify-content:center}
   .steps li b{color:var(--text)}
+  .shots{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .shots figure{margin:0;background:var(--surface);border:1px solid var(--hair);border-radius:14px;overflow:hidden}
+  .shots figure:first-child{grid-column:1 / -1}
+  .shots img{width:100%;display:block}
+  .shots figcaption{padding:11px 16px;color:var(--muted);font-size:14px;border-top:1px solid var(--hair)}
+  @media (max-width:620px){ .shots{grid-template-columns:1fr} .shots figure:first-child{grid-column:auto} }
 </style>
 </head>
 <body>
@@ -71,6 +77,7 @@
     <nav>
       <a href="#why">Почему безопасно</a>
       <a href="#features">Возможности</a>
+      <a href="#start">Как начать</a>
       <a href="privacy.html">Конфиденциальность</a>
     </nav>
   </header>
@@ -90,6 +97,23 @@
     <div class="sub" style="margin-top:4px;font-size:12px">Расширение: распакуйте архив → chrome://extensions → включите «Режим разработчика» → «Загрузить распакованное» → укажите папку. Приложение свяжется с ним само. После одобрения в Chrome Web Store установка станет в один клик.</div>
   </div>
 
+  <section id="shots">
+    <h2>Как это выглядит</h2>
+    <div class="shots">
+      <figure>
+        <img src="shots/vault.png" alt="Сейф IPasswrd: список записей слева, карточка сайта справа" loading="lazy">
+        <figcaption>Сейф: аккаунты, карты, документы, заметки и ключи доступа — в одном окне.</figcaption>
+      </figure>
+      <figure>
+        <img src="shots/security.png" alt="Проверка безопасности: слабые и повторяющиеся пароли" loading="lazy">
+        <figcaption>Проверка: слабые, повторяющиеся и утёкшие пароли — сразу списком.</figcaption>
+      </figure>
+      <figure>
+        <img src="shots/generator.png" alt="Генератор паролей" loading="lazy">
+        <figcaption>Генератор: надёжный пароль в один клик, сразу в сейф.</figcaption>
+      </figure>
+    </div>
+  </section>
   <section id="why">
     <h2>Почему безопасно</h2>
     <div class="safe">
@@ -116,13 +140,15 @@
     </div>
   </section>
 
-  <section id="install">
-    <h2>Установка</h2>
+  <section id="start">
+    <h2>Как начать</h2>
     <ol class="steps">
-      <li><b>Скачайте</b> установщик кнопкой выше.</li>
-      <li><b>Запустите</b> IPasswrdApp-win-Setup.exe. Windows SmartScreen может предупредить о неизвестном издателе — «Подробнее» → «Выполнить в любом случае».</li>
-      <li><b>Придумайте мастер-пароль</b> — и сейф готов. Обновления прилетают сами.</li>
+      <li><b>Поставьте на компьютер.</b> Кнопка «Скачать для Windows» выше. Windows может предупредить о неизвестном издателе — «Подробнее» → «Выполнить в любом случае». Дальше обновления приходят сами.</li>
+      <li><b>Придумайте мастер-пароль и запишите код восстановления.</b> Пароль знаете только вы, восстановить его нам нечем — поэтому приложение сразу выдаёт код восстановления. Сохраните памятку на бумаге и отдельно от компьютера.</li>
+      <li><b>Добавьте расширение для браузера</b> — тогда логин и пароль подставляются прямо в поля сайта, минуя буфер обмена. Пока магазин Chrome проверяет публикацию, расширение ставится файлом по ссылке выше.</li>
+      <li><b>Поставьте на телефон и включите автозаполнение.</b> Android — APK по ссылке выше, iPhone — источник для AltStore. Затем в приложении: Настройки → Автозаполнение → «Включить автозаполнение». Один сейф на всех устройствах — через ваш Google Диск в настройках синхронизации.</li>
     </ol>
+    <p class="note">Ничего не уходит на наши серверы: их попросту нет. Синхронизация идёт через ваш личный Google Диск или iCloud, и туда попадает только зашифрованный файл.</p>
   </section>
 
   <footer>
