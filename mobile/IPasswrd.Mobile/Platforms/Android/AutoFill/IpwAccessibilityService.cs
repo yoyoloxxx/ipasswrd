@@ -47,6 +47,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
     private string _domain = "";
     private string _pkg = "";
     private bool _awaitUnlock;
+    private string _anchorKey = "";
 
     public static bool IsRunning { get; private set; }
 
@@ -86,38 +87,118 @@ public sealed class IpwAccessibilityService : AccessibilityService
             if (e is null) return;
             string pkg = e.PackageName ?? "";
 
-            // Ушли из браузера — прибрать кнопку.
+            // Ушли из браузера — прибрать окошко.
             if (!Browsers.Contains(pkg))
             {
-                if (_button is not null) { HideButton(); HideMenu(); }
+                if (_menu is not null) { HideMenu(); _anchorKey = ""; }
+                return;
+            }
+            if (e.EventType == EventTypes.WindowStateChanged)
+            {
+                HideMenu(); _anchorKey = "";
                 return;
             }
 
-            AccessibilityNodeInfo? src = e.Source;
             AccessibilityNodeInfo? root = RootInActiveWindow;
-
-            // Показываем кнопку, когда фокус на редактируемом поле (или оно есть в окне).
-            bool editableFocused =
-                (src is not null && src.Editable) ||
-                (e.EventType == EventTypes.WindowContentChanged && HasEditable(root));
-
-            if (editableFocused)
+            AccessibilityNodeInfo? focus = root?.FindFocus(global::Android.Views.Accessibility.NodeFocus.Input);
+            if (focus is null || !focus.Editable)
             {
-                _pkg = pkg;
-                if (_button is null) _domain = FindDomain(root) ?? "";
-                // Эти браузеры не отдают поля системному автозаполнению (список выше) —
-                // кнопка вставки остаётся единственным путём. В Chrome и приложениях её нет.
-                ShowButton();
+                // фокус ушёл с поля — подсказка не нужна
+                if (_menu is not null) { HideMenu(); _anchorKey = ""; }
+                return;
             }
-            else if (e.EventType == EventTypes.WindowStateChanged)
-            {
-                HideButton(); HideMenu();
-            }
+
+            _pkg = pkg;
+            var r = Bounds(focus);
+            string key = pkg + "|" + r.Left + "|" + r.Top + "|" + r.Bottom + "|" + (focus.Password ? "1" : "0");
+            if (key == _anchorKey) return;   // у этого поля подсказку уже показывали
+
+            // Окошко тянем только к форме входа: само поле — пароль, или пароль есть рядом в окне.
+            if (!focus.Password && !HasPassword(root)) { HideMenu(); _anchorKey = key; return; }
+
+            _domain = FindDomain(root) ?? "";
+            HideMenu();
+            _anchorKey = key;
+            ShowSuggest(r);
         }
         catch (Exception ex)
         {
             Console.WriteLine("[IPW-A11Y] event error: " + ex.Message);
         }
+    }
+
+    private static bool HasPassword(AccessibilityNodeInfo? node)
+    {
+        if (node is null) return false;
+        if (node.Password) return true;
+        for (int i = 0; i < node.ChildCount; i++)
+            if (HasPassword(node.GetChild(i))) return true;
+        return false;
+    }
+
+    /// <summary>Окошко-подсказка у самого поля — как системное автозаполнение в Chrome.
+    /// Всплывает само при фокусе на поле входа (только в браузерах из списка выше).</summary>
+    private void ShowSuggest(global::Android.Graphics.Rect r)
+    {
+        var wm = GetSystemService(WindowService)?.JavaCast<IWindowManager>();
+        if (wm is null) return;
+
+        var panel = new LinearLayout(this) { Orientation = AndroidOrientation.Vertical };
+        var pbg = new GradientDrawable();
+        pbg.SetShape(ShapeType.Rectangle);
+        pbg.SetCornerRadius(Dp(12));
+        pbg.SetColor(AndroidColor.Argb(252, 20, 26, 33));
+        pbg.SetStroke(Dp(1), AndroidColor.Argb(255, 60, 70, 82));
+        panel.Background = pbg;
+        panel.SetPadding(Dp(4), Dp(2), Dp(4), Dp(2));
+
+        bool unlocked = Svc.State.IsUnlocked;
+        int rows = 0;
+        if (unlocked && Svc.State.Vault is Vault vault)
+        {
+            List<AutofillCandidate> items = AutofillMatcher.Rank(vault, _domain.Length > 0 ? _domain : null, null);
+            foreach (AutofillCandidate c in items.Where(x => x.Score > 0).Take(3))
+            {
+                var row = new AndroidButton(this) { Text = c.Title + (c.Login.Length > 0 ? "  ·  " + c.Login : "") };
+                row.SetAllCaps(false);
+                row.Gravity = GravityFlags.CenterVertical | GravityFlags.Start;
+                row.SetTextColor(AndroidColor.Argb(255, 236, 240, 245));
+                row.SetBackgroundColor(AndroidColor.Transparent);
+                AutofillCandidate cap = c;
+                row.Click += (_, _) => { Fill(cap); HideMenu(); };
+                panel.AddView(row); rows++;
+            }
+        }
+        var more = new AndroidButton(this)
+        {
+            Text = !unlocked ? "IPasswrd: открыть по отпечатку"
+                 : rows > 0 ? "Все записи…"
+                 : "IPasswrd: выбрать запись…",
+        };
+        more.SetAllCaps(false);
+        more.Gravity = GravityFlags.CenterVertical | GravityFlags.Start;
+        more.SetTextColor(AndroidColor.Argb(255, 214, 170, 78));
+        more.SetBackgroundColor(AndroidColor.Transparent);
+        more.Click += (_, _) => { HideMenu(); ToggleMenu(); };
+        panel.AddView(more);
+
+        int screenW = Resources?.DisplayMetrics?.WidthPixels ?? Dp(360);
+        int screenH = Resources?.DisplayMetrics?.HeightPixels ?? Dp(640);
+        int w = Math.Min(Dp(320), screenW - Dp(24));
+        int x = Math.Max(Dp(8), Math.Min(r.Left, screenW - w - Dp(8)));
+        int est = Dp(52) * (rows + 1) + Dp(10);
+        int y = r.Bottom + Dp(4);
+        if (y + est > screenH - Dp(40)) y = Math.Max(Dp(30), r.Top - est - Dp(4));
+
+        var lp = new WindowManagerLayoutParams(
+            w, ViewGroup.LayoutParams.WrapContent,
+            WindowManagerTypes.AccessibilityOverlay,
+            WindowManagerFlags.NotFocusable | WindowManagerFlags.NotTouchModal,
+            Format.Translucent)
+        { Gravity = GravityFlags.Top | GravityFlags.Start, X = x, Y = y };
+
+        try { wm.AddView(panel, lp); _menu = panel; }
+        catch (Exception ex) { Console.WriteLine("[IPW-A11Y] addSuggest: " + ex.Message); }
     }
 
     // ================= кнопка-триггер =================
@@ -178,7 +259,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
         {
             if (Svc.State.QuickUnlockAvailable)
             {
-                // Прозрачный хост: только системный отпечаток поверх браузера, еез открытия приложения.
+                // Прозрачный хост: только системный отпечаток поверх браузера, без открытия приложения.
                 _awaitUnlock = true;
                 new Handler(Looper.MainLooper!).PostDelayed(() => _awaitUnlock = false, 20000);
                 try
@@ -191,7 +272,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
             }
             else
             {
-                // Биометрия не настроена — тут еез приложения не разблокировать (нужен мастер-пароль).
+                // Биометрия не настроена — тут без приложения не разблокировать (нужен мастер-пароль).
                 Toast.MakeText(this, "Откройте сейф IPasswrd и повторите", ToastLength.Long)?.Show();
                 try
                 {
@@ -208,7 +289,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
         List<AutofillCandidate> items = AutofillMatcher.Rank(vault, _domain.Length > 0 ? _domain : null, null);
         var matched = items.Where(c => c.Score > 0).ToList();
-        // совпавшие по домену — все; иначе первые 8 (выеор вручную)
+        // совпавшие по домену — все; иначе первые 8 (выбор вручную)
         bool haveMatch = matched.Count > 0;
         var shown = haveMatch ? matched.Take(12).ToList() : items.Take(8).ToList();
 
@@ -288,7 +369,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
             if (passField is not null)
             {
-                // логин — елижайшее НЕ-парольное поле выше пароля
+                // логин — ближайшее НЕ-парольное поле выше пароля
                 int passTop = Bounds(passField).Top;
                 userField = edits
                     .Where(n => !n.Password && Bounds(n).Top <= passTop)
@@ -297,7 +378,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
             }
             else
             {
-                // только логин на экране (первый шаг входа) — еерём сфокусированное или первое
+                // только логин на экране (первый шаг входа) — берём сфокусированное или первое
                 userField = edits.FirstOrDefault(n => n.Focused) ?? edits[0];
             }
 
@@ -359,7 +440,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
     // ================= оеход дерева =================
 
     /// <summary>Корень окна браузера. RootInActiveWindow во время нашего меню-оверлея указывает
-    /// на оверлей, а не на страницу — поэтому идём по всем окнам и еерём то, чей пакет — браузер.</summary>
+    /// на оверлей, а не на страницу — поэтому идём по всем окнам и берём то, чей пакет — браузер.</summary>
     private AccessibilityNodeInfo? BrowserRoot()
     {
         try
