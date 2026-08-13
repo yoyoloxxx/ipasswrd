@@ -384,7 +384,7 @@ public partial class SettingsPage : ContentPage
                 "Я записал(а)", null, "Скопировать", "Сохранить в файл…");
             if (action == "Скопировать")
             {
-                await Clipboard.Default.SetTextAsync(pretty);
+                await IPasswrd.Mobile.Services.SecureClipboard.CopyAsync(pretty);
                 await ShowToastAsync("Код скопирован — вставьте в надёжное место");
             }
             else if (action == "Сохранить в файл…")

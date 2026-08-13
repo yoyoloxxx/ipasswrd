@@ -34,7 +34,7 @@ public sealed class AppState
 
     public int AutolockMinutes
     {
-        get => Preferences.Get("autolockMinutes", 5);
+        get => Preferences.Get("autolockMinutes", 1);
         set => Preferences.Set("autolockMinutes", value);
     }
 
@@ -290,7 +290,7 @@ public sealed class AppState
                 ExpiresAt = DateTimeOffset.UtcNow.AddDays(QuickUnlockDays).ToUnixTimeSeconds(),
             };
             byte[] json = JsonSerializer.SerializeToUtf8Bytes(data);
-            if (UseBioCrypto) _ = Svc.BiometricSecret.ProtectAsync(QuickUnlockKey, json);   // hardware-gated (silent public-key encrypt)
+            if (UseBioCrypto) { _ = Svc.BiometricSecret.ProtectAsync(QuickUnlockKey, json); try { Svc.KeyStore.Delete(QuickUnlockKey); } catch { } }   // hardware-gated; заодно стираем старую негейченную копию
             else Svc.KeyStore.Save(QuickUnlockKey, json);
             Preferences.Set(QuickUnlockPresentPref, true);
         }
