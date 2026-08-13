@@ -316,7 +316,7 @@ public partial class SettingsPage : ContentPage
         A11ySection.IsVisible = true;
         bool on = IPasswrd.Mobile.Platforms.Android.AutoFill.IpwAccessibilityService.IsRunning;
         A11yStatus.Text = on
-            ? "Включено. В Яндекс.Браузере тапните поле логина — появится кнопка IPasswrd."
+            ? "Включено. В Яндекс.Браузере тапните поле входа — под ним всплывёт окошко с записями."
             : "Выключено. Нужно один раз включить IPasswrd в спец-возможностях.";
         A11yButton.Text = on ? "Открыть настройки спец-возможностей" : "Включить";
 #else
