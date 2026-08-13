@@ -15,3 +15,7 @@ if "%TOK%"=="" (echo Нет токена GitHub: выполните gh auth login & exit /b 1)
 cd /d "%ROOT%"
 "%VPK%" upload github -o Releases --repoUrl https://github.com/yoyoloxxx/ipasswrd --token %TOK% --publish true --releaseName "IPasswrd %VER%" --tag v%VER% > "%ROOT%\vpk-upload.log" 2>&1
 if errorlevel 1 (echo === FAILED === >> "%ROOT%\vpk-upload.log") else (echo === OK === >> "%ROOT%\vpk-upload.log")
+
+rem Расширение файлом (временно, пока Chrome Web Store проверяет публикацию).
+powershell -NoProfile -Command "Compress-Archive -Path '%ROOT%\windows\extension\*' -DestinationPath '%ROOT%\Releases\IPasswrd-extension.zip' -Force" >> "%ROOT%\vpk-upload.log" 2>&1
+gh release upload v%VER% "%ROOT%\Releases\IPasswrd-extension.zip" --clobber -R yoyoloxxx/ipasswrd >> "%ROOT%\vpk-upload.log" 2>&1

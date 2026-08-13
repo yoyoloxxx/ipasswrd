@@ -36,6 +36,9 @@ rem "Установить расширение" нашла всё в одной папке.
 xcopy /E /I /Y "%ROOT%\windows\extension" "%OUT%\extension" >> "%LOG%" 2>&1
 if exist "%ROOT%\dist-host\IPasswrd.Host.exe" copy /Y "%ROOT%\dist-host\IPasswrd.Host.exe" "%OUT%\IPasswrd.Host.exe" >> "%LOG%" 2>&1
 
+rem Ключи Google OAuth едут внутри пакета - без них вход в Google из коробки не работает.
+if exist "%LOCALAPPDATA%\IPasswrd\google_oauth.json" copy /Y "%LOCALAPPDATA%\IPasswrd\google_oauth.json" "%OUT%\google_oauth.json" >> "%LOG%" 2>&1
+
 echo === pack === >> "%LOG%"
 "%VPK%" pack --packId IPasswrdApp --packTitle IPasswrd --packAuthors "yoyoloxxx Dev" --packVersion %VER% --packDir "%OUT%" --mainExe IPasswrd.App.exe --icon "%ROOT%\windows\IPasswrd.App\Assets\ipasswrd_app.ico" --outputDir "%ROOT%\Releases" >> "%LOG%" 2>&1
 if errorlevel 1 goto fail

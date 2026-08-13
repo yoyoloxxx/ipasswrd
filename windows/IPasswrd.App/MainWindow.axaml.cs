@@ -319,6 +319,10 @@ public partial class MainWindow : Window
         ["Войти через iCloud"] = "Sign in with iCloud", ["Google-синхронизация — скоро"] = "Google sync — coming soon",
         // Google Drive sync
         ["Подключить Google"] = "Connect Google", ["Как получить ключи?"] = "How to get the keys?",
+        ["У меня уже есть сейф — забрать с Google Диска"] = "I already have a vault — fetch it from Google Drive",
+        ["Ищу сейф в Google Диске…"] = "Looking for your vault in Google Drive…",
+        ["В этом Google-аккаунте сейф не найден. Создайте новый — после подключения синхронизации он сам появится в Google."] = "No vault found in this Google account. Create a new one — it will appear in Google once sync is on.",
+        ["Сейф загружен из Google — введите ваш мастер-пароль."] = "Vault downloaded from Google — enter your master password.",
         ["Открываю браузер для входа в Google…"] = "Opening the browser to sign in to Google…",
         ["Заполните Client ID и Client secret."] = "Fill in the Client ID and Client secret.",
         ["Сначала вставьте Client ID и Client secret от Google."] = "First paste your Google Client ID and Client secret.",
@@ -1447,6 +1451,7 @@ public partial class MainWindow : Window
         ForgotButton.IsVisible = !Creating && VaultFileHasRecovery();
         HelloButton.IsVisible = !Creating && !IsLocked && HasHelloCache();   // primary way in when armed
         RestoreBackupButton.IsVisible = false;   // появляется только после ошибки чтения файла
+        GooglePickupButton.IsVisible = Creating;   // первый запуск: сейф можно забрать из Google, а не создавать заново
         UnlockScreen.IsVisible = true;
         VaultScreen.IsVisible = false;
         EditorScreen.IsVisible = false;

@@ -181,6 +181,47 @@ public partial class MainWindow
         _ => code,
     };
 
+    // ---- первый запуск: забрать готовый сейф из Google Диска ----
+
+    /// <summary>Экран создания сейфа: вместо нового сейфа скачиваем существующий из Google Диска.
+    /// Успех переключает экран на обычный ввод мастер-пароля (файл уже на месте, синк включён).</summary>
+    private async void OnGooglePickupClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (!Creating || !GooglePickupButton.IsEnabled) return;
+        var g = EnsureGdrive();
+        GooglePickupButton.IsEnabled = false;
+        SetUnlockEnabled(false);
+        UnlockError.IsVisible = false;
+        UnlockSub.Text = Tr("Открываю браузер для входа в Google…");
+        string? err = null;
+        byte[]? remote = null;
+        try
+        {
+            await g.SignInAsync();
+            UnlockSub.Text = Tr("Ищу сейф в Google Диске…");
+            remote = await g.PullAsync();
+            if (remote is null)
+            {
+                try { g.SignOut(); } catch { /* ignore */ }
+                err = Tr("В этом Google-аккаунте сейф не найден. Создайте новый — после подключения синхронизации он сам появится в Google.");
+            }
+        }
+        catch (Exception ex) { err = Tr("Не удалось войти в Google: ") + GTranslateError(ex.Message); }
+
+        GooglePickupButton.IsEnabled = true;
+        SetUnlockEnabled(true);
+        if (remote is null)
+        {
+            UnlockSub.Text = Tr(Creating ? "Придумайте мастер-пароль" : "Введите мастер-пароль");
+            if (err is not null) { UnlockError.Text = err; UnlockError.IsVisible = true; }
+            return;
+        }
+        System.IO.File.WriteAllBytes(VaultPath(), remote);
+        _syncProvider = "google";
+        SaveSettings();
+        SetupUnlock(promptHello: false);   // Creating теперь false → обычный экран входа
+        UnlockSub.Text = Tr("Сейф загружен из Google — введите ваш мастер-пароль.");
+    }
     // ---- connect UI (inline in the Sync row) ----
 
     /// <summary>The expandable Google block: a Client ID / secret form (first run) then a Connect button.</summary>
