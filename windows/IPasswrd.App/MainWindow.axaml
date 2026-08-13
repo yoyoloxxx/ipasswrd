@@ -3,6 +3,7 @@
         x:Class="IPasswrd.App.MainWindow"
         Width="1080" Height="700" MinWidth="860" MinHeight="540"
         Title="IPasswrd"
+        Icon="/Assets/ipasswrd_app.ico"
         Background="{DynamicResource IpBgDeep}"
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaChromeHints="NoChrome"
