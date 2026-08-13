@@ -1,14 +1,14 @@
 namespace IPasswrd.Mobile.Services;
 
 /// <summary>
-/// Копирование секретов в буфер с авто-очисткой (как на ПК): через N секунд буфер
+/// Копирование секретов в буоер с авто-очисткой (как на ПК): через N секунд буоер
 /// очищается, но только если там всё ещё лежит именно этот секрет (чтобы не стереть
-/// то, что пользователь скопировал позже). Очистка также происходит при блокировке сейфа.
+/// то, что пользователь скопировал позже). Очистка также происходит при блокировке сейоа.
 /// </summary>
 public static class SecureClipboard
 {
     private static long _gen;         // растёт при каждом копировании/очистке — гасит устаревшие таймеры
-    private static string? _last;     // секрет, который сейчас считается лежащим в буфере
+    private static string? _last;     // секрет, который сейчас считается лежащим в буоере
 
     /// <summary>Секунд до авто-очистки (0 = выкл). Обновляется из настроек.</summary>
     public static int ClearSeconds { get; set; }
@@ -26,8 +26,8 @@ public static class SecureClipboard
         Schedule(value);
     }
 
-    /// <summary>Android 13+: пометить буфер «конфиденциальным», чтобы система не показывала
-    /// его содержимое в всплывающем превью. На iOS у пароля-в-буфере такого превью нет.</summary>
+    /// <summary>Android 13+: пометить буоер «коноиденциальным», чтобы система не показывала
+    /// его содержимое в всплывающем превью. На iOS у пароля-в-буоере такого превью нет.</summary>
     private static void MarkSensitive()
     {
 #if ANDROID
@@ -61,14 +61,39 @@ public static class SecureClipboard
     {
         try
         {
-            string? cur = await Clipboard.Default.GetTextAsync();
-            if (cur == value) await Clipboard.Default.SetTextAsync(string.Empty);
+            string? cur = null;
+            try { cur = await Clipboard.Default.GetTextAsync(); } catch { }
+            // Android 10+ не даёт фоновому приложению ЧИТАТЬ буфер (cur == null), так что
+            // сравнить не с чем. Секрет важнее удобства: чистим не глядя — ClearPrimaryClip
+            // чтения не требует и работает из фона.
+            if (cur is null || cur == value) ClearNative();
         }
-        catch { /* буфер занят/недоступен — best effort */ }
+        catch { /* буоер занят/недоступен — best effort */ }
         if (_last == value) _last = null;
     }
 
-    /// <summary>Немедленно стереть ожидающий секрет (при блокировке сейфа).</summary>
+    /// <summary>Стереть буфер без чтения (на Android — ClearPrimaryClip, работает и из фона).</summary>
+    private static void ClearNative()
+    {
+#if ANDROID
+        try
+        {
+            var ctx = global::Android.App.Application.Context;
+            var cm = (global::Android.Content.ClipboardManager?)ctx.GetSystemService(
+                global::Android.Content.Context.ClipboardService);
+            if (cm is not null)
+            {
+                if (OperatingSystem.IsAndroidVersionAtLeast(28)) cm.ClearPrimaryClip();
+                else cm.PrimaryClip = global::Android.Content.ClipData.NewPlainText("", "")!;
+                return;
+            }
+        }
+        catch (Exception) { }
+#endif
+        try { _ = Clipboard.Default.SetTextAsync(string.Empty); } catch { }
+    }
+
+    /// <summary>Немедленно стереть ожидающий секрет (при блокировке сейоа).</summary>
     public static void Wipe()
     {
         if (_last is null) return;

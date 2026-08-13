@@ -275,9 +275,13 @@ public sealed class AppState
     /// unlock screen can offer biometrics without probing the biometric store.</summary>
     private const string QuickUnlockPresentPref = "quickunlock.present";
 
+    /// <summary>Каким путём сохранён быстрый вход: "bio" (крипто-гейт) или "soft" (старый путь).</summary>
+    private const string QuickModePref = "quickunlock.mode";
+
     public bool QuickUnlockAvailable =>
         BiometricUnlockEnabled && HasLocalVault && Preferences.Get(QuickUnlockPresentPref, false)
-        && (UseBioCrypto ? Svc.BiometricSecret.IsAvailable : Svc.Biometric.IsAvailable);
+        && (Preferences.Get(QuickModePref, UseBioCrypto ? "bio" : "soft") == "bio"
+                ? Svc.BiometricSecret.IsAvailable : Svc.Biometric.IsAvailable);
 
     private void SaveQuickUnlock()
     {
@@ -290,8 +294,19 @@ public sealed class AppState
                 ExpiresAt = DateTimeOffset.UtcNow.AddDays(QuickUnlockDays).ToUnixTimeSeconds(),
             };
             byte[] json = JsonSerializer.SerializeToUtf8Bytes(data);
-            if (UseBioCrypto) { _ = Svc.BiometricSecret.ProtectAsync(QuickUnlockKey, json); try { Svc.KeyStore.Delete(QuickUnlockKey); } catch { } }   // hardware-gated; заодно стираем старую негейченную копию
-            else Svc.KeyStore.Save(QuickUnlockKey, json);
+            if (UseBioCrypto)
+            {
+                // Крипто-гейт заряжаем в фоне и пишем фактический режим: если гейт не дался
+                // (экзотическая прошивка), тихо остаёмся на старом пути — быстрый вход не теряется.
+                _ = Task.Run(async () =>
+                {
+                    bool ok = false;
+                    try { ok = await Svc.BiometricSecret.ProtectAsync(QuickUnlockKey, json); } catch { }
+                    if (ok) { Preferences.Set(QuickModePref, "bio"); try { Svc.KeyStore.Delete(QuickUnlockKey); } catch { } }
+                    else { try { Svc.KeyStore.Save(QuickUnlockKey, json); Preferences.Set(QuickModePref, "soft"); } catch { } }
+                });
+            }
+            else { Svc.KeyStore.Save(QuickUnlockKey, json); Preferences.Set(QuickModePref, "soft"); }
             Preferences.Set(QuickUnlockPresentPref, true);
         }
         catch { /* необязательный путь: мастер-пароль всегда работает */ }
@@ -302,6 +317,7 @@ public sealed class AppState
         try { Svc.KeyStore.Delete(QuickUnlockKey); } catch { }
         try { Svc.BiometricSecret.Delete(QuickUnlockKey); } catch { }
         try { Preferences.Remove(QuickUnlockPresentPref); } catch { }
+        try { Preferences.Remove(QuickModePref); } catch { }
     }
 
     /// <summary>null — успех; "" — тихий отказ (нет ключа/отмена Face ID); иначе текст ошибки.</summary>
@@ -312,8 +328,10 @@ public sealed class AppState
 
         if (!HasLocalVault || !Preferences.Get(QuickUnlockPresentPref, false)) return "";
 
+        string quickMode = Preferences.Get(QuickModePref, UseBioCrypto ? "bio" : "soft");
+        bool cryptoGated = quickMode == "bio" && UseBioCrypto;
         byte[]? raw;
-        if (UseBioCrypto)
+        if (cryptoGated)
         {
             // The crypto-gated store prompts biometrics as it releases the key.
             raw = await Svc.BiometricSecret.RevealAsync(QuickUnlockKey, "Открыть сейф IPasswrd");
@@ -336,7 +354,7 @@ public sealed class AppState
         }
 
         // Un-gated path still needs its biometric UI gate; the crypto-gated path already prompted on reveal.
-        if (!UseBioCrypto && !await Svc.Biometric.AuthenticateAsync("Открыть сейф IPasswrd")) return "";
+        if (!cryptoGated && !await Svc.Biometric.AuthenticateAsync("Открыть сейф IPasswrd")) return "";
 
         try
         {
