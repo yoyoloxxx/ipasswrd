@@ -102,6 +102,26 @@ jobs:
           cp "$APK" out/IPasswrd.apk
           ls -la out
 
+      # Тихо потерянная строчка в манифесте уже стоила нам иконки-пазла и отвалившегося
+      # автозаполнения. Проверяем собранный APK, а не исходники: важно то, что уедет людям.
+      - name: Смоук-проверка APK (иконка, службы, версия)
+        run: |
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt | sort | tail -1)
+          if [ -z "$AAPT" ]; then echo "::error::aapt не найден"; exit 1; fi
+          BADGING=$("$AAPT" dump badging out/IPasswrd.apk)
+          echo "$BADGING" | head -3
+          MF=$("$AAPT" dump xmltree out/IPasswrd.apk AndroidManifest.xml)
+          fail() { echo "::error::$1"; exit 1; }
+
+          echo "$BADGING" | grep -q "application:.*icon='res/" || fail "в APK не объявлена иконка приложения — лаунчер покажет пазл"
+          echo "$MF" | grep -q "IpwAutofillService"        || fail "нет службы автозаполнения"
+          echo "$MF" | grep -q "IpwAccessibilityService"   || fail "нет службы спец-возможностей (Яндекс-браузер останется без подсказок)"
+          echo "$MF" | grep -q "updateprovider"            || fail "нет FileProvider — обновление по воздуху не установится"
+          echo "$MF" | grep -q "REQUEST_INSTALL_PACKAGES"  || fail "нет разрешения на установку обновления"
+
+          CODE=$(grep -o '<ApplicationVersion>[^<]*' IPasswrd.Mobile.csproj | cut -d'>' -f2)
+          echo "$BADGING" | grep -q "versionCode='$CODE'" || fail "versionCode в APK не совпадает с csproj ($CODE) — обновление не предложится"
+          echo "APK в порядке: иконка, обе службы, обновление, версия $CODE"
       - name: Отпечаток подписи (чтобы видеть, что ключ тот же)
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
