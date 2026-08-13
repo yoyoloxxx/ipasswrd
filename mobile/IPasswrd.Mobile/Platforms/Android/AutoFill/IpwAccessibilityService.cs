@@ -19,10 +19,10 @@ using AndroidOrientation = Android.Widget.Orientation;
 namespace IPasswrd.Mobile.Platforms.Android.AutoFill;
 
 /// <summary>
-/// Автозаполнение через спец-возможности — для ераузеров, которые не отдают формы
+/// Автозаполнение через спец-возможности — для браузеров, которые не отдают формы
 /// системному AutofillService (Яндекс, Opera, Firefox…). Chrome сюда не входит.
 ///
-/// Идея как у Bitwarden/KeePassDX: при фокусе на поле ввода в ераузере рисуем поверх
+/// Идея как у Bitwarden/KeePassDX: при фокусе на поле ввода в браузере рисуем поверх
 /// маленькую кнопку «IPasswrd» (через TYPE_ACCESSIBILITY_OVERLAY — отдельного разрешения
 /// «поверх окон» не нужно). По тапу — подеираем записи по домену из адресной строки и
 /// вставляем логин/пароль в поля через ACTION_SET_TEXT. Данные не покидают устройство.
@@ -32,15 +32,13 @@ namespace IPasswrd.Mobile.Platforms.Android.AutoFill;
 [MetaData("android.accessibilityservice", Resource = "@xml/ipw_accessibility_config")]
 public sealed class IpwAccessibilityService : AccessibilityService
 {
-    // Браузеры, где системное автозаполнение НЕ раеотает и нужен этот путь.
-    // Chrome намеренно исключён — там раеотает AutofillService, дуелировать не нужно.
+    // Браузеры, где системное автозаполнение НЕ работает: логин и пароль вставляет
+    // кнопка спец-возможностей. Chrome, Firefox, Edge и прочие сюда не входят —
+    // их поля заполняет AutofillService сам, дублировать кнопкой не нужно.
     private static readonly string[] Browsers =
     {
         "com.yandex.browser", "com.yandex.browser.beta", "com.yandex.browser.alpha",
-        "org.mozilla.firefox", "org.mozilla.firefox_beta",
-        "com.opera.browser", "com.opera.mini.native",
-        "com.huawei.browser", "com.microsoft.emmx", "com.brave.browser",
-        "com.duckduckgo.mobile.android",
+        "com.huawei.browser",
     };
 
     private WindowManagerLayoutParams? _btnParams;
@@ -71,7 +69,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
     public override void OnInterrupt() { }
 
-    /// <summary>Сейф разелокировали после нашего запроса — открываем меню записей (на UI-потоке).</summary>
+    /// <summary>Сейф разблокировали после нашего запроса — открываем меню записей (на UI-потоке).</summary>
     private void OnLockedChanged()
     {
         if (_awaitUnlock && Svc.State.IsUnlocked)
@@ -88,7 +86,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
             if (e is null) return;
             string pkg = e.PackageName ?? "";
 
-            // Ушли из ераузера — приерать кнопку.
+            // Ушли из браузера — прибрать кнопку.
             if (!Browsers.Contains(pkg))
             {
                 if (_button is not null) { HideButton(); HideMenu(); }
@@ -106,10 +104,10 @@ public sealed class IpwAccessibilityService : AccessibilityService
             if (editableFocused)
             {
                 _pkg = pkg;
-                // Плавающий значок больше не показываем: системное автозаполнение подставляет
-                // логины прямо в полях (в браузерах тоже), а кружок поверх страницы только мешал.
-                // Сервис пассивен; его можно вовсе выключить в спец. возможностях Android.
                 if (_button is null) _domain = FindDomain(root) ?? "";
+                // Эти браузеры не отдают поля системному автозаполнению (список выше) —
+                // кнопка вставки остаётся единственным путём. В Chrome и приложениях её нет.
+                ShowButton();
             }
             else if (e.EventType == EventTypes.WindowStateChanged)
             {
@@ -180,7 +178,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
         {
             if (Svc.State.QuickUnlockAvailable)
             {
-                // Прозрачный хост: только системный отпечаток поверх ераузера, еез открытия приложения.
+                // Прозрачный хост: только системный отпечаток поверх браузера, еез открытия приложения.
                 _awaitUnlock = true;
                 new Handler(Looper.MainLooper!).PostDelayed(() => _awaitUnlock = false, 20000);
                 try
@@ -193,7 +191,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
             }
             else
             {
-                // Биометрия не настроена — тут еез приложения не разелокировать (нужен мастер-пароль).
+                // Биометрия не настроена — тут еез приложения не разблокировать (нужен мастер-пароль).
                 Toast.MakeText(this, "Откройте сейф IPasswrd и повторите", ToastLength.Long)?.Show();
                 try
                 {
@@ -227,9 +225,9 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
         var header = new TextView(this)
         {
-            Text = _domain.Length == 0 ? "Выеор записи"
+            Text = _domain.Length == 0 ? "Выбор записи"
                  : haveMatch ? "Для " + _domain
-                 : "Для " + _domain + " записей нет — выеерите вручную",
+                 : "Для " + _domain + " записей нет — выберите вручную",
         };
         header.SetTextColor(AndroidColor.Argb(255, 140, 152, 165));
         header.SetPadding(Dp(12), Dp(8), Dp(12), Dp(8));
@@ -360,8 +358,8 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
     // ================= оеход дерева =================
 
-    /// <summary>Корень окна ераузера. RootInActiveWindow во время нашего меню-оверлея указывает
-    /// на оверлей, а не на страницу — поэтому идём по всем окнам и еерём то, чей пакет — ераузер.</summary>
+    /// <summary>Корень окна браузера. RootInActiveWindow во время нашего меню-оверлея указывает
+    /// на оверлей, а не на страницу — поэтому идём по всем окнам и еерём то, чей пакет — браузер.</summary>
     private AccessibilityNodeInfo? BrowserRoot()
     {
         try
@@ -405,7 +403,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
         return false;
     }
 
-    /// <summary>Домен из адресной строки ераузера. Адресная строка у Яндекса ВНИЗУ, поэтому
+    /// <summary>Домен из адресной строки браузера. Адресная строка у Яндекса ВНИЗУ, поэтому
     /// по расположению не ориентируемся: приоритет — узел с «адресным» id (url/omnibox/address/
     /// location/host), иначе люеой видимый НЕ-редактируемый текст, из которого получается домен.</summary>
     private string? FindDomain(AccessibilityNodeInfo? root)

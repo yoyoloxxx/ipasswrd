@@ -24,6 +24,7 @@ public partial class SettingsPage : ContentPage
     {
         base.OnAppearing();
         Refresh();
+        RefreshAutofill();
     }
 
     private void Refresh()
@@ -336,6 +337,41 @@ public partial class SettingsPage : ContentPage
 #endif
     }
 
+    // ================= системное автозаполнение (Android) =================
+
+    private void RefreshAutofill()
+    {
+#if ANDROID
+        AutofillButton.IsVisible = true;
+        bool on = false;
+        try
+        {
+            var raw = global::Android.App.Application.Context.GetSystemService(
+                global::Java.Lang.Class.FromType(typeof(global::Android.Views.Autofill.AutofillManager)));
+            var mgr = raw is null ? null : global::Android.Runtime.Extensions.JavaCast<global::Android.Views.Autofill.AutofillManager>(raw);
+            on = mgr is not null && mgr.HasEnabledAutofillServices;
+        }
+        catch (Exception) { }
+        AutofillButton.Text = on ? "Автозаполнение включено" : "Включить автозаполнение";
+        AutofillButton.IsEnabled = !on;
+#endif
+    }
+
+    /// <summary>Системный диалог «Использовать IPasswrd для автозаполнения?» — после
+    /// переустановки Android сбрасывает выбор службы, и подсказки пропадают у всех.</summary>
+    private void OnEnableAutofill(object? sender, EventArgs e)
+    {
+#if ANDROID
+        try
+        {
+            var intent = new global::Android.Content.Intent(global::Android.Provider.Settings.ActionRequestSetAutofillService);
+            intent.SetData(global::Android.Net.Uri.Parse("package:" + global::Android.App.Application.Context.PackageName));
+            intent.AddFlags(global::Android.Content.ActivityFlags.NewTask);
+            global::Android.App.Application.Context.StartActivity(intent);
+        }
+        catch (Exception) { }
+#endif
+    }
     // ================= код восстановления =================
 
     private void RefreshRecovery()
