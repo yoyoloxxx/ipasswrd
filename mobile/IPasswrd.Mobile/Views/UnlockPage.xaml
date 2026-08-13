@@ -41,7 +41,7 @@
             <Label x:Name="BusyHint" Text="Проверяю мастер-пароль…" IsVisible="False"
                    HorizontalOptions="Center" Style="{StaticResource Muted}" />
 
-            <Button x:Name="GoogleButton" Text="У меня уже есть сейф — забрать с Google Диска"
+            <Button x:Name="GoogleButton" Text="Забрать сейф с Google Диска" LineBreakMode="WordWrap"
                     IsVisible="False" Clicked="OnConnectGoogle" BackgroundColor="Transparent"
                     TextColor="{AppThemeBinding Dark={StaticResource IpAccent}, Light={StaticResource IpAccentL}}" />
 
