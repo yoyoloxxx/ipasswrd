@@ -18,10 +18,10 @@
       "screenshots": [],
       "versions": [
         {
-          "version": "0.2.0",
-          "buildVersion": "2",
+          "version": "1.0.42",
+          "buildVersion": "10042",
           "date": "2026-08-13",
-          "size": 25752030,
+          "size": 25783361,
           "downloadURL": "https://github.com/yoyoloxxx/ipasswrd/releases/download/mobile-latest/IPasswrd-unsigned.ipa",
           "minOSVersion": "15.0",
           "localizedDescription": "Свежая сборка IPasswrd для iPhone."
