@@ -29,6 +29,12 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
     private const string PrefsName = "ipw.bio";
     private const string Transformation = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding";
 
+    /// <summary>Явные параметры OAEP: keymaster в AndroidKeyStore умеет MGF1 только с SHA-1, а
+    /// провайдер по умолчанию шифрует публичной половиной с MGF1-SHA256 — рассинхрон даёт
+    /// IllegalBlockSizeException при расшифровке. Задаём одинаково с обеих сторон.</summary>
+    private static Javax.Crypto.Spec.OAEPParameterSpec OaepSpec =>
+        new("SHA-256", "MGF1", Java.Security.Spec.MGF1ParameterSpec.Sha1!, Javax.Crypto.Spec.PSource.PSpecified.Default!);
+
     private const int StrongOrCredential =
         (int)(BiometricManager.Authenticators.BiometricStrong | BiometricManager.Authenticators.DeviceCredential);
 
@@ -63,7 +69,23 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
                 // 0 = SUCCESS. -1 = BIOMETRIC_STATUS_UNKNOWN: старый API (EMUI/Android 10) не может
                 // подтвердить «сильность» датчика заранее. Считаем гейт доступным — настоящая проверка
                 // в самом аппаратном ключе: не сработает — RevealAsync вернёт null, вход уйдёт на пароль.
-                return code == BiometricManager.BiometricSuccess || code == -1;
+                if (code != BiometricManager.BiometricSuccess && code != -1) return false;
+
+                // Решающая проверка — сам аппарат: отдаёт ли прошивка хэндл auth-bound ключа.
+                // Часть EMUI создаёт пару и шифрует публичной половиной, а приватную не выдаёт
+                // никогда — тогда гейт физически невозможен, честно живём старым путём. Кэшируем.
+                ISharedPreferences? pr = Prefs;
+                if (pr is not null && pr.GetBoolean("bio.hw.unsupported", false)) return false;
+                if (pr is not null && pr.GetBoolean("bio.hw.ok", false)) return true;
+                bool hw = ProbeAuthBound();
+                try
+                {
+                    ISharedPreferencesEditor? ed0 = pr?.Edit();
+                    if (ed0 is not null) { ed0.PutBoolean(hw ? "bio.hw.ok" : "bio.hw.unsupported", true); ed0.Commit(); }
+                }
+                catch (Exception) { }
+                if (!hw) Console.WriteLine("[IPW-BIO] auth-bound keys unsupported on this firmware -> gate off");
+                return hw;
             }
             catch (Exception) { return false; }
         }
@@ -78,7 +100,16 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
             KeyStore ks = KeyStore.GetInstance(KeystoreName)!;
             ks.Load(null);
             if (ks.IsKeyEntry(KeyAlias))
-                return ks.GetCertificate(KeyAlias)?.PublicKey;
+            {
+                IPublicKey? existing = ks.GetCertificate(KeyAlias)?.PublicKey;
+                Java.Security.IKey? handle = null;
+                try { handle = ks.GetKey(KeyAlias, null); } catch (Exception) { }
+                if (existing is not null && handle is not null) return existing;
+                // Алиас есть, но пара мертва (например, EMUI после инвалидации отпечатков):
+                // сносим и генерируем заново, иначе гейт завис бы нерабочим навечно.
+                Console.WriteLine("[IPW-BIO] EnsurePublicKey: stale alias, regenerating");
+                try { ks.DeleteEntry(KeyAlias); } catch (Exception) { }
+            }
 
             var builder = new KeyGenParameterSpec.Builder(
                     KeyAlias, KeyStorePurpose.Encrypt | KeyStorePurpose.Decrypt)
@@ -107,6 +138,20 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
         }
     }
 
+    /// <summary>Правда ли прошивка отдаёт auth-bound ключи: пара создаётся (или уже есть) и
+    /// хэндл приватной половины достаётся. Без этого крипто-гейт неработоспособен.</summary>
+    private static bool ProbeAuthBound()
+    {
+        try
+        {
+            if (EnsurePublicKey() is null) return false;
+            KeyStore ks = KeyStore.GetInstance(KeystoreName)!;
+            ks.Load(null);
+            return ks.GetKey(KeyAlias, null) is not null;
+        }
+        catch (Exception ex) { Console.WriteLine("[IPW-BIO] probe: " + ex.Message); return false; }
+    }
+
     // ---- API ----
 
     public Task<bool> ProtectAsync(string name, byte[] data)
@@ -120,14 +165,30 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
                 if (pub is null || prefs is null) return Task.FromResult(false);
 
                 JCipher cipher = JCipher.GetInstance(Transformation)!;
-                cipher.Init(JCipherMode.EncryptMode, pub);   // public-key encrypt: no user auth, silent
+                cipher.Init(JCipherMode.EncryptMode, pub, OaepSpec);   // public-key encrypt: no user auth, silent
                 byte[]? ct = cipher.DoFinal(data);
                 if (ct is null || ct.Length == 0) return Task.FromResult(false);
 
                 ISharedPreferencesEditor? ed = prefs.Edit();
                 if (ed is null) return Task.FromResult(false);
                 ed.PutString(PKey(name), Convert.ToBase64String(ct));
-                return Task.FromResult(ed.Commit());
+                bool stored = ed.Commit();
+                // Проба: отдаёт ли прошивка хэндл приватной половины. На части EMUI ключ создаётся
+                // и шифрует, а приватный хэндл не отдаёт — гейт нерабочий; честно возвращаем false,
+                // и AppState тихо остаётся на старом пути (быстрый вход не теряется).
+                if (stored)
+                {
+                    try
+                    {
+                        KeyStore ks2 = KeyStore.GetInstance(KeystoreName)!;
+                        ks2.Load(null);
+                        if (ks2.GetKey(KeyAlias, null) is null)
+                        { Console.WriteLine("[IPW-BIO] Protect: private handle unavailable -> false"); return Task.FromResult(false); }
+                    }
+                    catch (Exception ex2)
+                    { Console.WriteLine("[IPW-BIO] Protect probe: " + ex2.Message); return Task.FromResult(false); }
+                }
+                return Task.FromResult(stored);
             }
             catch (Exception ex)
             {
@@ -145,7 +206,7 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
         try
         {
             string? b64 = Prefs?.GetString(PKey(name), null);
-            if (string.IsNullOrEmpty(b64)) { tcs.TrySetResult(null); return tcs.Task; }
+            if (string.IsNullOrEmpty(b64)) { Console.WriteLine("[IPW-BIO] Reveal: no blob"); tcs.TrySetResult(null); return tcs.Task; }
             ct = Convert.FromBase64String(b64!);
         }
         catch (Exception) { tcs.TrySetResult(null); return tcs.Task; }
@@ -156,29 +217,41 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
             {
                 KeyStore ks = KeyStore.GetInstance(KeystoreName)!;
                 ks.Load(null);
-                if (ks.GetKey(KeyAlias, null) is not IPrivateKey priv) { tcs.TrySetResult(null); return; }
+                // ВАЖНО: не проверять «is IPrivateKey» — Xamarin оборачивает ключ из AndroidKeyStore
+                // инвокером, который реализует только IKey, и проверка типа всегда падала, хотя ключ
+                // настоящий. Cipher.Init принимает IKey напрямую.
+                Java.Security.IKey? priv = ks.GetKey(KeyAlias, null);
+                if (priv is null) { Console.WriteLine("[IPW-BIO] Reveal: private key handle is null"); tcs.TrySetResult(null); return; }
 
                 JCipher cipher = JCipher.GetInstance(Transformation)!;
-                cipher.Init(JCipherMode.DecryptMode, priv);   // authorised for one op after BiometricPrompt
+                cipher.Init(JCipherMode.DecryptMode, priv, OaepSpec);   // authorised for one op after BiometricPrompt
 
-                if (Platform.CurrentActivity is not FragmentActivity host) { tcs.TrySetResult(null); return; }
+                if (Platform.CurrentActivity is not FragmentActivity host) { Console.WriteLine("[IPW-BIO] Reveal: no FragmentActivity"); tcs.TrySetResult(null); return; }
 
                 var ib = new BiometricPrompt.PromptInfo.Builder()
                     .SetTitle("Разблокировка IPasswrd")!
-                    .SetSubtitle(reason)!
-                    .SetAllowedAuthenticators(AllowedAuth)!;
-                // Без DeviceCredential (API < 30) BiometricPrompt требует явную негативную кнопку.
-                if (!OperatingSystem.IsAndroidVersionAtLeast(30))
+                    .SetSubtitle(reason)!;
+                if (OperatingSystem.IsAndroidVersionAtLeast(30))
+                    ib = ib.SetAllowedAuthenticators(AllowedAuth)!;
+                else
+                    // API < 30: setAllowedAuthenticators вместе с CryptoObject валит промпт мгновенной
+                    // ошибкой ещё до показа (EMUI). Рецепт совместимости: только негативная кнопка —
+                    // androidx сам поведёт через сильную биометрию (FingerprintManager-путь).
                     ib = ib.SetNegativeButtonText("Мастер-пароль")!;
                 BiometricPrompt.PromptInfo info = ib.Build()!;
 
-                var callback = new RevealCallback(tcs, ct);
+                var callback = new RevealCallback(tcs, ct, name);
                 var prompt = new BiometricPrompt(host, new MainExecutor(), callback);
                 prompt.Authenticate(info, new BiometricPrompt.CryptoObject(cipher));
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[IPW-BIO] Reveal failed: " + ex.Message);
+                // Сюда прилетает и KeyPermanentlyInvalidatedException — набор отпечатков изменился.
+                // Сносим мёртвую пару и блоб: после входа мастер-паролем гейт перезарядится свежим
+                // ключом под новый набор, и биометрия оживёт сама.
+                Console.WriteLine("[IPW-BIO] Reveal failed: " + ex.Message + " - resetting gate");
+                try { KeyStore ksx = KeyStore.GetInstance(KeystoreName)!; ksx.Load(null); ksx.DeleteEntry(KeyAlias); } catch (Exception) { }
+                try { ISharedPreferencesEditor? edx = Prefs?.Edit(); if (edx is not null) { edx.Remove(PKey(name)); edx.Commit(); } } catch (Exception) { }
                 tcs.TrySetResult(null);
             }
         });
@@ -203,7 +276,8 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
     {
         private readonly TaskCompletionSource<byte[]?> _tcs;
         private readonly byte[] _ct;
-        public RevealCallback(TaskCompletionSource<byte[]?> tcs, byte[] ct) { _tcs = tcs; _ct = ct; }
+        private readonly string _name;
+        public RevealCallback(TaskCompletionSource<byte[]?> tcs, byte[] ct, string name) { _tcs = tcs; _ct = ct; _name = name; }
 
         public override void OnAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result)
         {
@@ -215,13 +289,17 @@ public sealed class BiometricKeystoreAndroid : IBiometricSecret
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[IPW-BIO] doFinal failed: " + ex.Message);
+                Console.WriteLine("[IPW-BIO] doFinal failed: " + ex.Message + " - wiping stale blob");
+                try { ISharedPreferencesEditor? edw = Prefs?.Edit(); if (edw is not null) { edw.Remove(PKey(_name)); edw.Commit(); } } catch (Exception) { }
                 _tcs.TrySetResult(null);
             }
         }
 
         public override void OnAuthenticationError(int errorCode, Java.Lang.ICharSequence errString)
-            => _tcs.TrySetResult(null);
+        {
+            Console.WriteLine("[IPW-BIO] prompt error " + errorCode + ": " + errString);
+            _tcs.TrySetResult(null);
+        }
         // OnAuthenticationFailed: one bad attempt, dialog stays open — do not resolve.
     }
 

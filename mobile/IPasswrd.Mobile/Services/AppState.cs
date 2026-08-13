@@ -296,14 +296,16 @@ public sealed class AppState
             byte[] json = JsonSerializer.SerializeToUtf8Bytes(data);
             if (UseBioCrypto)
             {
-                // Крипто-гейт заряжаем в фоне и пишем фактический режим: если гейт не дался
-                // (экзотическая прошивка), тихо остаёмся на старом пути — быстрый вход не теряется.
+                // Сначала СИНХРОННО старый путь — он переживает мгновенное закрытие приложения
+                // (фоновая задача не доживает: свайп убивает процесс посреди генерации ключа).
+                Svc.KeyStore.Save(QuickUnlockKey, json);
+                Preferences.Set(QuickModePref, "soft");
+                // Затем фоновый апгрейд до крипто-гейта; успел — переключаемся и чистим софт-копию.
                 _ = Task.Run(async () =>
                 {
                     bool ok = false;
                     try { ok = await Svc.BiometricSecret.ProtectAsync(QuickUnlockKey, json); } catch { }
                     if (ok) { Preferences.Set(QuickModePref, "bio"); try { Svc.KeyStore.Delete(QuickUnlockKey); } catch { } }
-                    else { try { Svc.KeyStore.Save(QuickUnlockKey, json); Preferences.Set(QuickModePref, "soft"); } catch { } }
                 });
             }
             else { Svc.KeyStore.Save(QuickUnlockKey, json); Preferences.Set(QuickModePref, "soft"); }
@@ -335,7 +337,7 @@ public sealed class AppState
         {
             // The crypto-gated store prompts biometrics as it releases the key.
             raw = await Svc.BiometricSecret.RevealAsync(QuickUnlockKey, "Открыть сейф IPasswrd");
-            if (raw is null) return "";   // cancelled / unavailable / not present -> master password, silently
+            if (raw is null) { Console.WriteLine("[IPW-BIO] quick unlock: gate null -> password"); return ""; }
         }
         else
         {
