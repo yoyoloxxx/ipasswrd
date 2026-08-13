@@ -20,6 +20,8 @@
                         <Label Text="Автоблокировка" VerticalOptions="Center" />
                         <Picker x:Name="AutolockPicker" Grid.Column="1" SelectedIndexChanged="OnAutolockChanged" />
                     </Grid>
+                    <BoxView HeightRequest="1" Color="{AppThemeBinding Dark={StaticResource IpHair}, Light={StaticResource IpHairL}}" />
+                    <Button x:Name="AutofillButton" Text="Включить автозаполнение" IsVisible="False" Margin="0,6" BackgroundColor="Transparent" Clicked="OnEnableAutofill" />
                 </VerticalStackLayout>
             </Border>
             <Label x:Name="AccessHint" Text="После простоя сейф закрывается; биометрия открывает его без мастер-пароля. Мастер-пароль переспрашивается раз в 30 дней."
