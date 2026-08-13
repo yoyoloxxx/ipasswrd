@@ -225,15 +225,16 @@ into a sibling's page.
   Anyone able to publish a release (or MITM a client that trusts a rogue CA) could ship a
   malicious update. Closing this needs an OS code-signing certificate; it is planned, and
   until then users should confirm releases come from the official repository.
-- **Mobile quick-unlock is biometric-gated in UI, not TPM-bound.** On desktop the cached
-  session key is released only by the TPM after a Windows Hello gesture -- a hardware crypto
-  gate. On iOS/Android the cached key sits in the Keychain / hardware-backed Keystore, marked
-  device-only, non-exportable and never backed up, and a biometric prompt gates its use --
-  but that gate is enforced in app code rather than by binding the key to biometrics in
-  hardware. For the threat model (another app cannot read the app-private store or drive the
-  app's flow, and a lost device must be locked) this was reviewed as adequate; binding the
-  key to a biometric crypto gate (Android CryptoObject / iOS SecAccessControl) is a planned
-  parity enhancement that must be validated on-device before shipping.
+- **Mobile quick-unlock is hardware-crypto-gated (desktop parity shipped).** On Android the
+  cached session key is RSA-wrapped by a hardware-Keystore keypair whose private half requires
+  user authentication per use (BiometricPrompt + CryptoObject; explicit OAEP MGF1-SHA1
+  parameters for keymaster compatibility) and is invalidated by new biometric enrollment --
+  verified on-device, including the invalidate -> master password -> re-arm cycle. On iOS the
+  item carries SecAccessControl(BiometryCurrentSet), so re-enrolling Face ID / changing the
+  finger set invalidates it the same way. Firmware that cannot release auth-bound keys
+  (probed at runtime, result cached) falls back to the previous app-gated flow so no device
+  loses quick unlock; the master password always remains the fallback, and biometrics can
+  never lock the user out.
 - **iOS clipboard has no pasteboard expiration.** A copied secret is cleared by an in-process
   timer and marked sensitive on Android, but the iOS pasteboard's own `ExpirationDate` is not
   set, so a secret copied just before the app is killed could outlive the timer. Low impact;
@@ -317,6 +318,10 @@ support coordinated disclosure and will credit reporters who wish to be named.
   unlock/merge with an app-private "already protected" marker (see 3.6, 3.10).
 - **Mobile clipboard hygiene**: recovery codes and the accessibility paste fallback go through
   the sensitivity-flagged, auto-clearing clipboard path.
+- **Mobile biometric crypto-gate shipped and verified on-device**: Android BiometricPrompt +
+  CryptoObject with enrollment invalidation (plus a runtime hardware probe with a safe
+  fallback), iOS BiometryCurrentSet; background-safe clipboard clearing via ClearPrimaryClip;
+  the vault now locks when the app is closed and after 1 minute in background.
 
 - Quick unlock on Windows moved from a DPAPI‑only cache (readable by any same‑user
   process, and non‑expiring when auto‑lock was off) to **Windows Hello / TPM**
