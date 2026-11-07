@@ -82,9 +82,56 @@ public class TotpTests
     [InlineData("", false)]
     [InlineData("   ", false)]
     [InlineData("otpauth://totp/X?issuer=X", false)]                              // uri without a secret
-    [InlineData("!!!!", false)]                                                   // no base32 chars -> empty key
+    [InlineData("!!!!", false)]                                                   // no base32 chars
+    [InlineData("GEZDGNBVGY3TQOJQ!!!!", false)]                                   // M7: invalid chars mixed in
+    [InlineData("otpauth://totp/X?secret=GEZDGNBVGY3TQOJQ&period=0", false)]      // M6: period=0
+    [InlineData("otpauth://totp/X?secret=GEZDGNBVGY3TQOJQ&digits=99", false)]     // M6: unbounded digits
+    [InlineData("otpauth://totp/X?secret=GEZDGNBVGY3TQOJQ&digits=-1", false)]     // M6: negative digits
     public void IsValidSecret_Accepts_Real_Secrets_Only(string input, bool ok)
     {
         Assert.Equal(ok, Totp.IsValidSecret(input));
+    }
+
+    // M6: crafted otpauth period/digits must not DivideByZero or overflow Math.Pow.
+    [Fact]
+    public void Generate_Rejects_NonPositive_Period()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Totp.Generate(Secret, 59, digits: 6, period: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Totp.SecondsRemaining(45, 0));
+    }
+
+    [Fact]
+    public void Generate_Rejects_OutOfRange_Digits()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Totp.Generate(Secret, 59, digits: 99));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Totp.Generate(Secret, 59, digits: 5));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Totp.Generate(Secret, 59, digits: -1));
+    }
+
+    [Fact]
+    public void Parse_Rejects_Bad_Period_And_Digits_In_Uri()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            Totp.Parse("otpauth://totp/X?secret=" + Secret + "&period=0"));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            Totp.Parse("otpauth://totp/X?secret=" + Secret + "&digits=99"));
+    }
+
+    // M7: Base32 must fail closed on typos instead of silently dropping bad characters.
+    [Fact]
+    public void Base32Decode_Rejects_Invalid_Characters()
+    {
+        Assert.Throws<FormatException>(() => Totp.Base32Decode("GEZD!GNBV"));
+        Assert.Throws<FormatException>(() => Totp.Base32Decode("!!!!"));
+    }
+
+    [Fact]
+    public void Base32Decode_Still_Allows_Spaces_Dashes_And_Padding()
+    {
+        byte[] spaced = Totp.Base32Decode("GEZD GNBV GY3T QOJQ");
+        byte[] dashed = Totp.Base32Decode("GEZD-GNBV-GY3T-QOJQ");
+        byte[] padded = Totp.Base32Decode("GEZDGNBVGY3TQOJQ====");
+        Assert.Equal(spaced, dashed);
+        Assert.Equal(spaced, padded);
     }
 }
