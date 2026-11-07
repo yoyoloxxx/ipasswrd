@@ -443,12 +443,14 @@ public sealed class IpwAccessibilityService : AccessibilityService
                     cm.PrimaryClip = clip;
                     node.PerformAction(global::Android.Views.Accessibility.Action.Focus);
                     node.PerformAction(global::Android.Views.Accessibility.Action.Paste);
-                    // Wipe the password from the clipboard right after the paste, so it is never left
-                    // behind for other apps or the clipboard history to pick up.
-                    new Handler(Looper.MainLooper!).PostDelayed(() =>
+                    // Audit M13: wipe synchronously after paste — do not leave the secret for
+                    // other apps / clipboard history (ClearPrimaryClip works from a11y context).
+                    try
                     {
-                        try { cm.PrimaryClip = global::Android.Content.ClipData.NewPlainText("", ""); } catch (Exception) { }
-                    }, 900);
+                        if (OperatingSystem.IsAndroidVersionAtLeast(28)) cm.ClearPrimaryClip();
+                        else cm.PrimaryClip = global::Android.Content.ClipData.NewPlainText("", "")!;
+                    }
+                    catch (Exception) { }
                 }
             }
             catch (Exception) { }

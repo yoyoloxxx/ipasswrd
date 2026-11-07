@@ -48,5 +48,10 @@ public sealed class AttachmentPage : ContentPage
         {
             await DisplayAlert("Не получилось", "Файл не отдался системе.", "Ок");
         }
+        finally
+        {
+            // Audit M13: share temp must not outlive the sheet (passport scan on disk).
+            try { if (File.Exists(path)) File.Delete(path); } catch { /* best-effort */ }
+        }
     }
 }
