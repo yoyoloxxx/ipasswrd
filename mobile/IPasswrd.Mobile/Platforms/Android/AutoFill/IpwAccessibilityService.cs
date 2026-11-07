@@ -73,7 +73,8 @@ public sealed class IpwAccessibilityService : AccessibilityService
     /// <summary>Сейф разблокировали после нашего запроса — открываем меню записей (на UI-потоке).</summary>
     private void OnLockedChanged()
     {
-        if (_awaitUnlock && Svc.State.IsUnlocked)
+        // EnforceAutolock first: LockedChanged can also fire from a background autolock wipe.
+        if (_awaitUnlock && Svc.State.ActiveVault is not null)
         {
             _awaitUnlock = false;
             new Handler(Looper.MainLooper!).Post(() => ToggleMenu());
@@ -163,9 +164,11 @@ public sealed class IpwAccessibilityService : AccessibilityService
         panel.Background = pbg;
         panel.SetPadding(Dp(4), Dp(2), Dp(4), Dp(2));
 
-        bool unlocked = Svc.State.IsUnlocked;
+        // Same process as Autofill: UI may stay Stopped for hours while a11y serves fills.
+        Vault? vault = Svc.State.ActiveVault;
+        bool unlocked = vault is not null;
         int rows = 0;
-        if (unlocked && Svc.State.Vault is Vault vault)
+        if (vault is not null)
         {
             List<AutofillCandidate> items = AutofillMatcher.Rank(vault, _domain.Length > 0 ? _domain : null, null);
             foreach (AutofillCandidate c in items.Where(x => x.Score > 0).Take(3))
@@ -266,7 +269,8 @@ public sealed class IpwAccessibilityService : AccessibilityService
     {
         if (_menu is not null) { HideMenu(); return; }
 
-        if (!Svc.State.IsUnlocked)
+        Vault? vault = Svc.State.ActiveVault;
+        if (vault is null)
         {
             if (Svc.State.QuickUnlockAvailable)
             {
@@ -294,9 +298,6 @@ public sealed class IpwAccessibilityService : AccessibilityService
             }
             return;
         }
-
-        Vault? vault = Svc.State.Vault;
-        if (vault is null) return;
 
         List<AutofillCandidate> items = AutofillMatcher.Rank(vault, _domain.Length > 0 ? _domain : null, null);
         var matched = items.Where(c => c.Score > 0).ToList();
@@ -366,6 +367,13 @@ public sealed class IpwAccessibilityService : AccessibilityService
     {
         try
         {
+            // Re-check before pasting: suggest/menu may have been built before the deadline.
+            if (Svc.State.ActiveVault is null)
+            {
+                Toast.MakeText(this, "Сейф заблокирован — разблокируйте IPasswrd", ToastLength.Long)?.Show();
+                return;
+            }
+
             AccessibilityNodeInfo? root = BrowserRoot();
             if (root is null) return;
 
