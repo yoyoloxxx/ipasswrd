@@ -92,6 +92,21 @@ public sealed class Vault
         try { return Parse(blob).VaultId ?? ""; } catch { return ""; }
     }
 
+    /// <summary>Reject a blob that is not a recognisable vault document (wrong JSON / unsupported
+    /// format). Used by restore paths before they overwrite the live file with arbitrary bytes.</summary>
+    public static void EnsureDocument(byte[] blob) => Parse(blob);
+
+    /// <summary>
+    /// Stable lineage id for a legacy file that has no <c>vaultId</c>. Derived from the DEK so every
+    /// unlock of the same vault (any device, after a password change) agrees — a random Guid on each
+    /// unlock would fork the lineage and make <see cref="MergeFrom"/> refuse the peer.
+    /// </summary>
+    private static string StableVaultIdFromDek(byte[] dek) =>
+        new Guid(Crypto.DeriveVaultIdBytes(dek)).ToString();
+
+    private static string ResolveVaultId(string? stored, byte[] dek) =>
+        string.IsNullOrEmpty(stored) ? StableVaultIdFromDek(dek) : stored;
+
     // ---- lifecycle ----
 
     /// <summary>Create a brand-new empty vault protected by <paramref name="masterPassword"/>.</summary>
@@ -119,7 +134,7 @@ public sealed class Vault
         byte[] kek = Crypto.DeriveKey(masterPassword, salt, cfg);
         byte[] dek = Unwrap(kek, doc.WrappedKey);   // throws WrongMasterPasswordException
         bool authed = VerifyDocMac(doc, dek, requireAuthenticated);   // throws on a tampered/forged file
-        string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
+        string vaultId = ResolveVaultId(doc.VaultId, dek);
         var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
                           doc.MasterChangedAt) { _authenticated = authed };
         CryptographicOperations.ZeroMemory(dek);   // the vault holds its own (shielded) copy now
@@ -204,11 +219,15 @@ public sealed class Vault
 
     /// <summary>
     /// Reopen a serialised vault with a cached session key, skipping the KDF (quick unlock).
-    /// The key is verified against the first live record when one exists; a wrong key throws
-    /// <see cref="WrongMasterPasswordException"/>. An empty or tombstone-only vault has no
-    /// record to prove the key against, so a document MAC is <b>required</b> in that case —
-    /// otherwise any 32-byte buffer would be accepted, and the next <see cref="Serialize"/>
-    /// would seal a MAC under the wrong DEK and brick password unlock.
+    /// The key is proved first by the document MAC when one is present; otherwise by decrypting
+    /// any live record (poisoned / corrupt records are skipped — a bad first record must not look
+    /// like a wrong password). A wrong key throws <see cref="WrongMasterPasswordException"/>.
+    /// An empty or tombstone-only vault has no record to prove the key against, so a document MAC
+    /// is <b>required</b> in that case — otherwise any 32-byte buffer would be accepted, and the
+    /// next <see cref="Serialize"/> would seal a MAC under the wrong DEK and brick password unlock.
+    /// When the DEK is already proved by a record but the seal fails under
+    /// <paramref name="requireAuthenticated"/>, the failure stays a
+    /// <see cref="VaultIntegrityException"/> so callers can tell wrong key from a tampered file.
     /// </summary>
     public static Vault UnlockWithSessionKey(byte[] blob, byte[] dek, bool requireAuthenticated = false)
     {
@@ -216,35 +235,55 @@ public sealed class Vault
 
         var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism).Capped();
         byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
-        string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
+        string vaultId = ResolveVaultId(doc.VaultId, dek);
         // NB: the caller keeps ownership of `dek` here (quick-unlock caches it OS-protected);
         // the ctor clones, so shielding never scrambles the caller's buffer.
         var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
                           doc.MasterChangedAt);
 
+        bool provedByMac = false;
         bool provedByRecord = false;
-        foreach (RecordDto r in doc.Records)
+
+        // Prefer the document MAC: it proves the DEK without depending on record order, and a
+        // poisoned first record cannot turn a correct biometric key into "wrong password".
+        if (!string.IsNullOrEmpty(doc.Mac))
         {
-            if (r.Deleted) continue;
-            try { v.DecryptRecord(r); }
-            catch (VaultIntegrityException) { throw new WrongMasterPasswordException(); }
-            provedByRecord = true;
-            break;
+            try { provedByMac = VerifyDocMac(doc, dek, requireAuthenticated: true); }
+            catch (VaultIntegrityException) { /* wrong key or tampered seal — try records next */ }
         }
-        // Record proof (when available) already rejected a wrong key as WrongMasterPassword.
-        // With no live record the MAC is the only DEK proof — require it even if the caller
-        // left requireAuthenticated false (empty-vault / all-tombstone quick unlock).
-        bool requireMac = requireAuthenticated || !provedByRecord;
+
+        if (!provedByMac)
+        {
+            foreach (RecordDto r in doc.Records)
+            {
+                if (r.Deleted) continue;
+                try
+                {
+                    v.DecryptRecord(r);
+                    provedByRecord = true;
+                    break;
+                }
+                catch (VaultIntegrityException) { /* skip poison / corrupt; try the next live record */ }
+                catch (FormatException) { /* mangled nonce/ciphertext encoding — same skip */ }
+            }
+        }
+
+        bool dekProved = provedByMac || provedByRecord;
+        // With no live-record proof the MAC is the only DEK proof — require it even if the caller
+        // left requireAuthenticated false (empty-vault / all-tombstone / all-poison quick unlock).
+        bool requireMac = requireAuthenticated || !dekProved;
         try
         {
-            v._authenticated = VerifyDocMac(doc, dek, requireMac);
+            v._authenticated = provedByMac || VerifyDocMac(doc, dek, requireMac);
         }
-        catch (VaultIntegrityException) when (!provedByRecord)
+        catch (VaultIntegrityException) when (!dekProved)
         {
-            // Wrong DEK against an empty sealed vault looks like a MAC mismatch; surface it the
-            // same way as a wrong session key on a non-empty vault.
+            // Wrong DEK against an empty / all-poison sealed vault looks like a MAC mismatch;
+            // surface it the same way as a wrong session key on a healthy vault.
             throw new WrongMasterPasswordException();
         }
+        if (!dekProved)
+            throw new WrongMasterPasswordException();
         return v;
     }
 
@@ -376,7 +415,7 @@ public sealed class Vault
                 rec.Deleted = true;
                 rec.Nonce = "";
                 rec.Ciphertext = "";
-                rec.UpdatedAt = NowIso();
+                rec.UpdatedAt = NowIsoFine();
                 _hasAttachments = null;   // the last scan may have just gone with it
                 return;
             }
@@ -468,7 +507,9 @@ public sealed class Vault
         // nor brick the vault. Empty peer vaultId with a valid MAC under our DEK is same-lineage
         // (the seal is the proof); empty peer vaultId with no MAC is refused when require is set,
         // which closes the "clear vaultId + strip mac" bypass of the mismatch check.
-        WithDek(d => { VerifyDocMac(other, d, require); return 0; });
+        // Capture whether the peer carried a valid seal: recovery LWW must not run on an
+        // unauthenticated peer (a stripped-MAC future revoke/issue is a recovery DoS).
+        bool peerAuthenticated = WithDek(d => VerifyDocMac(other, d, require));
 
         var byId = new Dictionary<string, RecordDto>(StringComparer.Ordinal);
         foreach (RecordDto r in _records) byId[r.Id] = r;
@@ -480,7 +521,7 @@ public sealed class Vault
             {
                 byId[r.Id] = r; changed++;                                   // new record from the other side
             }
-            else if (string.CompareOrdinal(r.UpdatedAt, mine.UpdatedAt) > 0)
+            else if (CompareStamp(r.UpdatedAt, mine.UpdatedAt) > 0)
             {
                 byId[r.Id] = r; changed++;                                   // the other side's copy is newer
             }
@@ -496,8 +537,14 @@ public sealed class Vault
         // The recovery envelope is not a record, so it needs its own last-write-wins rule.
         // Without one, a device that has never seen the code would quietly drop it on its
         // next save and the user would find out only when they needed it.
-        if (string.CompareOrdinal(RecoveryStamp(other.Recovery, other.RecoveryRevokedAt),
-                                  RecoveryStamp(_recovery, _recoveryRevokedAt)) > 0)
+        // Only adopt from a MAC-authenticated peer: clear-text createdAt/revokedAt alone would
+        // let a stripped-MAC attacker push a future garbage envelope or fake revoke and burn the
+        // paper recovery code while the master password still works. Structural check rejects a
+        // sealed-but-mangled wrap so a broken envelope never replaces a working one.
+        if (peerAuthenticated
+            && CompareStamp(RecoveryStamp(other.Recovery, other.RecoveryRevokedAt),
+                            RecoveryStamp(_recovery, _recoveryRevokedAt)) > 0
+            && RecoveryEnvelopeUsable(other.Recovery, other.RecoveryRevokedAt))
         {
             _recovery = other.Recovery;
             _recoveryRevokedAt = other.RecoveryRevokedAt;
@@ -625,7 +672,7 @@ public sealed class Vault
         {
             Kdf = KdfDtoOf(_cfg, salt),
             WrappedKey = WithDek(d => Wrap(rek, d, Crypto.AadRecoveryKey)),
-            CreatedAt = NowIso(),
+            CreatedAt = NowIsoFine(),
         };
         CryptographicOperations.ZeroMemory(rek);
         _recoveryRevokedAt = "";
@@ -641,7 +688,7 @@ public sealed class Vault
     {
         if (_recovery is null) return;
         _recovery = null;
-        _recoveryRevokedAt = NowIso();
+        _recoveryRevokedAt = NowIsoFine();
     }
 
     /// <summary>
@@ -667,7 +714,7 @@ public sealed class Vault
 
         var cfg = new KdfConfig(doc.Kdf.MemoryKiB, doc.Kdf.Iterations, doc.Kdf.Parallelism).Capped();
         byte[] salt = Convert.FromBase64String(doc.Kdf.Salt);
-        string vaultId = string.IsNullOrEmpty(doc.VaultId) ? Guid.NewGuid().ToString() : doc.VaultId;
+        string vaultId = ResolveVaultId(doc.VaultId, dek);
         bool authed = VerifyDocMac(doc, dek, requireAuthenticated);   // throws on a tampered/forged file
         var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
                           doc.MasterChangedAt) { _authenticated = authed };
@@ -804,6 +851,26 @@ public sealed class Vault
     private static string RecoveryStamp(RecoveryDto? rec, string revokedAt) =>
         rec is not null ? rec.CreatedAt : revokedAt;
 
+    /// <summary>
+    /// True when the peer's recovery side is either a well-formed envelope or a plain revoke.
+    /// Rejects mangled wrap bytes so MergeFrom never swaps a working recovery door for garbage
+    /// that still happened to ride under a valid document MAC (e.g. truncated base64).
+    /// </summary>
+    private static bool RecoveryEnvelopeUsable(RecoveryDto? rec, string revokedAt)
+    {
+        if (rec is null) return true; // revoke (or empty) — stamp already decided "newer"
+        try
+        {
+            byte[] salt = Convert.FromBase64String(rec.Kdf.Salt);
+            byte[] nonce = Convert.FromBase64String(rec.WrappedKey.Nonce);
+            byte[] ct = Convert.FromBase64String(rec.WrappedKey.Ciphertext);
+            return salt.Length == Crypto.SaltLen
+                && nonce.Length == Crypto.NonceLen
+                && ct.Length >= Crypto.TagLen;
+        }
+        catch (FormatException) { return false; }
+    }
+
     private static KdfDto KdfDtoOf(KdfConfig cfg, byte[] salt) => new()
     {
         Algorithm = "argon2id",
@@ -860,7 +927,7 @@ public sealed class Vault
             Id = id,
             Nonce = Convert.ToBase64String(nonce),
             Ciphertext = Convert.ToBase64String(ct),
-            UpdatedAt = NowIso(),
+            UpdatedAt = NowIsoFine(),
             Deleted = false,
         };
     }
@@ -895,10 +962,29 @@ public sealed class Vault
         DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss'Z'", CultureInfo.InvariantCulture);
 
     /// <summary>
-    /// Envelope stamp with sub-second precision: two devices changing the master password in
-    /// the same second must still order deterministically. One fixed length and layout, so the
+    /// Envelope / record stamp with sub-second precision: two devices editing in the same
+    /// second must still order deterministically. One fixed length and layout, so the
     /// ordinal string compare in <see cref="MergeFrom"/> is a correct time compare.
     /// </summary>
     private static string NowIsoFine() =>
         DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Compare ISO stamps written by this build (fine) or by older builds (whole seconds).
+    /// Coarse stamps are normalised to <c>.0000000</c> so a fine stamp in the same second
+    /// correctly outranks a legacy coarse one under ordinal compare.
+    /// </summary>
+    private static int CompareStamp(string a, string b) =>
+        string.CompareOrdinal(NormalizeStamp(a), NormalizeStamp(b));
+
+    private static string NormalizeStamp(string stamp)
+    {
+        if (string.IsNullOrEmpty(stamp)) return stamp;
+        // Already fine: "...ss.fffffffZ"
+        if (stamp.Length >= 28 && stamp[^1] == 'Z' && stamp[^9] == '.') return stamp;
+        // Coarse: "...ssZ" → "...ss.0000000Z"
+        if (stamp.Length >= 20 && stamp[^1] == 'Z' && stamp[^3] == ':')
+            return stamp[..^1] + ".0000000Z";
+        return stamp;
+    }
 }

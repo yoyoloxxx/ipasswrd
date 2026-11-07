@@ -53,14 +53,16 @@ public class VaultBackupsTests : IDisposable
     [Fact] // 4
     public void RestoreBringsTheOldContentBack()
     {
-        WriteVault("до беды");
+        byte[] before = Vault.Create("pw-before", KdfConfig.Fast).Serialize();
+        byte[] after = Vault.Create("pw-after", KdfConfig.Fast).Serialize();
+        File.WriteAllBytes(VaultPath, before);
         VaultBackups.Snapshot(VaultPath);
-        WriteVault("после беды");
+        File.WriteAllBytes(VaultPath, after);
 
         var backup = VaultBackups.List(VaultPath)[0];
         VaultBackups.Restore(VaultPath, backup.Path);
 
-        Assert.Equal("до беды", File.ReadAllText(VaultPath));
+        Assert.Equal(before, File.ReadAllBytes(VaultPath));
     }
 
     // Восстановление, которое нельзя откатить, — та же необратимая перезапись,
@@ -68,15 +70,58 @@ public class VaultBackupsTests : IDisposable
     [Fact] // 5
     public void RestoreKeepsTodayAsABackupToo()
     {
-        WriteVault("до беды");
+        byte[] before = Vault.Create("pw-before", KdfConfig.Fast).Serialize();
+        byte[] after = Vault.Create("pw-after", KdfConfig.Fast).Serialize();
+        File.WriteAllBytes(VaultPath, before);
         VaultBackups.Snapshot(VaultPath);
-        WriteVault("после беды");
+        File.WriteAllBytes(VaultPath, after);
 
         var backup = VaultBackups.List(VaultPath)[0];
         VaultBackups.Restore(VaultPath, backup.Path);
 
         Assert.Contains(VaultBackups.List(VaultPath),
-            b => File.ReadAllText(b.Path) == "после беды");
+            b => File.ReadAllBytes(b.Path).AsSpan().SequenceEqual(after));
+    }
+
+    // M10: arbitrary paths / non-vault bytes must not overwrite the live file.
+    [Fact] // 10
+    public void Restore_RejectsPathOutsideBackupDir()
+    {
+        byte[] blob = Vault.Create("pw", KdfConfig.Fast).Serialize();
+        File.WriteAllBytes(VaultPath, blob);
+        VaultBackups.Snapshot(VaultPath);
+        string outsider = Path.Combine(_dir, "not-in-backups.ipvault");
+        File.WriteAllBytes(outsider, blob);
+
+        Assert.Throws<ArgumentException>(() => VaultBackups.Restore(VaultPath, outsider));
+        Assert.Equal(blob, File.ReadAllBytes(VaultPath));
+    }
+
+    [Fact] // 11
+    public void Restore_RejectsNonVaultBytesEvenInsideBackupDir()
+    {
+        byte[] blob = Vault.Create("pw", KdfConfig.Fast).Serialize();
+        File.WriteAllBytes(VaultPath, blob);
+        string dir = VaultBackups.DirFor(VaultPath);
+        Directory.CreateDirectory(dir);
+        string junk = Path.Combine(dir, "vault-20990101-000000.ipvault");
+        File.WriteAllText(junk, "not a vault");
+
+        Assert.ThrowsAny<Exception>(() => VaultBackups.Restore(VaultPath, junk));
+        Assert.Equal(blob, File.ReadAllBytes(VaultPath));
+    }
+
+    [Fact] // 12
+    public void Restore_RejectsWrongNamePattern()
+    {
+        byte[] blob = Vault.Create("pw", KdfConfig.Fast).Serialize();
+        File.WriteAllBytes(VaultPath, blob);
+        string dir = VaultBackups.DirFor(VaultPath);
+        Directory.CreateDirectory(dir);
+        string weird = Path.Combine(dir, "other-20990101-000000.ipvault");
+        File.WriteAllBytes(weird, blob);
+
+        Assert.Throws<ArgumentException>(() => VaultBackups.Restore(VaultPath, weird));
     }
 
     [Fact] // 6
