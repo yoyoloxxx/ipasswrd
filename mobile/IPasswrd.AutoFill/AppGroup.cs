@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Foundation;
+using IPasswrd.Core;
 using Security;
 
 namespace IPasswrd.AutoFill;
@@ -19,6 +20,8 @@ internal static class AppGroup
     private const string DekAccountLegacy = "v1";
     private const string LockoutFailsKey = "lockout.fails";
     private const string LockoutUntilKey = "lockout.until";
+    /// <summary>Anti-downgrade marker written by the host (audit M12).</summary>
+    private const string AuthVaultIdKey = "vault.authenticatedId";
 
     private static string? _group;
     private static string? _keychainGroup;
@@ -240,6 +243,32 @@ internal static class AppGroup
             TimeSpan left = LockoutUntil - DateTimeOffset.UtcNow;
             return left > TimeSpan.Zero ? left : TimeSpan.Zero;
         }
+    }
+
+    /// <summary>VaultId this install has sealed with a document MAC (host → App Group).</summary>
+    internal static string AuthenticatedVaultId
+    {
+        get
+        {
+            try
+            {
+                string? s = SharedDefaults()?.StringForKey(AuthVaultIdKey);
+                return s ?? "";
+            }
+            catch { return ""; }
+        }
+    }
+
+    /// <summary>True when the blob's lineage is known MAC-protected — pass to Vault.Unlock*.</summary>
+    internal static bool RequireAuth(byte[] blob)
+    {
+        try
+        {
+            string id = Vault.VaultIdOf(blob);
+            string marked = AuthenticatedVaultId;
+            return id.Length > 0 && marked.Length > 0 && marked == id;
+        }
+        catch { return false; }
     }
 }
 

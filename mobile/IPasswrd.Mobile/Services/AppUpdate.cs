@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace IPasswrd.Mobile.Services;
@@ -7,9 +8,10 @@ namespace IPasswrd.Mobile.Services;
 /// GitHub — значит, обновляться оно должно само, иначе человек навсегда останется на той
 /// сборке, которую однажды поставил.
 ///
-/// CI кладёт рядом с APK файл android-latest.json с номером сборки. Здесь мы его читаем,
-/// сравниваем с текущим versionCode и, если новее, скачиваем APK и отдаём системному
-/// установщику. Ставится поверх: подпись та же (постоянный ключ в секретах CI), данные целы.
+/// CI кладёт рядом с APK файл android-latest.json с номером сборки и sha256. Здесь мы его
+/// читаем, сравниваем с текущим versionCode и, если новее, скачиваем APK, проверяем хеш
+/// (и подпись пакета) и отдаём системному установщику. Ставится поверх: подпись та же
+/// (постоянный ключ в секретах CI), данные целы.
 ///
 /// На iOS обновления приходят через AltStore (источник altstore.json) — там этого нет.
 /// </summary>
@@ -21,8 +23,16 @@ public static class AppUpdate
     private const string LastCheckPref = "update.lastcheck";
     private const string SkipPref = "update.skip";           // сборка, от которой человек отказался
     private const string ApkName = "IPasswrd-update.apk";
+    private const string AllowedRepoPath = "/yoyoloxxx/ipasswrd/";
 
-    public sealed record UpdateInfo(string VersionName, long VersionCode, string Url, long Size, string Notes);
+    private static readonly HashSet<string> AllowedHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "github.com",
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+    };
+
+    public sealed record UpdateInfo(string VersionName, long VersionCode, string Url, long Size, string Notes, string Sha256);
 
     /// <summary>Обновление «по воздуху» только на Android (на iOS этим занимается AltStore).</summary>
     public static bool Supported =>
@@ -54,10 +64,13 @@ public static class AppUpdate
             string url = r.TryGetProperty("url", out var u) ? (u.GetString() ?? "") : "";
             long size = r.TryGetProperty("size", out var s) && s.TryGetInt64(out long sz) ? sz : 0;
             string notes = r.TryGetProperty("notes", out var n) ? (n.GetString() ?? "") : "";
+            string sha256 = r.TryGetProperty("sha256", out var h) ? (h.GetString() ?? "") : "";
 
             Preferences.Default.Set(LastCheckPref, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             if (code <= CurrentCode || url.Length == 0) return null;
-            return new UpdateInfo(name, code, url, size, notes);
+            // Audit M2: refuse unexpected hosts and require a content hash before offering install.
+            if (!IsAllowedDownloadUrl(url) || sha256.Length != 64) return null;
+            return new UpdateInfo(name, code, url, size, notes, sha256.ToLowerInvariant());
         }
         catch (Exception)
         {
@@ -85,6 +98,8 @@ public static class AppUpdate
     public static async Task<string?> DownloadAsync(UpdateInfo info, IProgress<double>? progress = null,
                                                     CancellationToken ct = default)
     {
+        if (!IsAllowedDownloadUrl(info.Url) || info.Sha256.Length != 64) return null;
+
         string path = Path.Combine(FileSystem.CacheDirectory, ApkName);
         try
         {
@@ -94,10 +109,16 @@ public static class AppUpdate
             using HttpResponseMessage resp =
                 await http.GetAsync(info.Url, HttpCompletionOption.ResponseHeadersRead, ct);
             resp.EnsureSuccessStatusCode();
+            // Final URI after redirects must still be an allowed host.
+            if (resp.RequestMessage?.RequestUri is Uri final && !IsAllowedDownloadUrl(final.ToString()))
+            {
+                TryDelete(path);
+                return null;
+            }
 
             long total = resp.Content.Headers.ContentLength ?? info.Size;
             using Stream src = await resp.Content.ReadAsStreamAsync(ct);
-            var dst = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+            await using var dst = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
 
             var buf = new byte[128 * 1024];
             long done = 0;
@@ -109,10 +130,25 @@ public static class AppUpdate
                 if (total > 0) progress?.Report((double)done / total);
             }
             await dst.FlushAsync(ct);
-            dst.Dispose();
 
             // Оборванная закачка = битый APK: установщик покажет невнятную ошибку, лучше сразу честно.
             if (total > 0 && done < total) { TryDelete(path); return null; }
+
+            // Audit M2: verify SHA-256 before handing the file to the installer.
+            string actual = await Sha256FileAsync(path, ct);
+            if (!string.Equals(actual, info.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                TryDelete(path);
+                return null;
+            }
+
+            // Pin signing cert to the currently installed app (same release key).
+            if (!SigningCertMatchesInstalled(path))
+            {
+                TryDelete(path);
+                return null;
+            }
+
             return path;
         }
         catch (Exception)
@@ -161,6 +197,112 @@ public static class AppUpdate
         return false;
 #endif
     }
+
+    /// <summary>HTTPS + allow-listed GitHub hosts; github.com paths must be this repo.</summary>
+    internal static bool IsAllowedDownloadUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? u)) return false;
+        if (!string.Equals(u.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return false;
+        if (!AllowedHosts.Contains(u.Host)) return false;
+        if (u.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+            && u.AbsolutePath.IndexOf(AllowedRepoPath, StringComparison.OrdinalIgnoreCase) < 0)
+            return false;
+        return true;
+    }
+
+    private static async Task<string> Sha256FileAsync(string path, CancellationToken ct)
+    {
+        await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        byte[] hash = await SHA256.HashDataAsync(fs, ct);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>True when the APK's signing cert matches the installed package (or when we cannot check).</summary>
+    private static bool SigningCertMatchesInstalled(string apkPath)
+    {
+#if ANDROID
+        try
+        {
+            var ctx = global::Android.App.Application.Context;
+            var pm = ctx.PackageManager;
+            if (pm is null) return false;
+
+            IList<string> installed = SigningCertDigests(pm, ctx.PackageName!, archivePath: null);
+            if (installed.Count == 0) return false;
+
+            IList<string> archive = SigningCertDigests(pm, packageName: null, archivePath: apkPath);
+            if (archive.Count == 0) return false;
+
+            foreach (string a in archive)
+                if (installed.Contains(a)) return true;
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+#else
+        return true;
+#endif
+    }
+
+#if ANDROID
+    private static IList<string> SigningCertDigests(global::Android.Content.PM.PackageManager pm,
+                                                    string? packageName, string? archivePath)
+    {
+        var digests = new List<string>();
+        try
+        {
+            global::Android.Content.PM.PackageInfo? info;
+            if (archivePath is not null)
+            {
+                info = OperatingSystem.IsAndroidVersionAtLeast(28)
+                    ? pm.GetPackageArchiveInfo(archivePath, global::Android.Content.PM.PackageInfoFlags.SigningCertificates)
+                    : pm.GetPackageArchiveInfo(archivePath, global::Android.Content.PM.PackageInfoFlags.Signatures);
+                // Without SourceDir, some API levels return empty signing info for archives.
+                if (info?.ApplicationInfo is not null)
+                {
+                    info.ApplicationInfo.SourceDir = archivePath;
+                    info.ApplicationInfo.PublicSourceDir = archivePath;
+                }
+            }
+            else
+            {
+                info = OperatingSystem.IsAndroidVersionAtLeast(28)
+                    ? pm.GetPackageInfo(packageName!, global::Android.Content.PM.PackageInfoFlags.SigningCertificates)
+                    : pm.GetPackageInfo(packageName!, global::Android.Content.PM.PackageInfoFlags.Signatures);
+            }
+            if (info is null) return digests;
+
+            if (OperatingSystem.IsAndroidVersionAtLeast(28) && info.SigningInfo is { } si)
+            {
+                var certs = si.HasMultipleSigners
+                    ? si.GetApkContentsSigners()
+                    : si.GetSigningCertificateHistory();
+                if (certs is not null)
+                {
+                    foreach (var c in certs)
+                    {
+                        byte[]? raw = c?.ToByteArray();
+                        if (raw is { Length: > 0 })
+                            digests.Add(Convert.ToHexString(SHA256.HashData(raw)).ToLowerInvariant());
+                    }
+                }
+            }
+            else if (info.Signatures is not null)
+            {
+                foreach (var s in info.Signatures)
+                {
+                    byte[]? raw = s?.ToByteArray();
+                    if (raw is { Length: > 0 })
+                        digests.Add(Convert.ToHexString(SHA256.HashData(raw)).ToLowerInvariant());
+                }
+            }
+        }
+        catch { }
+        return digests;
+    }
+#endif
 
     private static void TryDelete(string path)
     {

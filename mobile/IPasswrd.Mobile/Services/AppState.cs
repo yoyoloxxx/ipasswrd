@@ -95,7 +95,14 @@ public sealed class AppState
 
     private static void MarkVaultAuthenticated(Vault? v)
     {
-        try { if (v is not null) Preferences.Set(AuthVaultIdPref, v.VaultId); } catch { /* best-effort */ }
+        try
+        {
+            if (v is null) return;
+            Preferences.Set(AuthVaultIdPref, v.VaultId);
+            // App Group copy for iOS AutoFill (audit M12) — extension must refuse MAC-stripped peers too.
+            AutoFillShare.SetAuthenticatedVaultId(v.VaultId);
+        }
+        catch { /* best-effort */ }
     }
 
     /// <summary>True if the blob belongs to a vault this install knows to be MAC-protected, so a
@@ -105,7 +112,9 @@ public sealed class AppState
         try
         {
             string id = IPasswrd.Core.Vault.VaultIdOf(blob);
-            return id.Length > 0 && Preferences.Get(AuthVaultIdPref, "") == id;
+            string marked = Preferences.Get(AuthVaultIdPref, "");
+            if (marked.Length == 0) marked = AutoFillShare.GetAuthenticatedVaultId();
+            return id.Length > 0 && marked == id;
         }
         catch { return false; }
     }
@@ -113,7 +122,13 @@ public sealed class AppState
     /// <summary>Merge-side check: the open vault's lineage id is already known.</summary>
     private bool RequireAuthLocal()
     {
-        try { return _vault is not null && Preferences.Get(AuthVaultIdPref, "") == _vault.VaultId; }
+        try
+        {
+            if (_vault is null) return false;
+            string marked = Preferences.Get(AuthVaultIdPref, "");
+            if (marked.Length == 0) marked = AutoFillShare.GetAuthenticatedVaultId();
+            return marked == _vault.VaultId;
+        }
         catch { return false; }
     }
 
@@ -375,20 +390,40 @@ public sealed class AppState
             byte[] json = JsonSerializer.SerializeToUtf8Bytes(data);
             if (UseBioCrypto)
             {
-                // Сначала СИНХРОННО старый путь — он переживает мгновенное закрытие приложения
-                // (фоновая задача не доживает: свайп убивает процесс посреди генерации ключа).
-                Svc.KeyStore.Save(QuickUnlockKey, json);
-                Preferences.Set(QuickModePref, "soft");
-                // Затем фоновый апгрейд до крипто-гейта; успел — переключаемся и чистим софт-копию.
+                // Audit M1: never leave a soft (un-gated) DEK copy while bio Protect is pending —
+                // process compromise would read it without a prompt. Fail-closed: if Protect is
+                // slow/killed/fails, quick-unlock stays off and the master password remains the door.
+                try { Svc.KeyStore.Delete(QuickUnlockKey); } catch { }
+                Preferences.Set(QuickModePref, "bio");
+                Preferences.Remove(QuickUnlockPresentPref);
                 _ = Task.Run(async () =>
                 {
                     bool ok = false;
-                    try { ok = await Svc.BiometricSecret.ProtectAsync(QuickUnlockKey, json); } catch { }
-                    if (ok) { Preferences.Set(QuickModePref, "bio"); try { Svc.KeyStore.Delete(QuickUnlockKey); } catch { } }
+                    try
+                    {
+                        Task<bool> protect = Svc.BiometricSecret.ProtectAsync(QuickUnlockKey, json);
+                        ok = await protect.WaitAsync(TimeSpan.FromSeconds(8));
+                    }
+                    catch { /* timeout / protect failure → master password */ }
+                    if (ok)
+                    {
+                        Preferences.Set(QuickModePref, "bio");
+                        Preferences.Set(QuickUnlockPresentPref, true);
+                        try { Svc.KeyStore.Delete(QuickUnlockKey); } catch { }
+                    }
+                    else
+                    {
+                        try { Svc.BiometricSecret.Delete(QuickUnlockKey); } catch { }
+                        try { Preferences.Remove(QuickUnlockPresentPref); } catch { }
+                    }
                 });
             }
-            else { Svc.KeyStore.Save(QuickUnlockKey, json); Preferences.Set(QuickModePref, "soft"); }
-            Preferences.Set(QuickUnlockPresentPref, true);
+            else
+            {
+                Svc.KeyStore.Save(QuickUnlockKey, json);
+                Preferences.Set(QuickModePref, "soft");
+                Preferences.Set(QuickUnlockPresentPref, true);
+            }
         }
         catch { /* необязательный путь: мастер-пароль всегда работает */ }
     }
@@ -410,6 +445,12 @@ public sealed class AppState
         if (!HasLocalVault || !Preferences.Get(QuickUnlockPresentPref, false)) return "";
 
         string quickMode = Preferences.Get(QuickModePref, UseBioCrypto ? "bio" : "soft");
+        // Audit M1: soft must not win while a hardware bio gate is available (leftover mid-upgrade).
+        if (UseBioCrypto && quickMode != "bio")
+        {
+            WipeQuickUnlock();
+            return "";
+        }
         bool cryptoGated = quickMode == "bio" && UseBioCrypto;
         byte[]? raw;
         if (cryptoGated)
@@ -420,6 +461,8 @@ public sealed class AppState
         }
         else
         {
+            // Audit M1: UI-auth BEFORE loading the DEK into process memory.
+            if (!await Svc.Biometric.AuthenticateAsync("Открыть сейф IPasswrd")) return "";
             raw = Svc.KeyStore.Load(QuickUnlockKey);
             if (raw is null) { WipeQuickUnlock(); return ""; }
         }
@@ -433,9 +476,6 @@ public sealed class AppState
             WipeQuickUnlock();
             return "Пора ввести мастер-пароль (прошло 30 дней).";
         }
-
-        // Un-gated path still needs its biometric UI gate; the crypto-gated path already prompted on reveal.
-        if (!cryptoGated && !await Svc.Biometric.AuthenticateAsync("Открыть сейф IPasswrd")) return "";
 
         try
         {

@@ -18,6 +18,8 @@ public static class AutoFillShare
     public const string FallbackGroup = "group.com.yoyoloxxx.ipasswrd";
     private const string LockoutFailsKey = "lockout.fails";
     private const string LockoutUntilKey = "lockout.until";
+    /// <summary>Anti-downgrade marker (audit M12): vaultId known to be MAC-sealed on this install.</summary>
+    private const string AuthVaultIdKey = "vault.authenticatedId";
 
 #if IOS
     private static string? _group;
@@ -140,6 +142,36 @@ public static class AutoFillShare
         try { Preferences.Set(LockoutUntilKey, unixSeconds); } catch { }
     }
 
+    /// <summary>Persist the MAC-authenticated vaultId into the App Group so AutoFill
+    /// can pass <c>requireAuthenticated: true</c> (audit M12).</summary>
+    public static void SetAuthenticatedVaultId(string vaultId)
+    {
+        if (string.IsNullOrEmpty(vaultId)) return;
+        try
+        {
+            NSUserDefaults? d = SharedDefaults();
+            if (d is not null)
+            {
+                d.SetString(vaultId, AuthVaultIdKey);
+                d.Synchronize();
+            }
+        }
+        catch { }
+        try { Preferences.Set(AuthVaultIdKey, vaultId); } catch { }
+    }
+
+    public static string GetAuthenticatedVaultId()
+    {
+        try
+        {
+            NSUserDefaults? d = SharedDefaults();
+            string? s = d?.StringForKey(AuthVaultIdKey);
+            if (!string.IsNullOrEmpty(s)) return s;
+        }
+        catch { }
+        return Preferences.Get(AuthVaultIdKey, "");
+    }
+
     /// <summary>Обновить подсказки над клавиатурой: логины (домен + имя) и,
     /// на iOS 18+, одноразовые коды проверки для полей кода.</summary>
     public static void UpdateIdentities(Vault v)
@@ -217,5 +249,12 @@ public static class AutoFillShare
     public static void SetLockoutFails(int value) => Preferences.Set(LockoutFailsKey, value);
     public static long GetLockoutUntilUnix() => Preferences.Get(LockoutUntilKey, 0L);
     public static void SetLockoutUntilUnix(long unixSeconds) => Preferences.Set(LockoutUntilKey, unixSeconds);
+
+    public static void SetAuthenticatedVaultId(string vaultId)
+    {
+        if (!string.IsNullOrEmpty(vaultId)) Preferences.Set(AuthVaultIdKey, vaultId);
+    }
+
+    public static string GetAuthenticatedVaultId() => Preferences.Get(AuthVaultIdKey, "");
 #endif
 }

@@ -155,7 +155,8 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
             }
             try
             {
-                Vault v = Vault.UnlockWithSessionKey(blob, dek);
+                // Audit M12: honour host anti-downgrade marker (MAC-stripped App Group vault → refuse).
+                Vault v = Vault.UnlockWithSessionKey(blob, dek, AppGroup.RequireAuth(blob));
                 InvokeOnMainThread(() => { _vault = v; FillRows(); });
             }
             catch
@@ -198,7 +199,8 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
             {
                 try
                 {
-                    Vault v = Vault.Unlock(blob, pw);
+                    // Audit M12: same RequireAuth gate as the host AppState unlock path.
+                    Vault v = Vault.Unlock(blob, pw, AppGroup.RequireAuth(blob));
                     AppGroup.LockoutFails = 0;
                     AppGroup.LockoutUntil = DateTimeOffset.UnixEpoch;
                     AppGroup.SaveDek(v.ExportSessionKey());
@@ -369,7 +371,20 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
         try
         {
             TotpConfig cfg = Totp.Parse(totp);
-            UIPasteboard.General.String = Totp.Generate(cfg.Secret, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), cfg.Digits, cfg.Period, cfg.Algorithm);
+            string code = Totp.Generate(cfg.Secret, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), cfg.Digits, cfg.Period, cfg.Algorithm);
+            UIPasteboard.General.String = code;
+            // Audit M13: TOTP must not linger on the pasteboard after the code's useful window.
+            double clearAfter = Math.Clamp(cfg.Period, 15, 60);
+            string copied = code;
+            NSTimer.CreateScheduledTimer(clearAfter, false, _ =>
+            {
+                try
+                {
+                    if (UIPasteboard.General.String == copied)
+                        UIPasteboard.General.String = "";
+                }
+                catch { }
+            });
         }
         catch { }
     }
