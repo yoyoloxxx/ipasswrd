@@ -139,10 +139,68 @@ public class SyncIntegrityTests
         Assert.Throws<VaultIntegrityException>(() => Vault.Unlock(stripped, Pw, requireAuthenticated: true));
     }
 
+    // H5: once the local vault is sealed, a stripped peer is refused even when the caller
+    // forgets requireAuthenticated: true (the previous footgun).
+    [Fact]
+    public void StrippedMac_IsRejected_WhenLocalIsAuthenticated_WithoutCallerFlag()
+    {
+        var (a, b) = TwoDevices(out string id);
+        Assert.True(a.IsAuthenticated);
+
+        byte[] stripped = Edit(b.Serialize(), root =>
+        {
+            foreach (var r in root["records"]!.AsArray())
+                if ((string?)r!["id"] == id)
+                {
+                    r["deleted"] = true;
+                    r["updatedAt"] = "2999-01-01T00:00:00Z";
+                }
+            root.Remove("mac");
+        });
+
+        Assert.Throws<VaultIntegrityException>(() => a.MergeFrom(stripped));   // default flag = false
+        Assert.Single(a.Items());
+    }
+
+    // H7: clearing vaultId must not bypass the cross-vault check against an authenticated local.
+    [Fact]
+    public void ClearedPeerVaultId_WithStrippedMac_IsRejected()
+    {
+        var (a, b) = TwoDevices(out string id);
+        byte[] attack = Edit(b.Serialize(), root =>
+        {
+            root["vaultId"] = "";
+            foreach (var r in root["records"]!.AsArray())
+                if ((string?)r!["id"] == id)
+                {
+                    r["deleted"] = true;
+                    r["updatedAt"] = "2999-01-01T00:00:00Z";
+                }
+            root.Remove("mac");
+        });
+
+        Assert.Throws<VaultIntegrityException>(() => a.MergeFrom(attack));
+        Assert.Single(a.Items());
+    }
+
+    [Fact]
+    public void ClearedPeerVaultId_Alone_BreaksMac_AndIsRejected()
+    {
+        // Blanking vaultId without re-sealing invalidates the document MAC — same as any other
+        // clear-text metadata tamper. Combined with StrippedMac_* this closes the
+        // "clear vaultId + strip mac" downgrade path from H7.
+        var (a, b) = TwoDevices(out _);
+        b.Add(Sample("From B"));
+        byte[] peer = Edit(b.Serialize(), root => root["vaultId"] = "");
+
+        Assert.Throws<VaultIntegrityException>(() => a.MergeFrom(peer));
+        Assert.Single(a.Items());
+    }
+
     [Fact]
     public void MissingMac_IsToleratedByDefault_ForABareLegacyFile()
     {
-        // A genuine pre-MAC file (no forgery) still opens and merges when authentication is not required.
+        // A genuine pre-MAC file (no forgery) still opens when authentication is not required.
         var v = Vault.Create(Pw, Fast);
         v.Add(Sample());
         byte[] legacy = Edit(v.Serialize(), root => root.Remove("mac"));
@@ -151,6 +209,26 @@ public class SyncIntegrityTests
         Assert.False(reopened.IsAuthenticated);
         Assert.Single(reopened.Items());
         Assert.NotNull((string?)JsonNode.Parse(reopened.Serialize())!["mac"]);   // self-heals to authenticated on save
+    }
+
+    [Fact]
+    public void LegacyUnauthenticatedLocals_CanStillMergeWithoutFlag()
+    {
+        // Pre-MAC files on two devices: neither side is authenticated, so the weaker path remains.
+        var seed = Vault.Create(Pw, Fast);
+        string id = seed.Add(Sample());
+        byte[] sealedBlob = seed.Serialize();
+        byte[] legacyA = Edit(sealedBlob, root => root.Remove("mac"));
+        var a = Vault.Unlock(legacyA, Pw);
+        var b = Vault.Unlock(legacyA, Pw);
+        Assert.False(a.IsAuthenticated);
+        System.Threading.Thread.Sleep(1100);
+        b.Update(id, Sample(pw: "edited-on-b"));
+        byte[] peer = Edit(b.Serialize(), root => root.Remove("mac"));
+
+        int changed = a.MergeFrom(peer);   // default requireAuthenticated = false, local not sealed
+        Assert.Equal(1, changed);
+        Assert.Equal("edited-on-b", a.Get(id).Fields["password"]);
     }
 
     // ---- cross-DEK: copy the victim's vaultId but sign with a different key ----

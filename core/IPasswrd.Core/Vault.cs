@@ -204,8 +204,11 @@ public sealed class Vault
 
     /// <summary>
     /// Reopen a serialised vault with a cached session key, skipping the KDF (quick unlock).
-    /// The key is verified against the first live record; a wrong key throws
-    /// <see cref="WrongMasterPasswordException"/>. An empty vault is accepted as-is.
+    /// The key is verified against the first live record when one exists; a wrong key throws
+    /// <see cref="WrongMasterPasswordException"/>. An empty or tombstone-only vault has no
+    /// record to prove the key against, so a document MAC is <b>required</b> in that case —
+    /// otherwise any 32-byte buffer would be accepted, and the next <see cref="Serialize"/>
+    /// would seal a MAC under the wrong DEK and brick password unlock.
     /// </summary>
     public static Vault UnlockWithSessionKey(byte[] blob, byte[] dek, bool requireAuthenticated = false)
     {
@@ -219,16 +222,29 @@ public sealed class Vault
         var v = new Vault(cfg, salt, dek, doc.WrappedKey, doc.Records, vaultId, doc.Recovery, doc.RecoveryRevokedAt,
                           doc.MasterChangedAt);
 
+        bool provedByRecord = false;
         foreach (RecordDto r in doc.Records)
         {
             if (r.Deleted) continue;
             try { v.DecryptRecord(r); }
             catch (VaultIntegrityException) { throw new WrongMasterPasswordException(); }
+            provedByRecord = true;
             break;
         }
-        // The key is proven above (a wrong one already threw as WrongMasterPassword); now confirm the
-        // sync metadata was not forged. A MAC mismatch here therefore means a tampered file, not a bad key.
-        v._authenticated = VerifyDocMac(doc, dek, requireAuthenticated);
+        // Record proof (when available) already rejected a wrong key as WrongMasterPassword.
+        // With no live record the MAC is the only DEK proof — require it even if the caller
+        // left requireAuthenticated false (empty-vault / all-tombstone quick unlock).
+        bool requireMac = requireAuthenticated || !provedByRecord;
+        try
+        {
+            v._authenticated = VerifyDocMac(doc, dek, requireMac);
+        }
+        catch (VaultIntegrityException) when (!provedByRecord)
+        {
+            // Wrong DEK against an empty sealed vault looks like a MAC mismatch; surface it the
+            // same way as a wrong session key on a non-empty vault.
+            throw new WrongMasterPasswordException();
+        }
         return v;
     }
 
@@ -421,23 +437,38 @@ public sealed class Vault
     /// device replaces the wrapping — never the DEK — everywhere else, so after this call the
     /// vault may require the OTHER side's master password at the next unlock. Files without a
     /// stamp keep the local envelope, exactly as every build behaved before the stamp existed.
-    /// Refuses to merge a different vault (mismatched <see cref="VaultId"/>). Returns the number
+    /// Refuses to merge a different vault (mismatched <see cref="VaultId"/>), and refuses a peer
+    /// with an empty <c>vaultId</c> when this side already has one <b>unless</b> the peer still
+    /// carries a valid document MAC under our DEK (same-lineage proof). Returns the number
     /// of records that were added or replaced from <paramref name="otherBlob"/> (an adopted
     /// envelope is not counted — compare <see cref="MasterPasswordChangedAt"/> to detect it).
+    /// <para>
+    /// Anti-downgrade: if this open vault is already <see cref="IsAuthenticated"/>, a peer with
+    /// no MAC is refused even when <paramref name="requireAuthenticated"/> is left at its default
+    /// <c>false</c> — callers no longer have to remember the flag after the first sealed save.
+    /// Unauthenticated (legacy) locals still tolerate an un-sealed peer so pre-MAC files can merge.
+    /// </para>
     /// </summary>
     public int MergeFrom(byte[] otherBlob, bool requireAuthenticated = false)
     {
         VaultDocumentDto other = Parse(otherBlob);
-        if (!string.IsNullOrEmpty(other.VaultId) && !string.IsNullOrEmpty(_vaultId)
+        if (!string.IsNullOrEmpty(_vaultId) && !string.IsNullOrEmpty(other.VaultId)
             && !string.Equals(other.VaultId, _vaultId, StringComparison.Ordinal))
             throw new VaultIntegrityException("refusing to merge a different vault");
+
+        // Fail closed once THIS vault has a seal: a stripped peer MAC is a downgrade, not "legacy".
+        // Legacy (unauthenticated local) merge remains available without an explicit flag so
+        // pre-MAC files can still converge; the opt-in to that weaker path is simply "local has
+        // never been sealed", not a caller forgetting requireAuthenticated: true.
+        bool require = requireAuthenticated || _authenticated;
 
         // Authenticate the incoming copy against OUR DEK (same lineage => same MAC key). A forged
         // updatedAt, a fabricated tombstone, or a swapped key envelope all break this check, so a
         // cloud or account that cannot derive the DEK can neither roll us back, delete our records,
-        // nor brick the vault. A file with no MAC is legacy: tolerated unless the caller knows this
-        // vault is already protected (requireAuthenticated), which turns a stripped MAC into a refusal.
-        WithDek(d => { VerifyDocMac(other, d, requireAuthenticated); return 0; });
+        // nor brick the vault. Empty peer vaultId with a valid MAC under our DEK is same-lineage
+        // (the seal is the proof); empty peer vaultId with no MAC is refused when require is set,
+        // which closes the "clear vaultId + strip mac" bypass of the mismatch check.
+        WithDek(d => { VerifyDocMac(other, d, require); return 0; });
 
         var byId = new Dictionary<string, RecordDto>(StringComparer.Ordinal);
         foreach (RecordDto r in _records) byId[r.Id] = r;

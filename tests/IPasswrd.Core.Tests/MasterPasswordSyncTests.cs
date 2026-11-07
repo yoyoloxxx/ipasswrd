@@ -160,20 +160,47 @@ public class MasterPasswordSyncTests
     }
 
     [Fact]
-    public void DamagedEnvelope_IsNotAdopted_RecordsStillMerge()
+    public void DamagedEnvelope_WithStrippedMac_IsRejected_WhenLocalAuthenticated()
     {
+        // H5: an authenticated local must not accept a peer that dropped its seal — even when
+        // the caller leaves requireAuthenticated at the default false. (Pre-H5 this path
+        // still merged records while skipping a mangled envelope.)
         var (pc, phone) = TwoDevices();
+        Assert.True(phone.IsAuthenticated);
         pc.ChangeMasterPassword(OldPw, NewPw);
         pc.Add(Sample("Added on PC"));
         var root = JsonNode.Parse(pc.Serialize())!.AsObject();
-        root.Remove("mac");                                    // a legacy peer with no integrity seal...
-        root["kdf"]!["salt"] = "*** not base64 ***";            // ...and a broken wrapping must never replace a working one
+        root.Remove("mac");
+        root["kdf"]!["salt"] = "*** not base64 ***";
         byte[] damaged = Encoding.UTF8.GetBytes(root.ToJsonString());
 
-        int changed = phone.MergeFrom(damaged);                 // requireAuthenticated defaults false -> legacy tolerated
-
-        Assert.Equal(1, changed);                               // the record still arrived
+        Assert.Throws<VaultIntegrityException>(() => phone.MergeFrom(damaged));
+        Assert.Single(phone.Items());                           // merge never began
         Assert.NotNull(Vault.Unlock(phone.Serialize(), OldPw)); // envelope stayed local
+    }
+
+    [Fact]
+    public void DamagedEnvelope_OnLegacyLocals_IsNotAdopted_RecordsStillMerge()
+    {
+        // Unauthenticated (pre-MAC) locals still tolerate an un-sealed peer: records merge,
+        // a mangled wrapping is skipped.
+        var seed = Vault.Create(OldPw, Fast);
+        seed.Add(Sample("Seed"));
+        byte[] legacy = WithoutStamp(seed.Serialize());
+        var phone = Vault.Unlock(legacy, OldPw);
+        var pc = Vault.Unlock(legacy, OldPw);
+        Assert.False(phone.IsAuthenticated);
+
+        pc.ChangeMasterPassword(OldPw, NewPw);
+        pc.Add(Sample("Added on PC"));
+        var root = JsonNode.Parse(pc.Serialize())!.AsObject();
+        root.Remove("mac");
+        root["kdf"]!["salt"] = "*** not base64 ***";
+        byte[] damaged = Encoding.UTF8.GetBytes(root.ToJsonString());
+
+        int changed = phone.MergeFrom(damaged);
+        Assert.Equal(1, changed);
+        Assert.NotNull(Vault.Unlock(phone.Serialize(), OldPw));
     }
 
     [Fact]
