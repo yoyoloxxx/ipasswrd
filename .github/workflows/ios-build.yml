@@ -20,6 +20,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      # Mobile stays on SDK/TFM 9 (Hot Restart / MAUI). Desktop + core tests use SDK 10;
+      # tests.yml dual-runs net9+net10 so shared unlock-pull/autolock rules stay aligned (M16).
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
