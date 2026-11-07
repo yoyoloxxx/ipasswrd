@@ -30,6 +30,17 @@ public partial class MainWindow
     private string BridgeToken() => _bridgeToken ??= Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
     private static string PairFlagPath() => System.IO.Path.Combine(LocalDataDir(), "ext-paired.flag");   // remembers a one-time extension approval
 
+    /// <summary>UTF-8 compare that returns false on length mismatch. <see cref="CryptographicOperations.FixedTimeEquals"/>
+    /// throws when lengths differ; that exception used to leak through the bridge catch as an error type name
+    /// and was swallowed by the SMS relay catch — both paths must reject cleanly instead.</summary>
+    private static bool TokenEquals(string? provided, string expected)
+    {
+        byte[] a = Encoding.UTF8.GetBytes(provided ?? "");
+        byte[] b = Encoding.UTF8.GetBytes(expected);
+        if (a.Length != b.Length) return false;
+        return CryptographicOperations.FixedTimeEquals(a, b);
+    }
+
     private void StartBrowserBridge()
     {
         _bridgeCts = new CancellationTokenSource();
@@ -98,7 +109,7 @@ public partial class MainWindow
             // per-session token, which the extension gets from the trusted pipe's `status` or via a
             // one-time `pair` the user approves in the app window.
             string token = Get("token");
-            bool tokenOk = !viaHttp || (_bridgeToken is not null && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(token ?? ""), System.Text.Encoding.UTF8.GetBytes(_bridgeToken)));
+            bool tokenOk = !viaHttp || (_bridgeToken is not null && TokenEquals(token, _bridgeToken));
             bool secret = cmd is "credentials" or "save" or "unlock" or "list" or "passkeyList" or "passkeyCreate" or "passkeySign" or "focus";
             if (viaHttp && secret && !tokenOk) return Resp(new { ok = false, error = "unpaired" });
 
