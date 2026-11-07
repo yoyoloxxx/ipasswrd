@@ -20,22 +20,35 @@ namespace IPasswrd.Core;
 /// </summary>
 public static class PublicSuffix
 {
+    /// <summary>
+    /// Floor for a healthy embedded PSL. Far below the real list (~10k rules) so a truncated
+    /// resource fails closed, but high enough that an empty/missing load cannot look "loaded".
+    /// </summary>
+    public const int MinRuleCount = 1000;
+
     private static readonly HashSet<string> Exact = new(StringComparer.Ordinal);
     private static readonly HashSet<string> Wildcard = new(StringComparer.Ordinal);
     private static readonly HashSet<string> Exception = new(StringComparer.Ordinal);
+    private static readonly bool LoadedOk;
 
-    static PublicSuffix() => Load();
+    static PublicSuffix() => LoadedOk = Load();
 
-    private static void Load()
+    /// <summary>Total exact + wildcard + exception rules after load. For smoke tests / diagnostics.</summary>
+    public static int RuleCount => Exact.Count + Wildcard.Count + Exception.Count;
+
+    /// <summary>True when the embedded list loaded with at least <see cref="MinRuleCount"/> rules.</summary>
+    public static bool IsReady => LoadedOk;
+
+    private static bool Load()
     {
         try
         {
             Assembly asm = typeof(PublicSuffix).Assembly;
             string? name = Array.Find(asm.GetManifestResourceNames(),
                 n => n.EndsWith("public_suffix_list.dat", StringComparison.OrdinalIgnoreCase));
-            if (name is null) return;
+            if (name is null) return false;
             using Stream? s = asm.GetManifestResourceStream(name);
-            if (s is null) return;
+            if (s is null) return false;
             using var r = new StreamReader(s, System.Text.Encoding.UTF8);
             string? line;
             while ((line = r.ReadLine()) is not null)
@@ -49,14 +62,24 @@ public static class PublicSuffix
                 else if (l.StartsWith("*.", StringComparison.Ordinal)) Wildcard.Add(l[2..]);
                 else Exact.Add(l);
             }
+            return RuleCount >= MinRuleCount;
         }
-        catch { /* resource missing/unreadable — falls back to "last label is the TLD", never throws on lookup */ }
+        catch
+        {
+            Exact.Clear();
+            Wildcard.Clear();
+            Exception.Clear();
+            return false;
+        }
     }
 
-    /// <summary>Label count of the public suffix of a host given as its label array.</summary>
+    /// <summary>Label count of the public suffix of a host given as its label array.
+    /// When the list failed to load, returns the full label count so multi-label hosts never
+    /// collapse to a shared parent (fail closed — sibling tenants stay distinct).</summary>
     private static int PsLabels(string[] labels)
     {
         int n = labels.Length;
+        if (!LoadedOk) return n;                                // refuse multi-label collapse
         for (int i = 0; i < n; i++)                            // exceptions win outright
             if (Exception.Contains(string.Join('.', labels[i..]))) return n - (i + 1);
         int best = 0;
@@ -68,7 +91,8 @@ public static class PublicSuffix
     }
 
     /// <summary>Registrable domain (eTLD+1) of a bare host. Empty/IP returned as-is; a host that
-    /// IS itself a public suffix is returned unchanged (never collapsed with its siblings).</summary>
+    /// IS itself a public suffix is returned unchanged (never collapsed with its siblings).
+    /// If the PSL failed to load, the full host is returned (no tenant collapse).</summary>
     public static string RegistrableDomain(string? host)
     {
         string h = (host ?? "").Trim().TrimEnd('.').ToLowerInvariant();
@@ -76,18 +100,21 @@ public static class PublicSuffix
         if (System.Net.IPAddress.TryParse(h, out _)) return h;
         var labels = h.Split('.', StringSplitOptions.RemoveEmptyEntries);
         if (labels.Length <= 1) return h;
+        if (!LoadedOk) return h;                               // fail closed: no eTLD+1 collapse
         int ps = PsLabels(labels);
         if (labels.Length <= ps) return h;                     // host is a public suffix on its own
         return string.Join('.', labels[^(ps + 1)..]);
     }
 
     /// <summary>True if <paramref name="domain"/> is itself a public suffix (a bare TLD or a listed
-    /// multi-tenant registration point) — i.e. NOT a registrable site on its own.</summary>
+    /// multi-tenant registration point) — i.e. NOT a registrable site on its own.
+    /// When the list is missing, only bare single labels are treated as public suffixes.</summary>
     public static bool IsPublicSuffix(string? domain)
     {
         string d = (domain ?? "").Trim().TrimEnd('.').ToLowerInvariant();
         if (d.Length == 0) return true;
         if (d.IndexOf('.') < 0) return true;                   // bare TLD ("com", "io", "ru")
+        if (!LoadedOk) return false;                           // unknown multi-label: not a suffix
         var labels = d.Split('.', StringSplitOptions.RemoveEmptyEntries);
         return labels.Length <= PsLabels(labels);
     }
