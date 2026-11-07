@@ -61,8 +61,12 @@ public class AutofillPickerActivity : AppCompatActivity
     private TextView? _error;
     private EditText? _search;
     private ListView? _list;
+    private Button? _showAllBtn;
+    private TextView? _emptyHint;
     private CandidateAdapter? _adapter;
     private List<AutofillCandidate> _all = new();
+    /// <summary>False = matches-only (score &gt; 0). True only after an explicit phishing warning.</summary>
+    private bool _showAllConfirmed;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -209,6 +213,12 @@ public class AutofillPickerActivity : AppCompatActivity
         _search.TextChanged += (_, _) => ApplyFilter();
         _listBox.AddView(_search);
 
+        _emptyHint = new TextView(this) { Visibility = ViewStates.Gone };
+        _emptyHint.SetTextColor(Text3);
+        _emptyHint.SetTextSize(ComplexUnitType.Sp, 14);
+        _emptyHint.SetPadding(Dp(4), Dp(16), Dp(4), Dp(8));
+        _listBox.AddView(_emptyHint);
+
         _list = new ListView(this)
         {
             LayoutParameters = new LinearLayout.LayoutParams(
@@ -223,6 +233,16 @@ public class AutofillPickerActivity : AppCompatActivity
             if (c is not null) Deliver(c);
         };
         _listBox.AddView(_list);
+
+        // Matches-only by default; full vault only behind an explicit phishing warning.
+        _showAllBtn = new Button(this) { Text = "Показать все аккаунты…" };
+        _showAllBtn.SetAllCaps(false);
+        _showAllBtn.SetTextColor(Accent);
+        _showAllBtn.Background = RoundedBg(Card);
+        _showAllBtn.LayoutParameters = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, Dp(48)) { TopMargin = Dp(10) };
+        _showAllBtn.Click += (_, _) => OfferShowAll();
+        _listBox.AddView(_showAllBtn);
 
         return _listBox;
     }
@@ -258,9 +278,11 @@ public class AutofillPickerActivity : AppCompatActivity
 
         _all = AutofillMatcher.Rank(vault, _domain.Length > 0 ? _domain : null,
                                     _package.Length > 0 ? _package : null);
+        _showAllConfirmed = false;
 
-        _adapter = new CandidateAdapter(this, _all);
+        _adapter = new CandidateAdapter(this, new List<AutofillCandidate>());
         if (_list is not null) _list.Adapter = _adapter;
+        ApplyFilter();
 
         if (_unlockBox is not null) _unlockBox.Visibility = ViewStates.Gone;
         if (_listBox is not null) _listBox.Visibility = ViewStates.Visible;
@@ -270,12 +292,50 @@ public class AutofillPickerActivity : AppCompatActivity
 
     private void ApplyFilter()
     {
+        List<AutofillCandidate> scope = AutofillMatcher.ForDisplay(_all, _showAllConfirmed);
         string q = (_search?.Text ?? "").Trim();
         List<AutofillCandidate> shown = q.Length == 0
-            ? _all
-            : _all.Where(c => c.Title.Contains(q, StringComparison.CurrentCultureIgnoreCase)
-                           || c.Login.Contains(q, StringComparison.CurrentCultureIgnoreCase)).ToList();
+            ? scope
+            : scope.Where(c => c.Title.Contains(q, StringComparison.CurrentCultureIgnoreCase)
+                            || c.Login.Contains(q, StringComparison.CurrentCultureIgnoreCase)).ToList();
         _adapter?.Replace(shown);
+
+        bool anyMatch = _all.Any(c => c.Score > 0);
+        if (_emptyHint is not null)
+        {
+            if (shown.Count == 0 && !_showAllConfirmed)
+            {
+                _emptyHint.Text = anyMatch
+                    ? "Нет записей по запросу."
+                    : (_domain.Length > 0 || _package.Length > 0)
+                        ? "Нет записей для этого сайта или приложения. Показать все — только если уверены, что это не фишинг."
+                        : "Сайт не определён. Показать все аккаунты — только после предупреждения.";
+                _emptyHint.Visibility = ViewStates.Visible;
+            }
+            else
+            {
+                _emptyHint.Text = "";
+                _emptyHint.Visibility = ViewStates.Gone;
+            }
+        }
+
+        if (_showAllBtn is not null)
+            _showAllBtn.Visibility = _showAllConfirmed ? ViewStates.Gone : ViewStates.Visible;
+    }
+
+    private void OfferShowAll()
+    {
+        if (_showAllConfirmed) return;
+        new AndroidX.AppCompat.App.AlertDialog.Builder(this)
+            .SetTitle("Показать все аккаунты?")
+            .SetMessage("Эти записи не привязаны к текущему сайту или приложению. Подставляйте пароль только если уверены, что страница настоящая — иначе логин может уйти на фишинг.")
+            .SetNegativeButton("Отмена", (_, _) => { })
+            .SetPositiveButton("Показать все", (_, _) =>
+            {
+                _showAllConfirmed = true;
+                ApplyFilter();
+            })
+            .Show();
     }
 
     private async Task UnlockAsync()
