@@ -42,11 +42,13 @@ public class IpwAutofillService : AutofillService
 
             AutofillFields fields = AutofillParser.Parse(structure);
 
-            // ⚠ ДИАГНОСТИКА (Яндекс): что реально пришло от браузера
+#if DEBUG
+            // Package/domain diagnostics must never ship in Release (audit L10).
             bool compat = ((int)request.Flags & 0x2) != 0;   // FLAG_COMPATIBILITY_MODE_REQUEST
             Console.WriteLine($"[IPW] fill pkg={fields.PackageName} web={fields.WebDomain} compat={compat} " +
                 $"user={(fields.Username != null)} pass={(fields.Password != null)} otp={(fields.Otp != null)} " +
                 $"nodes={AutofillParser.LastTextNodeCount}");
+#endif
 
             if (!fields.HasAny) { callback.OnSuccess(null); return; }
 
