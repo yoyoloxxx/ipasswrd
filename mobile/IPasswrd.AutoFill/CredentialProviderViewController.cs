@@ -27,8 +27,11 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
     private bool _otcMode;   // режим «одноразовые коды» (iOS 18+): подставляем код проверки, не пароль
     private Vault? _vault;
     private readonly List<Row> _rows = new();
+    /// <summary>False = matches-only. True only after an explicit phishing warning.</summary>
+    private bool _showAllConfirmed;
     private UITableView? _table;
     private UILabel? _status;
+    private UIButton? _showAllBtn;
 
     public CredentialProviderViewController(NativeHandle handle) : base(handle) { }
 
@@ -269,6 +272,7 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
                 if (_otcMode)
                 {
                     // Режим одноразовых кодов: любая запись с кодом проверки.
+                    // Secrets stay in the vault until Complete — list rows are display-only.
                     string totp = e.Item.Fields.GetValueOrDefault("totp", "");
                     if (totp.Length == 0 || e.Item.Type == "meta") continue;
                     string user2 = e.Item.Fields.GetValueOrDefault("username", "");
@@ -284,7 +288,7 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
                         User = user2.Length > 0 ? user2 : (e.Item.Title.Length > 0 ? e.Item.Title : "(код)"),
                         Password = "",
                         Site = site2,
-                        Totp = totp,
+                        Totp = "1",   // presence flag only; GenerateCode loads from vault on select
                         Match = match2,
                     });
                     continue;
@@ -300,13 +304,14 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
                 string site = dom.Length > 0 ? dom : (e.Item.Title.Length > 0 ? e.Item.Title : url);
                 bool match = dom.Length > 0 && domains.Contains(dom);
 
+                // List rows carry display metadata only — password is loaded on Complete(id).
                 _rows.Add(new Row
                 {
                     Id = e.Id,
                     User = user.Length > 0 ? user : "(без логина)",
-                    Password = pass,
+                    Password = "",
                     Site = site,
-                    Totp = e.Item.Fields.GetValueOrDefault("totp", ""),
+                    Totp = e.Item.Fields.GetValueOrDefault("totp", "").Length > 0 ? "1" : "",
                     Match = match,
                 });
             }
@@ -320,6 +325,9 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
             int s = string.Compare(a.Site, b.Site, StringComparison.CurrentCultureIgnoreCase);
             return s != 0 ? s : string.Compare(a.User, b.User, StringComparison.CurrentCultureIgnoreCase);
         });
+
+        _showAllConfirmed = false;
+        RefreshShowAllButton();
 
         // Прямой переход от подсказки: если запись известна — заполняем сразу.
         if (_targetRecordId is not null)
@@ -335,19 +343,72 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
 
     private void Complete(Row r)
     {
+        // Refuse unmatched picks unless the user confirmed show-all (phishing gate).
+        // Exception: iOS already named this record via PrepareInterfaceToProvideCredential.
+        bool systemPicked = _targetRecordId is not null && r.Id == _targetRecordId;
+        if (!r.Match && !_showAllConfirmed && !systemPicked)
+        {
+            OfferShowAll();
+            return;
+        }
+
         if (_otcMode)
         {
-            string? code = GenerateCode(r.Totp);
+            string? code = null;
+            if (_vault is not null)
+            {
+                try
+                {
+                    VaultItem it = _vault.Get(r.Id);
+                    code = GenerateCode(it.Fields.GetValueOrDefault("totp", ""));
+                }
+                catch { }
+            }
             if (code is null) { CancelWith(ASExtensionErrorCode.Failed); return; }
             CompleteOtc(code);
             return;
         }
 
+        string user = r.User == "(без логина)" ? "" : r.User;
+        string pass = "";
         if (_vault is not null)
         {
-            try { CopyTotpIfAny(_vault.Get(r.Id)); } catch { }
+            try
+            {
+                VaultItem it = _vault.Get(r.Id);
+                user = it.Fields.GetValueOrDefault("username", "");
+                pass = it.Fields.GetValueOrDefault("password", "");
+                CopyTotpIfAny(it);
+            }
+            catch { }
         }
-        ExtensionContext!.CompleteRequest(new ASPasswordCredential(r.User == "(без логина)" ? "" : r.User, r.Password), null);
+        ExtensionContext!.CompleteRequest(new ASPasswordCredential(user, pass), null);
+    }
+
+    private void OfferShowAll()
+    {
+        if (_showAllConfirmed) return;
+        var alert = UIAlertController.Create(
+            "Показать все аккаунты?",
+            "Эти записи не для текущего сайта. Подставляйте пароль только если уверены, что страница настоящая — иначе логин может уйти на фишинг.",
+            UIAlertControllerStyle.Alert);
+        alert.AddAction(UIAlertAction.Create("Отмена", UIAlertActionStyle.Cancel, null));
+        alert.AddAction(UIAlertAction.Create("Показать все", UIAlertActionStyle.Destructive, _ =>
+        {
+            _showAllConfirmed = true;
+            RefreshShowAllButton();
+            _table?.ReloadData();
+        }));
+        PresentViewController(alert, true, null);
+    }
+
+    private void RefreshShowAllButton()
+    {
+        if (_showAllBtn is null) return;
+        bool hasOther = _rows.Any(r => !r.Match);
+        bool hasMatch = _rows.Any(r => r.Match);
+        // Offer show-all when unmatched exist, or when nothing matched (unknown / empty target).
+        _showAllBtn.Hidden = _showAllConfirmed || (!hasOther && hasMatch);
     }
 
     /// <summary>«google» ↔ «google.com»: равенство базы всегда, подстрока — от 5 символов.</summary>
@@ -397,8 +458,15 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
         cancel.TranslatesAutoresizingMaskIntoConstraints = false;
         cancel.TouchUpInside += (_, _) => CancelWith(ASExtensionErrorCode.UserCanceled);
 
+        _showAllBtn = UIButton.FromType(UIButtonType.System);
+        _showAllBtn.SetTitle("Все…", UIControlState.Normal);
+        _showAllBtn.TranslatesAutoresizingMaskIntoConstraints = false;
+        _showAllBtn.TouchUpInside += (_, _) => OfferShowAll();
+        _showAllBtn.Hidden = true;
+
         bar.AddSubview(title);
         bar.AddSubview(cancel);
+        bar.AddSubview(_showAllBtn);
         View.AddSubview(bar);
 
         _table = new UITableView(CoreGraphics.CGRect.Empty, UITableViewStyle.InsetGrouped)
@@ -418,6 +486,8 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
             title.CenterYAnchor.ConstraintEqualTo(bar.CenterYAnchor),
             cancel.LeadingAnchor.ConstraintEqualTo(bar.LeadingAnchor, 16),
             cancel.CenterYAnchor.ConstraintEqualTo(bar.CenterYAnchor),
+            _showAllBtn.TrailingAnchor.ConstraintEqualTo(bar.TrailingAnchor, -16),
+            _showAllBtn.CenterYAnchor.ConstraintEqualTo(bar.CenterYAnchor),
             _table.TopAnchor.ConstraintEqualTo(bar.BottomAnchor),
             _table.LeadingAnchor.ConstraintEqualTo(View.LeadingAnchor),
             _table.TrailingAnchor.ConstraintEqualTo(View.TrailingAnchor),
@@ -456,6 +526,7 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
 
         public override nint NumberOfSections(UITableView tableView)
         {
+            if (!_c._showAllConfirmed) return 1;   // matches-only (or empty)
             bool hasMatch = _c._rows.Any(r => r.Match);
             bool hasOther = _c._rows.Any(r => !r.Match);
             return hasMatch && hasOther ? 2 : 1;
@@ -463,6 +534,9 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
 
         private List<Row> RowsFor(nint section)
         {
+            if (!_c._showAllConfirmed)
+                return _c._rows.Where(r => r.Match).ToList();
+
             bool hasMatch = _c._rows.Any(r => r.Match);
             bool matchSection = hasMatch && section == 0;
             return _c._rows.Where(r => r.Match == matchSection || !hasMatch).ToList();
@@ -473,6 +547,8 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
         public override string TitleForHeader(UITableView tableView, nint section)
         {
             bool hasMatch = _c._rows.Any(r => r.Match);
+            if (!_c._showAllConfirmed)
+                return hasMatch ? "Для этого сайта" : "Нет подходящих записей";
             if (!hasMatch) return "Все аккаунты";
             return section == 0 ? "Для этого сайта" : "Все аккаунты";
         }
@@ -484,6 +560,7 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
             cell.TextLabel!.Text = r.User;
             if (cell.DetailTextLabel is not null)
             {
+                // Never render a live TOTP value in the list — only a presence hint.
                 cell.DetailTextLabel.Text = _c._otcMode
                     ? r.Site + "  ·  подставить код"
                     : r.Site + (r.Totp.Length > 0 ? "  ·  код скопируется" : "");

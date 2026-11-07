@@ -48,6 +48,8 @@ public sealed class IpwAccessibilityService : AccessibilityService
     private string _pkg = "";
     private bool _awaitUnlock;
     private string _anchorKey = "";
+    /// <summary>True only after the user confirms the phishing warning for unmatched fills.</summary>
+    private bool _showAllConfirmed;
 
     public static bool IsRunning { get; private set; }
 
@@ -131,6 +133,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
             _domain = FindDomain(root) ?? "";
             HideMenu();
             _anchorKey = key;
+            _showAllConfirmed = false;   // never carry unmatched consent across fields/sites
             ShowSuggest(r);
         }
         catch (Exception ex)
@@ -186,14 +189,14 @@ public sealed class IpwAccessibilityService : AccessibilityService
         var more = new AndroidButton(this)
         {
             Text = !unlocked ? "IPasswrd: открыть по отпечатку"
-                 : rows > 0 ? "Все записи…"
+                 : rows > 0 ? "Ещё совпадения…"
                  : "IPasswrd: выбрать запись…",
         };
         more.SetAllCaps(false);
         more.Gravity = GravityFlags.CenterVertical | GravityFlags.Start;
         more.SetTextColor(AndroidColor.Argb(255, 214, 170, 78));
         more.SetBackgroundColor(AndroidColor.Transparent);
-        more.Click += (_, _) => { HideMenu(); ToggleMenu(); };
+        more.Click += (_, _) => { HideMenu(); _showAllConfirmed = false; ToggleMenu(); };
         panel.AddView(more);
 
         int screenW = Resources?.DisplayMetrics?.WidthPixels ?? Dp(360);
@@ -299,11 +302,12 @@ public sealed class IpwAccessibilityService : AccessibilityService
             return;
         }
 
+        // Unknown domain / score 0: refuse fill until the user confirms a phishing warning.
+        // Never dump the first N unmatched accounts onto the current page.
         List<AutofillCandidate> items = AutofillMatcher.Rank(vault, _domain.Length > 0 ? _domain : null, null);
-        var matched = items.Where(c => c.Score > 0).ToList();
-        // совпавшие по домену — все; иначе первые 8 (выбор вручную)
-        bool haveMatch = matched.Count > 0;
-        var shown = haveMatch ? matched.Take(12).ToList() : items.Take(8).ToList();
+        List<AutofillCandidate> shown = AutofillMatcher.ForDisplay(items, _showAllConfirmed).Take(12).ToList();
+        bool haveMatch = items.Any(c => c.Score > 0);
+        bool domainKnown = _domain.Length > 0;
 
         var wm = GetSystemService(WindowService)?.JavaCast<IWindowManager>();
         if (wm is null) return;
@@ -316,12 +320,13 @@ public sealed class IpwAccessibilityService : AccessibilityService
         panel.Background = pbg;
         panel.SetPadding(Dp(6), Dp(6), Dp(6), Dp(6));
 
-        var header = new TextView(this)
-        {
-            Text = _domain.Length == 0 ? "Выбор записи"
-                 : haveMatch ? "Для " + _domain
-                 : "Для " + _domain + " записей нет — выберите вручную",
-        };
+        string headerText;
+        if (_showAllConfirmed) headerText = "Все аккаунты — проверьте сайт";
+        else if (!domainKnown) headerText = "Сайт не определён — совпадений нет";
+        else if (haveMatch) headerText = "Для " + _domain;
+        else headerText = "Для " + _domain + " подходящих записей нет";
+
+        var header = new TextView(this) { Text = headerText };
         header.SetTextColor(AndroidColor.Argb(255, 140, 152, 165));
         header.SetPadding(Dp(12), Dp(8), Dp(12), Dp(8));
         header.TextSize = 13;
@@ -339,6 +344,17 @@ public sealed class IpwAccessibilityService : AccessibilityService
             panel.AddView(row);
         }
 
+        if (!_showAllConfirmed)
+        {
+            var showAll = new AndroidButton(this) { Text = "Показать все аккаунты…" };
+            showAll.SetAllCaps(false);
+            showAll.Gravity = GravityFlags.CenterVertical | GravityFlags.Start;
+            showAll.SetTextColor(AndroidColor.Argb(255, 214, 170, 78));
+            showAll.SetBackgroundColor(AndroidColor.Transparent);
+            showAll.Click += (_, _) => { HideMenu(); OfferShowAllWarning(); };
+            panel.AddView(showAll);
+        }
+
         var lp = new WindowManagerLayoutParams(
             (int)(Resources!.DisplayMetrics!.WidthPixels * 0.86),
             ViewGroup.LayoutParams.WrapContent,
@@ -352,6 +368,63 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
         try { wm.AddView(panel, lp); _menu = panel; }
         catch (Exception ex) { Console.WriteLine("[IPW-A11Y] addMenu: " + ex.Message); }
+    }
+
+    /// <summary>In-overlay phishing warning before unmatched accounts can be filled.</summary>
+    private void OfferShowAllWarning()
+    {
+        var wm = GetSystemService(WindowService)?.JavaCast<IWindowManager>();
+        if (wm is null) return;
+
+        var panel = new LinearLayout(this) { Orientation = AndroidOrientation.Vertical };
+        var pbg = new GradientDrawable();
+        pbg.SetShape(ShapeType.Rectangle);
+        pbg.SetCornerRadius(Dp(14));
+        pbg.SetColor(AndroidColor.Argb(255, 20, 26, 33));
+        panel.Background = pbg;
+        panel.SetPadding(Dp(10), Dp(10), Dp(10), Dp(10));
+
+        var warn = new TextView(this)
+        {
+            Text = "Эти записи не для текущей страницы. Подставляйте пароль только если уверены, что сайт настоящий — иначе логин уйдёт на фишинг.",
+        };
+        warn.SetTextColor(AndroidColor.Argb(255, 236, 240, 245));
+        warn.SetPadding(Dp(8), Dp(8), Dp(8), Dp(12));
+        warn.TextSize = 14;
+        panel.AddView(warn);
+
+        var confirm = new AndroidButton(this) { Text = "Всё равно показать все" };
+        confirm.SetAllCaps(false);
+        confirm.SetTextColor(AndroidColor.Argb(255, 235, 110, 110));
+        confirm.SetBackgroundColor(AndroidColor.Transparent);
+        confirm.Click += (_, _) =>
+        {
+            HideMenu();
+            _showAllConfirmed = true;
+            ToggleMenu();
+        };
+        panel.AddView(confirm);
+
+        var cancel = new AndroidButton(this) { Text = "Отмена" };
+        cancel.SetAllCaps(false);
+        cancel.SetTextColor(AndroidColor.Argb(255, 140, 152, 165));
+        cancel.SetBackgroundColor(AndroidColor.Transparent);
+        cancel.Click += (_, _) => HideMenu();
+        panel.AddView(cancel);
+
+        var lp = new WindowManagerLayoutParams(
+            (int)(Resources!.DisplayMetrics!.WidthPixels * 0.86),
+            ViewGroup.LayoutParams.WrapContent,
+            WindowManagerTypes.AccessibilityOverlay,
+            WindowManagerFlags.NotTouchModal,
+            Format.Translucent)
+        {
+            Gravity = GravityFlags.Bottom | GravityFlags.CenterHorizontal,
+            Y = Dp(150),
+        };
+
+        try { wm.AddView(panel, lp); _menu = panel; }
+        catch (Exception ex) { Console.WriteLine("[IPW-A11Y] addWarn: " + ex.Message); }
     }
 
     private void HideMenu()
@@ -371,6 +444,13 @@ public sealed class IpwAccessibilityService : AccessibilityService
             if (Svc.State.ActiveVault is null)
             {
                 Toast.MakeText(this, "Сейф заблокирован — разблокируйте IPasswrd", ToastLength.Long)?.Show();
+                return;
+            }
+
+            // Score 0 / unknown domain: refuse unless the user confirmed show-all.
+            if (c.Score <= 0 && !_showAllConfirmed)
+            {
+                Toast.MakeText(this, "Нет совпадения с сайтом — подтвердите «показать все»", ToastLength.Long)?.Show();
                 return;
             }
 
