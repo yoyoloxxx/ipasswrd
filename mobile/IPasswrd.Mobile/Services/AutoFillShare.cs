@@ -16,6 +16,8 @@ namespace IPasswrd.Mobile.Services;
 public static class AutoFillShare
 {
     public const string FallbackGroup = "group.com.yoyoloxxx.ipasswrd";
+    private const string LockoutFailsKey = "lockout.fails";
+    private const string LockoutUntilKey = "lockout.until";
 
 #if IOS
     private static string? _group;
@@ -39,6 +41,12 @@ public static class AutoFillShare
         return _group = FallbackGroup;
     }
 
+    private static NSUserDefaults? SharedDefaults()
+    {
+        try { return NSUserDefaults.FromSuiteName(GroupId()); }
+        catch { return null; }
+    }
+
     private static string? GroupVaultPath()
     {
         try
@@ -60,6 +68,76 @@ public static class AutoFillShare
             File.WriteAllBytes(p, data);
         }
         catch { /* автозаполнение — необязательный путь */ }
+    }
+
+    /// <summary>Стереть кэш DEK расширения при блокировке хоста (shared keychain-access-group).</summary>
+    public static void WipeDek()
+    {
+        try { IPasswrd.AutoFill.AutoFillDek.Wipe(); }
+        catch { /* расширение / keychain могут быть недоступны */ }
+    }
+
+    /// <summary>Общий счётчик неудачных попыток мастер-пароля (App Group ↔ AutoFill).</summary>
+    public static int GetLockoutFails()
+    {
+        try
+        {
+            NSUserDefaults? d = SharedDefaults();
+            string? s = d?.StringForKey(LockoutFailsKey);
+            if (!string.IsNullOrEmpty(s) && int.TryParse(s, out int n))
+                return n;
+        }
+        catch { }
+        // Миграция со старых приватных Preferences хоста.
+        int legacy = Preferences.Get(LockoutFailsKey, 0);
+        if (legacy != 0) SetLockoutFails(legacy);
+        return legacy;
+    }
+
+    public static void SetLockoutFails(int value)
+    {
+        try
+        {
+            NSUserDefaults? d = SharedDefaults();
+            if (d is not null)
+            {
+                d.SetString(value.ToString(), LockoutFailsKey);
+                d.Synchronize();
+            }
+        }
+        catch { }
+        try { Preferences.Set(LockoutFailsKey, value); } catch { }
+    }
+
+    public static long GetLockoutUntilUnix()
+    {
+        try
+        {
+            NSUserDefaults? d = SharedDefaults();
+            string? s = d?.StringForKey(LockoutUntilKey);
+            if (!string.IsNullOrEmpty(s) && long.TryParse(s, out long n))
+                return Math.Max(0, n);
+        }
+        catch { }
+        long legacy = Preferences.Get(LockoutUntilKey, 0L);
+        if (legacy != 0) SetLockoutUntilUnix(legacy);
+        return legacy;
+    }
+
+    public static void SetLockoutUntilUnix(long unixSeconds)
+    {
+        if (unixSeconds < 0) unixSeconds = 0;
+        try
+        {
+            NSUserDefaults? d = SharedDefaults();
+            if (d is not null)
+            {
+                d.SetString(unixSeconds.ToString(), LockoutUntilKey);
+                d.Synchronize();
+            }
+        }
+        catch { }
+        try { Preferences.Set(LockoutUntilKey, unixSeconds); } catch { }
     }
 
     /// <summary>Обновить подсказки над клавиатурой: логины (домен + имя) и,
@@ -133,5 +211,11 @@ public static class AutoFillShare
 #else
     public static void MirrorVault(byte[] data) { }
     public static void UpdateIdentities(Vault v) { }
+    public static void WipeDek() { }
+
+    public static int GetLockoutFails() => Preferences.Get(LockoutFailsKey, 0);
+    public static void SetLockoutFails(int value) => Preferences.Set(LockoutFailsKey, value);
+    public static long GetLockoutUntilUnix() => Preferences.Get(LockoutUntilKey, 0L);
+    public static void SetLockoutUntilUnix(long unixSeconds) => Preferences.Set(LockoutUntilKey, unixSeconds);
 #endif
 }

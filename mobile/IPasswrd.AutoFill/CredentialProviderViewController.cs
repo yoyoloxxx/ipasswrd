@@ -67,50 +67,14 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
         OpenVaultThenShow();
     }
 
-    /// <summary>Тихий путь для подсказки над клавиатурой: без UI. Получается, только если
-    /// сессионный ключ ещё в Keychain; иначе iOS сам откроет наш интерфейс.</summary>
+    /// <summary>Тихий путь отключён (audit H1): DEK под Face ID и подстановка только
+    /// через UI расширения. iOS откроет PrepareInterface… после UserInteractionRequired.</summary>
     public override void ProvideCredentialWithoutUserInteraction(ASPasswordCredentialIdentity credentialIdentity) =>
-        SilentProvide(credentialIdentity.RecordIdentifier, otc: false);
+        CancelWith(ASExtensionErrorCode.UserInteractionRequired);
 
-    /// <summary>Тихий путь нового образца (iOS 17+): пароль или одноразовый код.</summary>
+    /// <summary>Тихий путь нового образца (iOS 17+): тоже требует UI.</summary>
     public override void ProvideCredentialWithoutUserInteraction(IASCredentialRequest credentialRequest) =>
-        SilentProvide(credentialRequest.CredentialIdentity?.RecordIdentifier,
-                      credentialRequest.Type == ASCredentialRequestType.OneTimeCode);
-
-    private void SilentProvide(string? id, bool otc)
-    {
-        try
-        {
-            byte[]? blob = AppGroup.ReadVault();
-            byte[]? dek = AppGroup.LoadDek();
-            if (blob is null || dek is null) { CancelWith(ASExtensionErrorCode.UserInteractionRequired); return; }
-
-            Vault v = Vault.UnlockWithSessionKey(blob, dek);
-            VaultItem? it = null;
-            if (!string.IsNullOrEmpty(id))
-            {
-                try { it = v.Get(id!); } catch { it = null; }
-            }
-            if (it is null) { CancelWith(ASExtensionErrorCode.CredentialIdentityNotFound); return; }
-
-            if (otc)
-            {
-                string? code = GenerateCode(it.Fields.GetValueOrDefault("totp", ""));
-                if (code is null) { CancelWith(ASExtensionErrorCode.CredentialIdentityNotFound); return; }
-                CompleteOtc(code);
-                return;
-            }
-
-            CopyTotpIfAny(it);
-            ExtensionContext!.CompleteRequest(
-                new ASPasswordCredential(it.Fields.GetValueOrDefault("username", ""),
-                                         it.Fields.GetValueOrDefault("password", "")), null);
-        }
-        catch
-        {
-            CancelWith(ASExtensionErrorCode.UserInteractionRequired);
-        }
-    }
+        CancelWith(ASExtensionErrorCode.UserInteractionRequired);
 
     private void CompleteOtc(string code)
     {
@@ -173,31 +137,43 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
             return;
         }
 
-        byte[]? dek = AppGroup.LoadDek();
-        if (dek is not null)
+        if (AppGroup.LockoutRemaining > TimeSpan.Zero)
         {
-            ShowStatus("Открываю сейф…");
-            Task.Run(() =>
-            {
-                try
-                {
-                    Vault v = Vault.UnlockWithSessionKey(blob, dek);
-                    InvokeOnMainThread(() => { _vault = v; FillRows(); });
-                }
-                catch
-                {
-                    AppGroup.WipeDek();
-                    InvokeOnMainThread(AskPassword);
-                }
-            });
+            ShowStatus($"Слишком много попыток. Подождите {FormatDuration(AppGroup.LockoutRemaining)}.");
             return;
         }
 
-        AskPassword();
+        // LoadDek с BiometryCurrentSet блокирует на Face ID — только с фона.
+        ShowStatus("Открываю сейф…");
+        Task.Run(() =>
+        {
+            byte[]? dek = AppGroup.LoadDek();
+            if (dek is null)
+            {
+                InvokeOnMainThread(AskPassword);
+                return;
+            }
+            try
+            {
+                Vault v = Vault.UnlockWithSessionKey(blob, dek);
+                InvokeOnMainThread(() => { _vault = v; FillRows(); });
+            }
+            catch
+            {
+                AppGroup.WipeDek();
+                InvokeOnMainThread(AskPassword);
+            }
+        });
     }
 
     private void AskPassword()
     {
+        if (AppGroup.LockoutRemaining > TimeSpan.Zero)
+        {
+            ShowStatus($"Слишком много попыток. Подождите {FormatDuration(AppGroup.LockoutRemaining)}.");
+            return;
+        }
+
         ShowStatus("Нужен мастер-пароль.");
         var alert = UIAlertController.Create("IPasswrd", "Введите мастер-пароль сейфа", UIAlertControllerStyle.Alert);
         alert.AddTextField(tf =>
@@ -213,17 +189,41 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
             ShowStatus("Открываю сейф…\n(первый раз может занять несколько секунд)");
             byte[]? blob = AppGroup.ReadVault();
             if (blob is null || pw.Length == 0) { AskPassword(); return; }
+            if (AppGroup.LockoutRemaining > TimeSpan.Zero)
+            {
+                ShowStatus($"Слишком много попыток. Подождите {FormatDuration(AppGroup.LockoutRemaining)}.");
+                return;
+            }
             Task.Run(() =>
             {
                 try
                 {
                     Vault v = Vault.Unlock(blob, pw);
+                    AppGroup.LockoutFails = 0;
+                    AppGroup.LockoutUntil = DateTimeOffset.UnixEpoch;
                     AppGroup.SaveDek(v.ExportSessionKey());
                     InvokeOnMainThread(() => { _vault = v; FillRows(); });
                 }
                 catch (WrongMasterPasswordException)
                 {
-                    InvokeOnMainThread(() => { ShowStatus("Неверный мастер-пароль."); AskPassword(); });
+                    int fails = AppGroup.LockoutFails + 1;
+                    AppGroup.LockoutFails = fails;
+                    TimeSpan pen = Lockout.PenaltyFor(fails);
+                    if (pen > TimeSpan.Zero)
+                        AppGroup.LockoutUntil = DateTimeOffset.UtcNow + pen;
+                    InvokeOnMainThread(() =>
+                    {
+                        if (pen > TimeSpan.Zero)
+                            ShowStatus($"Неверный мастер-пароль. Вход закрыт на {FormatDuration(pen)}.");
+                        else
+                        {
+                            int left = Lockout.AttemptsLeft(fails);
+                            ShowStatus(left > 0
+                                ? $"Неверный мастер-пароль. Осталось попыток без блокировки: {left}."
+                                : "Неверный мастер-пароль.");
+                            AskPassword();
+                        }
+                    });
                 }
                 catch
                 {
@@ -232,6 +232,14 @@ public class CredentialProviderViewController : ASCredentialProviderViewControll
             });
         }));
         PresentViewController(alert, true, null);
+    }
+
+    private static string FormatDuration(TimeSpan t)
+    {
+        if (t.TotalDays >= 1) return $"{(int)Math.Ceiling(t.TotalDays)} дн";
+        if (t.TotalHours >= 1) return $"{(int)Math.Ceiling(t.TotalHours)} ч";
+        if (t.TotalMinutes >= 1) return $"{(int)Math.Ceiling(t.TotalMinutes)} мин";
+        return $"{Math.Max(1, (int)Math.Ceiling(t.TotalSeconds))} с";
     }
 
     // ================= данные и таблица =================
