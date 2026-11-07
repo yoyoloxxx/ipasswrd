@@ -5,7 +5,7 @@ namespace IPasswrd.Mobile.Views;
 
 public partial class SecurityPage : ContentPage
 {
-    private Dictionary<string, long>? _breachCounts;   // пароль → число утечек (только найденные)
+    private Dictionary<string, long>? _breachCounts;   // entry id → число утечек (только найденные; audit M14)
     private bool _breachRunning;
     private string? _breachStatus;
 
@@ -17,7 +17,28 @@ public partial class SecurityPage : ContentPage
     protected override void OnAppearing()
     {
         base.OnAppearing();
+        Svc.State.LockedChanged += OnLocked;
         Build();
+    }
+
+    protected override void OnDisappearing()
+    {
+        Svc.State.LockedChanged -= OnLocked;
+        ClearBreachCache();
+        base.OnDisappearing();
+    }
+
+    private void OnLocked()
+    {
+        ClearBreachCache();
+        MainThread.BeginInvokeOnMainThread(Build);
+    }
+
+    private void ClearBreachCache()
+    {
+        _breachCounts?.Clear();
+        _breachCounts = null;
+        _breachStatus = null;
     }
 
     private void OnRefresh(object? sender, EventArgs e)
@@ -212,9 +233,8 @@ public partial class SecurityPage : ContentPage
         {
             Vault? v = Svc.State.Vault;
             var hits = (v?.Items() ?? Enumerable.Empty<VaultEntry>())
-                .Where(x => x.Item.Type == "account"
-                            && x.Item.Fields.TryGetValue("password", out var p) && _breachCounts.ContainsKey(p))
-                .OrderByDescending(x => _breachCounts[x.Item.Fields["password"]])
+                .Where(x => x.Item.Type == "account" && _breachCounts.ContainsKey(x.Id))
+                .OrderByDescending(x => _breachCounts[x.Id])
                 .ToList();
 
             if (hits.Count == 0)
@@ -229,7 +249,7 @@ public partial class SecurityPage : ContentPage
                 Color bad = C("IpBad", "IpBadL");
                 foreach (VaultEntry e in hits)
                 {
-                    long n = _breachCounts[e.Item.Fields["password"]];
+                    long n = _breachCounts[e.Id];
                     stack.Children.Add(FindingRow(e.Id, e.Item.Title.Length > 0 ? e.Item.Title : "(без названия)",
                         $"в {Hibp.FormatCount(n)} утечках", bad));
                 }
@@ -251,11 +271,21 @@ public partial class SecurityPage : ContentPage
 
         try
         {
-            var pwds = v.Items()
+            // Audit M14: result map keyed by entry id (Hibp itself keys by SHA-1, never plaintext).
+            var entries = v.Items()
                 .Where(x => x.Item.Type == "account"
                             && x.Item.Fields.TryGetValue("password", out var p) && !string.IsNullOrEmpty(p))
-                .Select(x => x.Item.Fields["password"]);
-            _breachCounts = await Hibp.CheckAsync(pwds);
+                .Select(x => (x.Id, Password: x.Item.Fields["password"]))
+                .ToList();
+            Dictionary<string, long> bySha = await Hibp.CheckAsync(entries.Select(e => e.Password));
+            var byId = new Dictionary<string, long>();
+            foreach (var (id, password) in entries)
+            {
+                string sha = BreachCheck.Sha1Hex(password);
+                if (bySha.TryGetValue(sha, out long n)) byId[id] = n;
+            }
+            bySha.Clear();
+            _breachCounts = byId;
             _breachStatus = null;
         }
         catch (Exception)

@@ -93,13 +93,14 @@ public static class SecureClipboard
         try { _ = Clipboard.Default.SetTextAsync(string.Empty); } catch { }
     }
 
-    /// <summary>Немедленно стереть ожидающий секрет (при блокировке сейоа).</summary>
+    /// <summary>Немедленно стереть ожидающий секрет (при блокировке сейфа).
+    /// Sync clear — fire-and-forget left secrets on the pasteboard if the process was killed
+    /// before the async clear ran (audit M13).</summary>
     public static void Wipe()
     {
         if (_last is null) return;
         _gen++;
-        string v = _last;
         _last = null;
-        _ = ClearIfMatches(v);
+        ClearNative();
     }
 }
