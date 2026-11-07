@@ -5,6 +5,10 @@
 	<!-- Keychain на устройстве работает и без entitlements; этот файл нужен,
 	     только если запускать в симуляторе (тогда добавьте в csproj:
 	     <CodesignEntitlements>Platforms/iOS/Entitlements.plist</CodesignEntitlements>) -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.yoyoloxxx.ipasswrd</string>
+	</array>
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)com.yoyoloxxx.ipasswrd</string>

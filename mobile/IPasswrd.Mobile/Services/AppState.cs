@@ -60,16 +60,18 @@ public sealed class AppState
 
     // ================= локаут (как на Windows: счётчик на устройстве) =================
 
+    // iOS: App Group UserDefaults — тот же счётчик, что у AutoFill (audit H2).
+    // Android: те же ключи через Preferences (WipeDek/App Group — no-op).
     private int Fails
     {
-        get => Preferences.Get("lockout.fails", 0);
-        set => Preferences.Set("lockout.fails", value);
+        get => AutoFillShare.GetLockoutFails();
+        set => AutoFillShare.SetLockoutFails(value);
     }
 
     private DateTimeOffset LockedUntil
     {
-        get => DateTimeOffset.FromUnixTimeSeconds(Preferences.Get("lockout.until", 0L));
-        set => Preferences.Set("lockout.until", value.ToUnixTimeSeconds());
+        get => DateTimeOffset.FromUnixTimeSeconds(AutoFillShare.GetLockoutUntilUnix());
+        set => AutoFillShare.SetLockoutUntilUnix(value.ToUnixTimeSeconds());
     }
 
     public TimeSpan LockoutRemaining
@@ -170,7 +172,7 @@ public sealed class AppState
         }
 
         Fails = 0;
-        LockedUntil = DateTimeOffset.MinValue;
+        LockedUntil = DateTimeOffset.UnixEpoch;
         AfterUnlock();
         return null;
     }
@@ -375,10 +377,12 @@ public sealed class AppState
 
     // ================= блокировка =================
 
-    /// <summary>Убрать сейф из памяти (Face ID продолжает работать — ключ остаётся в Keychain).</summary>
+    /// <summary>Убрать сейф из памяти (Face ID продолжает работать — ключ остаётся в Keychain).
+    /// Кэш DEK расширения AutoFill стирается: «замок» отзывает silent/quick AutoFill-сессию.</summary>
     public void Lock()
     {
         SecureClipboard.Wipe();   // стереть скопированный секрет при блокировке
+        AutoFillShare.WipeDek();  // shared keychain-access-group (audit H1)
         _vault = null;
         LockedChanged?.Invoke();
     }
@@ -641,7 +645,7 @@ public sealed class AppState
 
         _vault = restored;
         Fails = 0;
-        LockedUntil = DateTimeOffset.MinValue;
+        LockedUntil = DateTimeOffset.UnixEpoch;
         await SaveAsync();      // запишет уже с новым паролем + синк
         AfterUnlock();
         return null;
