@@ -64,8 +64,19 @@ internal static class Crypto
     /// password changes keep the DEK, so the id survives them too.</summary>
     public static readonly byte[] AadVaultId = Encoding.ASCII.GetBytes("ipasswrd/vault-id/v1");
 
+    /// <summary>
+    /// AAD for a record seal. Record ids must be ASCII: <c>Encoding.ASCII</c> would map every
+    /// non-ASCII code unit to <c>?</c>, so two different caller-chosen <c>Put</c> ids could share
+    /// one AAD and decrypt under each other's ciphertext. Guids and app prefs ids already are ASCII.
+    /// </summary>
     public static byte[] RecordAad(string id)
     {
+        if (string.IsNullOrEmpty(id)) throw new ArgumentException("record id is empty", nameof(id));
+        for (int i = 0; i < id.Length; i++)
+        {
+            if (id[i] > 0x7F)
+                throw new ArgumentException("record id must be ASCII (non-ASCII would collide under AES-GCM AAD)", nameof(id));
+        }
         byte[] idBytes = Encoding.ASCII.GetBytes(id);
         byte[] aad = new byte[AadRecordPrefix.Length + idBytes.Length];
         Buffer.BlockCopy(AadRecordPrefix, 0, aad, 0, AadRecordPrefix.Length);

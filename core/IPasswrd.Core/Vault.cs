@@ -616,6 +616,9 @@ public sealed class Vault
     /// <summary>
     /// Verify the current password, then rotate the salt and re-wrap the SAME DEK
     /// under the new password. Records are untouched (the point of the KEK/DEK split).
+    /// The KDF is raised to at least <see cref="KdfConfig.Default"/> (same floor as
+    /// <see cref="ResetMasterPassword"/>), so a password change never preserves a weak
+    /// header that an older build or a tampered file left behind.
     /// </summary>
     public void ChangeMasterPassword(string oldPassword, string newPassword)
     {
@@ -623,12 +626,16 @@ public sealed class Vault
         byte[] check = Unwrap(oldKek, _wrapped); // throws if wrong
         CryptographicOperations.ZeroMemory(oldKek);
         CryptographicOperations.ZeroMemory(check);
+        _cfg = _cfg.Sanitized();   // raise to max(old, Default), then cap — new wrap only
         _salt = Crypto.RandomBytes(Crypto.SaltLen);
         byte[] kek = Crypto.DeriveKey(newPassword, _salt, _cfg);   // slow KDF outside the key lock
         _wrapped = WithDek(d => Wrap(kek, d, Crypto.AadVaultKey));
         CryptographicOperations.ZeroMemory(kek);
         _masterChangedAt = NowIsoFine();   // this envelope now outranks every other device's
     }
+
+    /// <summary>Current Argon2id cost for the master-password wrap (after any raise on change/reset).</summary>
+    public KdfConfig Kdf => _cfg;
 
     /// <summary>
     /// Set a new master password WITHOUT proving the old one. Only for the recovery flow.
