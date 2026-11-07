@@ -12,6 +12,15 @@ public partial class ChangePasswordPage : ContentPage
         NewBox.TextChanged += (_, _) => StrengthMeter.Show(MeterLabel, NewBox.Text);
     }
 
+    protected override void OnDisappearing()
+    {
+        // Audit L11: clear password fields when leaving the page.
+        OldBox.Text = "";
+        NewBox.Text = "";
+        ConfirmBox.Text = "";
+        base.OnDisappearing();
+    }
+
     private async void OnSave(object? sender, EventArgs e)
     {
         ErrorLabel.IsVisible = false;

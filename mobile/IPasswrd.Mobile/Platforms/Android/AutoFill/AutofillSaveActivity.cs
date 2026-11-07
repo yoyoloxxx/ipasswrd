@@ -65,7 +65,8 @@ public class AutofillSaveActivity : AppCompatActivity
         if (Window?.DecorView is View dvNoFill)
             dvNoFill.ImportantForAutofill = global::Android.Views.ImportantForAutofill.NoExcludeDescendants;
 
-        Svc.State.EnforceAutolock();
+        // Autofill path: cap applies even when UI autolock is «Никогда» (audit L9).
+        Svc.State.EnforceAutofillAutolock();
         if (Svc.State.IsUnlocked) _ = SaveAndFinishAsync();
         else if (Svc.State.QuickUnlockAvailable) _ = TryQuickUnlockAsync();
     }

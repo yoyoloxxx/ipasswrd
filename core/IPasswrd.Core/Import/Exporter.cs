@@ -14,6 +14,9 @@ namespace IPasswrd.Core.Import;
 ///
 /// Колонки — те же, что пишет экспорт Chrome (name,url,username,password,note), плюс totp
 /// шестой: потерять коды проверки при переезде было бы тихой потерей.
+///
+/// Plaintext CSV is intentional (audit L11): portability requires an unencrypted export;
+/// the host must gate it behind an explicit user action (Settings → export).
 /// </summary>
 public static class Exporter
 {

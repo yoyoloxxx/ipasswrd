@@ -10,7 +10,7 @@ public class AutolockTests
     [Fact]
     public void IsDue_False_When_Minutes_Zero_Never()
     {
-        // "Никогда" — even hours in background must not lock.
+        // "Никогда" — even hours in background must not lock the UI path.
         Assert.False(Autolock.IsDue(0, T0, T0.AddHours(5)));
     }
 
@@ -40,5 +40,27 @@ public class AutolockTests
     public void IsDue_Respects_Configured_Minutes(int minutes, int elapsedMinutes, bool due)
     {
         Assert.Equal(due, Autolock.IsDue(minutes, T0, T0.AddMinutes(elapsedMinutes)));
+    }
+
+    [Fact]
+    public void IsDueForCredentialFill_Caps_Never_At_AutofillBackgroundCap()
+    {
+        // Audit L9: UI «Никогда» still locks Autofill after the cap.
+        Assert.False(Autolock.IsDueForCredentialFill(0, T0, T0.AddMinutes(Autolock.AutofillBackgroundCapMinutes - 1)));
+        Assert.True(Autolock.IsDueForCredentialFill(0, T0, T0.AddMinutes(Autolock.AutofillBackgroundCapMinutes)));
+        Assert.True(Autolock.IsDueForCredentialFill(0, T0, T0.AddHours(5)));
+    }
+
+    [Fact]
+    public void IsDueForCredentialFill_Honours_Positive_User_Setting()
+    {
+        Assert.False(Autolock.IsDueForCredentialFill(5, T0, T0.AddMinutes(4)));
+        Assert.True(Autolock.IsDueForCredentialFill(5, T0, T0.AddMinutes(5)));
+    }
+
+    [Fact]
+    public void IsDueForCredentialFill_False_When_Not_Backgrounded()
+    {
+        Assert.False(Autolock.IsDueForCredentialFill(0, Autolock.NotBackgrounded, T0.AddHours(2)));
     }
 }

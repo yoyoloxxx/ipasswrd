@@ -508,9 +508,8 @@ public sealed class AppState
 
     /// <summary>
     /// Wipe the in-memory vault if background idle time has reached <see cref="AutolockMinutes"/>.
-    /// Must be called from Autofill / Accessibility before reading <see cref="IsUnlocked"/> /
-    /// <see cref="Vault"/>: those services run while the MAUI window stays stopped, so
-    /// <see cref="OnResumed"/> never fires and credentials would otherwise keep serving.
+    /// UI / resume path: «Никогда» (0) means never. Autofill / Accessibility must use
+    /// <see cref="EnforceAutofillAutolock"/> / <see cref="ActiveVault"/> instead (audit L9).
     /// </summary>
     public void EnforceAutolock()
     {
@@ -519,12 +518,23 @@ public sealed class AppState
             Lock();
     }
 
-    /// <summary>Vault still open after applying autolock — prefer on fill paths over raw <see cref="Vault"/>.</summary>
+    /// <summary>
+    /// Autofill / Accessibility idle wipe. Applies a background cap even when the UI
+    /// autolock setting is «Никогда», so credentials are not served forever from RAM (audit L9).
+    /// </summary>
+    public void EnforceAutofillAutolock()
+    {
+        if (_vault is null) return;
+        if (Autolock.IsDueForCredentialFill(AutolockMinutes, _backgroundedAt, DateTimeOffset.UtcNow))
+            Lock();
+    }
+
+    /// <summary>Vault still open after applying the Autofill autolock cap — prefer on fill paths over raw <see cref="Vault"/>.</summary>
     public Vault? ActiveVault
     {
         get
         {
-            EnforceAutolock();
+            EnforceAutofillAutolock();
             return _vault;
         }
     }

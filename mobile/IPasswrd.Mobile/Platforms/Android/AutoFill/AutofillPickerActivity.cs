@@ -87,7 +87,8 @@ public class AutofillPickerActivity : AppCompatActivity
             dvNoFill.ImportantForAutofill = global::Android.Views.ImportantForAutofill.NoExcludeDescendants;
 
         // Picker can open hours after the host went to background — enforce before IsUnlocked.
-        Svc.State.EnforceAutolock();
+        // Autofill path: cap applies even when UI autolock is «Никогда» (audit L9).
+        Svc.State.EnforceAutofillAutolock();
         if (Svc.State.IsUnlocked) ShowList();
         else
         {
