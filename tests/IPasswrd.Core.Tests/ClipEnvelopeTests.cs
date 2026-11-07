@@ -74,4 +74,33 @@ public class ClipEnvelopeTests
 
         Assert.False(ClipEnvelope.TryOpen(key, recordBlob, out _));
     }
+
+    // L4: expiry is bound into AAD — rewriting the stamp without resealing must fail open.
+    [Fact] // 8
+    public void TamperedExpiryOpensNothing()
+    {
+        byte[] blob = ClipEnvelope.Seal(Key(), "секрет");
+        // Expiry sits right after the 12-byte nonce.
+        blob[12] ^= 0x01;
+
+        Assert.False(ClipEnvelope.TryOpen(Key(), blob, out _));
+    }
+
+    [Fact] // 9
+    public void ExpiredEnvelopeOpensNothing()
+    {
+        byte[] blob = ClipEnvelope.Seal(Key(), "секрет", TimeSpan.FromSeconds(1));
+        Thread.Sleep(2100); // unix-second expiry: wait past the sealed expiresAt second
+
+        Assert.False(ClipEnvelope.TryOpen(Key(), blob, out _));
+    }
+
+    [Fact] // 10
+    public void ExcessiveTtlIsCallerError()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => ClipEnvelope.Seal(Key(), "секрет", ClipEnvelope.MaxTtl + TimeSpan.FromSeconds(1)));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => ClipEnvelope.Seal(Key(), "секрет", TimeSpan.Zero));
+    }
 }

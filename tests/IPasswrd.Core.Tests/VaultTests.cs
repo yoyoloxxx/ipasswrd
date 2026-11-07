@@ -155,6 +155,30 @@ public class VaultTests
         Assert.Throws<KeyNotFoundException>(() => v.Get(id));
     }
 
+    // L3: non-ASCII Put ids would collide under ASCII AAD ('?' substitution).
+    [Fact]
+    public void Put_RejectsNonAsciiRecordId()
+    {
+        var v = Vault.Create(Pw, Fast);
+        Assert.Throws<ArgumentException>(() =>
+            v.Put("prefs-настройки", new VaultItem { Type = "note", Title = "x" }));
+    }
+
+    // L5: changing the master password raises a weak (test) KDF up to the Default floor.
+    [Fact]
+    public void ChangeMasterPassword_RaisesWeakKdfToDefault()
+    {
+        var v = Vault.Create(Pw, Fast);
+        Assert.True(v.Kdf.MemoryKiB < KdfConfig.Default.MemoryKiB);
+
+        v.ChangeMasterPassword(Pw, "new stronger passphrase 2026");
+
+        Assert.Equal(KdfConfig.Default.MemoryKiB, v.Kdf.MemoryKiB);
+        Assert.Equal(KdfConfig.Default.Iterations, v.Kdf.Iterations);
+        Assert.Equal(KdfConfig.Default.Parallelism, v.Kdf.Parallelism);
+        Assert.NotNull(Vault.Unlock(v.Serialize(), "new stronger passphrase 2026"));
+    }
+
     // ---- helpers ----
 
     private static byte[] Mutate(byte[] blob, Action<JsonObject> mutate)

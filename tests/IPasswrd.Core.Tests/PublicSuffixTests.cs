@@ -60,4 +60,14 @@ public class PublicSuffixTests
     [InlineData("evil.duckdns.org", false)]
     public void IsPublicSuffix_classifies(string domain, bool expected)
         => Assert.Equal(expected, PublicSuffix.IsPublicSuffix(domain));
+
+    // L2: embedded PSL must actually load — empty/missing list used to collapse every multi-label
+    // host to its rightmost label (evil.duckdns.org ≡ alice.duckdns.org).
+    [Fact]
+    public void EmbeddedList_MeetsRuleCountFloor()
+    {
+        Assert.True(PublicSuffix.IsReady, "public_suffix_list.dat must be embedded and parseable");
+        Assert.True(PublicSuffix.RuleCount >= PublicSuffix.MinRuleCount,
+            $"RuleCount={PublicSuffix.RuleCount} < floor {PublicSuffix.MinRuleCount}");
+    }
 }
