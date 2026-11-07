@@ -90,18 +90,45 @@ public static class VaultBackups
     /// Вернуть сейф к копии. Текущий файл сам становится копией прямо перед этим:
     /// восстановление, которое нельзя откатить, — это та же необратимая перезапись,
     /// от которой копии и защищают.
+    /// <para>
+    /// <paramref name="backupPath"/> must resolve inside this vault's backup directory and
+    /// match the <c>vault-*.ipvault</c> name pattern; the file must also parse as a vault
+    /// document before the live file is replaced. Arbitrary paths are refused so a malicious
+    /// or confused caller cannot overwrite the vault with an unrelated file.
+    /// </para>
     /// </summary>
     public static void Restore(string vaultPath, string backupPath)
     {
-        // Не Snapshot(): у него защита от частых копий, а здесь копия обязана сняться.
         string dir = DirFor(vaultPath);
-        Directory.CreateDirectory(dir);
-        if (File.Exists(vaultPath))
-            File.Copy(vaultPath, Path.Combine(dir,
+        string fullVault = Path.GetFullPath(vaultPath);
+        string fullDir = Path.GetFullPath(dir);
+        string fullBackup = Path.GetFullPath(backupPath);
+
+        string dirPrefix = fullDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                           + Path.DirectorySeparatorChar;
+        if (!fullBackup.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("backup path must be inside the vault backups directory", nameof(backupPath));
+
+        string name = Path.GetFileName(fullBackup);
+        if (name.Length == 0
+            || !name.StartsWith("vault-", StringComparison.OrdinalIgnoreCase)
+            || !name.EndsWith(".ipvault", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("backup name must match vault-*.ipvault", nameof(backupPath));
+
+        if (!File.Exists(fullBackup))
+            throw new FileNotFoundException("backup file not found", fullBackup);
+
+        // Parse before replacing the live vault — refuse non-vault bytes.
+        Vault.EnsureDocument(File.ReadAllBytes(fullBackup));
+
+        // Не Snapshot(): у него защита от частых копий, а здесь копия обязана сняться.
+        Directory.CreateDirectory(fullDir);
+        if (File.Exists(fullVault))
+            File.Copy(fullVault, Path.Combine(fullDir,
                 "vault-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-до-восстановления.ipvault"), overwrite: true);
 
-        File.Copy(backupPath, vaultPath, overwrite: true);
-        Prune(vaultPath);
+        File.Copy(fullBackup, fullVault, overwrite: true);
+        Prune(fullVault);
     }
 
     /// <summary>Свежие — все (до KeepRecent), старше — по последней за день, за KeepDays дней.</summary>
