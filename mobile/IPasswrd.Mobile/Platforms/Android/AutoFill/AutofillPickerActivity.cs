@@ -82,6 +82,8 @@ public class AutofillPickerActivity : AppCompatActivity
         if (Window?.DecorView is View dvNoFill)
             dvNoFill.ImportantForAutofill = global::Android.Views.ImportantForAutofill.NoExcludeDescendants;
 
+        // Picker can open hours after the host went to background — enforce before IsUnlocked.
+        Svc.State.EnforceAutolock();
         if (Svc.State.IsUnlocked) ShowList();
         else
         {

@@ -67,7 +67,9 @@ public class IpwAutofillService : AutofillService
         var builder = new FillResponse.Builder();
         AutofillId[] ids = fields.Ids();
 
-        Vault? vault = Svc.State.IsUnlocked ? Svc.State.Vault : null;
+        // Autofill runs while the MAUI window stays Stopped — OnResumed never fires.
+        // EnforceAutolock (via ActiveVault) closes the in-memory vault after idle time.
+        Vault? vault = Svc.State.ActiveVault;
         int added = 0;
 
         if (vault is not null)
@@ -184,7 +186,7 @@ public class IpwAutofillService : AutofillService
             string domain = AutofillMatcher.IsBrowser(fields.PackageName) ? (fields.WebDomain ?? "") : "";
             string pkg = fields.PackageName ?? "";
 
-            if (Svc.State.IsUnlocked)
+            if (Svc.State.ActiveVault is not null)
             {
                 _ = Task.Run(async () =>
                 {
