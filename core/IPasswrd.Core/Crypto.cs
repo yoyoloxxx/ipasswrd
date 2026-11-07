@@ -59,6 +59,11 @@ internal static class Crypto
     /// <summary>Domain tag (HKDF info) for the document-integrity MAC key.</summary>
     public static readonly byte[] AadDocMac = Encoding.ASCII.GetBytes("ipasswrd/doc-mac/v1");
 
+    /// <summary>Domain tag (HKDF info) for a stable lineage id derived from the DEK when a
+    /// legacy file has no <c>vaultId</c>. Same DEK ⇒ same id across unlocks and devices;
+    /// password changes keep the DEK, so the id survives them too.</summary>
+    public static readonly byte[] AadVaultId = Encoding.ASCII.GetBytes("ipasswrd/vault-id/v1");
+
     public static byte[] RecordAad(string id)
     {
         byte[] idBytes = Encoding.ASCII.GetBytes(id);
@@ -74,6 +79,10 @@ internal static class Crypto
     /// stays stable across master-password changes (the DEK is unchanged when the password changes).</summary>
     public static byte[] DeriveDocMacKey(byte[] dek) =>
         HKDF.DeriveKey(HashAlgorithmName.SHA256, dek, KeyLen, salt: null, info: AadDocMac);
+
+    /// <summary>16-byte lineage id material from the DEK (see <see cref="AadVaultId"/>).</summary>
+    public static byte[] DeriveVaultIdBytes(byte[] dek) =>
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, dek, 16, salt: null, info: AadVaultId);
 
     /// <summary>HMAC-SHA256(key, data).</summary>
     public static byte[] HmacSha256(byte[] key, byte[] data)
