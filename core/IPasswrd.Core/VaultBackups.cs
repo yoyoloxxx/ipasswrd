@@ -35,7 +35,12 @@ public static class VaultBackups
     /// Снять копию ПЕРЕД перезаписью сейфа. Молча ничего не делает, если сейфа ещё нет,
     /// копия снималась только что или диск отказал: резерв не должен ронять сохранение.
     /// </summary>
-    public static void Snapshot(string vaultPath)
+    /// <param name="force">
+    /// When true, ignore <see cref="MinInterval"/>. Use before a destructive replace
+    /// (cloud pull that would overwrite local bytes, restore, merge-before-write on unlock)
+    /// so a recent ordinary save cannot suppress the only rollback copy of unsynced edits.
+    /// </param>
+    public static void Snapshot(string vaultPath, bool force = false)
     {
         try
         {
@@ -45,9 +50,14 @@ public static class VaultBackups
             Directory.CreateDirectory(dir);
 
             var existing = List(vaultPath);
-            if (existing.Count > 0 && DateTime.UtcNow - existing[0].TakenUtc < MinInterval) return;
+            if (!force && existing.Count > 0 && DateTime.UtcNow - existing[0].TakenUtc < MinInterval) return;
 
-            string name = "vault-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".ipvault";
+            // Force may re-snapshot within the same second as an earlier copy — disambiguate
+            // the filename so we never overwrite the previous forced snapshot in place.
+            string stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+            string name = force
+                ? "vault-" + stamp + "-force.ipvault"
+                : "vault-" + stamp + ".ipvault";
             File.Copy(vaultPath, Path.Combine(dir, name), overwrite: true);
 
             Prune(vaultPath);
