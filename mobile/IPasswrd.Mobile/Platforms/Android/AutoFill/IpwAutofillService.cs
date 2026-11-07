@@ -124,8 +124,10 @@ public class IpwAutofillService : AutofillService
                 || (fields.Otp is not null && !string.IsNullOrEmpty(code));
         if (!any) return null;
 
+        // Never put a live TOTP into the RemoteViews subtitle — it is visible in the
+        // dropdown (screenshots, overlays, shoulder surfing) before the user picks a row.
+        // The code is still delivered via AutofillValue when the dataset is applied.
         string subtitle = login.Length > 0 ? login : "без логина";
-        if (fields.Otp is not null && !string.IsNullOrEmpty(code)) subtitle += " · код " + code;
 
         var ds = new Dataset.Builder(Presentation(c.Title, subtitle));
         // Пустые значения НЕ проставляем: иначе запись без логина стёрла бы то,
