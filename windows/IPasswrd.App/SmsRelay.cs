@@ -21,8 +21,9 @@ namespace IPasswrd.App;
 // расширению (BridgeCredentials → smsCodes) — карточка «Код проверки» предлагает вставить.
 //
 // Безопасность:
-//  - принимается ТОЛЬКО POST /sms с верным токеном в query (?t=…); всё прочее — 403/404;
-//  - токен генерируется локально; готовый URL лежит в %LOCALAPPDATA%\IPasswrd\sms-relay.txt;
+//  - принимается ТОЛЬКО POST /sms с верным токеном (заголовок X-IPW-Token или ?t=…); всё прочее — 403/404;
+//  - токен генерируется локально и лежит в %LOCALAPPDATA%\IPasswrd\sms-relay.token;
+//    sms-relay.txt — только подсказка со схемами URL, без самого токена;
 //  - наружу не отдаётся ничего (ответ всегда только {"ok":…}), сейф в этом пути не участвует;
 //  - код живёт в памяти 3 минуты и уходит только расширению (pipe CurrentUserOnly /
 //    loopback-HTTP с проверкой Origin) — с текстом СМС ничего больше не происходит.
@@ -588,7 +589,8 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>Готовые адреса для вставки в Быструю команду — в sms-relay.txt рядом с сейфом.</summary>
+    /// <summary>Готовые адреса для вставки в Быструю команду — в sms-relay.txt рядом с сейфом.
+    /// Bearer живёт только в sms-relay.token; helper-файл больше не вшивает его в URL (L7).</summary>
     private void WriteSmsRelayInfo()
     {
         try
@@ -603,35 +605,11 @@ public partial class MainWindow
                 .Distinct()
                 .ToList();
 
-            var sb = new StringBuilder();
-            sb.AppendLine("IPasswrd — приём СМС-кодов с телефона (для автоматизации «Быстрых команд»).");
-            sb.AppendLine();
-            sb.AppendLine("В действии «Получить содержимое URL»: метод POST, тело — текст СМС.");
-            sb.AppendLine("Телефон должен быть в одной сети с этим компьютером.");
-            sb.AppendLine();
-            sb.AppendLine($"URL по имени компьютера: http://{Environment.MachineName.ToLowerInvariant()}.local:{SmsRelayPort}/sms?t={_smsToken}");
-            foreach (string ip in ips)
-                sb.AppendLine($"URL по адресу:           http://{ip}:{SmsRelayPort}/sms?t={_smsToken}");
-            sb.AppendLine();
-            sb.AppendLine("Вне дома (мобильный интернет): вместо URL сохраняйте текст СМС файлом");
-            sb.AppendLine("в iCloud Drive → IPasswrd → sms-inbox (действие «Сохранить файл», с заменой).");
-            sb.AppendLine();
-            sb.AppendLine("БУФЕР ТЕЛЕФОН → ПК, ОСНОВНОЙ ПУТЬ (сеть НЕ нужна):");
-            sb.AppendLine("  Быстрая команда «На ПК»: Получить буфер обмена → Показать уведомление");
-            sb.AppendLine("  (в теле — переменная «Буфер обмена»). Уведомление едет по Bluetooth");
-            sb.AppendLine("  через «Связь с телефоном». Предел канала ~150 символов.");
-            sb.AppendLine();
-            sb.AppendLine("ДЛИННЫЙ ТЕКСТ (любая сеть с интернетом, задержка 10-60 с):");
-            sb.AppendLine("  Действие «Сохранить файл» → iCloud Drive, путь /IPasswrd/clip-inbox/clip.txt");
-            sb.AppendLine("  (с заменой, без вопроса куда сохранять). Приложение заберёт и удалит.");
-            sb.AppendLine();
-            sb.AppendLine("ЗАПАСНОЙ СЕТЕВОЙ ПУТЬ (та же сеть, мгновенно):");
-            sb.AppendLine("  Токен можно слать заголовком X-IPW-Token (надёжнее — не попадает в логи URL)");
-            sb.AppendLine("  ЛИБО как ?t=… в адресе. Принимаются только адреса из локальной сети.");
-            sb.AppendLine($"  Телефон → ПК: POST http://{Environment.MachineName.ToLowerInvariant()}.local:{SmsRelayPort}/clip?t={_smsToken}   (тело — текст буфера)");
-            sb.AppendLine($"  ПК → телефон: GET  http://{Environment.MachineName.ToLowerInvariant()}.local:{SmsRelayPort}/clip?t={_smsToken}   (в ответе JSON, поле text)");
-            sb.AppendLine("     ⚠ ПК → телефон (GET /clip) по умолчанию ВЫКЛЮЧЕН — включается в Настройках.");
-            File.WriteAllText(Path.Combine(SmsDir(), "sms-relay.txt"), sb.ToString(), new UTF8Encoding(false));
+            string text = SmsRelayInfoFile.Build(Environment.MachineName, SmsRelayPort, ips);
+            // Defence in depth: never persist the live bearer into the helper file.
+            if (_smsToken.Length > 0 && text.Contains(_smsToken, StringComparison.Ordinal))
+                throw new InvalidOperationException("sms-relay helper must not embed the live token");
+            File.WriteAllText(Path.Combine(SmsDir(), "sms-relay.txt"), text, new UTF8Encoding(false));
         }
         catch { /* информационный файл — не критично */ }
     }
