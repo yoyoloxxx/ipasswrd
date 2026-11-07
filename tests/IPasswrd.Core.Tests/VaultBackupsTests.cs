@@ -115,4 +115,35 @@ public class VaultBackupsTests : IDisposable
         Assert.Equal("новая", File.ReadAllText(list[0].Path));
         Assert.Equal("старая", File.ReadAllText(list[1].Path));
     }
+
+    // C1: a destructive replace (cloud pull / unlock merge write) must snapshot even when
+    // an ordinary save already snapshotted within MinInterval — otherwise unsynced edits
+    // between the last snapshot and the overwrite have no rollback copy.
+    [Fact] // 8
+    public void ForceSnapshot_BypassesMinInterval()
+    {
+        WriteVault("до офлайн-правки");
+        VaultBackups.Snapshot(VaultPath);          // ordinary save snapshot
+        WriteVault("офлайн-правка ещё не в облаке");
+
+        Assert.Single(VaultBackups.List(VaultPath));
+
+        VaultBackups.Snapshot(VaultPath, force: true);   // about to overwrite with cloud
+
+        var list = VaultBackups.List(VaultPath);
+        Assert.True(list.Count >= 2, "force snapshot must not be swallowed by MinInterval");
+        Assert.Contains(list, b => File.ReadAllText(b.Path) == "офлайн-правка ещё не в облаке");
+    }
+
+    [Fact] // 9
+    public void NonForce_StillCollapsesInsideMinInterval()
+    {
+        WriteVault("v1");
+        VaultBackups.Snapshot(VaultPath);
+        WriteVault("v2");
+        VaultBackups.Snapshot(VaultPath);   // throttled
+
+        Assert.Single(VaultBackups.List(VaultPath));
+        Assert.Equal("v1", File.ReadAllText(VaultBackups.List(VaultPath)[0].Path));
+    }
 }

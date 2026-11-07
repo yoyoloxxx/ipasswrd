@@ -141,45 +141,80 @@ public sealed class AppState
         if (LockoutRemaining > TimeSpan.Zero)
             return $"Слишком много попыток. Подождите {Fmt.Duration(LockoutRemaining)}.";
 
-        byte[] blob;
-        try { blob = await PullLatestAsync() ?? throw new FileNotFoundException(); }
+        VaultUnlockSource.Decision decision;
+        try { decision = await PrepareUnlockDecisionAsync(); }
         catch { return "Файл сейфа не найден."; }
 
+        Vault unlocked;
+        byte[]? mergePeer = decision.OtherBlobToMergeAfterUnlock;
         try
         {
-            _vault = await Task.Run(() => IPasswrd.Core.Vault.Unlock(blob, masterPassword, RequireAuth(blob)));
+            unlocked = await Task.Run(() =>
+                IPasswrd.Core.Vault.Unlock(decision.UnlockBlob, masterPassword, RequireAuth(decision.UnlockBlob)));
         }
         catch (WrongMasterPasswordException)
         {
-            Fails++;
-            string hint = MasterChangeHint(blob);
-            TimeSpan pen = Lockout.PenaltyFor(Fails);
-            if (pen > TimeSpan.Zero)
+            // Stale wrap on the preferred side (e.g. password changed elsewhere, or the
+            // newer-envelope remote was preferred but the user still typed the old password):
+            // try the peer once before counting a fail — same DEK lineage, different envelope.
+            if (mergePeer is { Length: > 0 })
             {
-                LockedUntil = DateTimeOffset.UtcNow + pen;
-                return $"Неверный мастер-пароль. Вход закрыт на {Fmt.Duration(pen)}.{hint}";
+                try
+                {
+                    unlocked = await Task.Run(() =>
+                        IPasswrd.Core.Vault.Unlock(mergePeer, masterPassword, RequireAuth(mergePeer)));
+                    // Unlocked the peer: merge the side we tried first.
+                    mergePeer = decision.UnlockBlob;
+                }
+                catch (WrongMasterPasswordException)
+                {
+                    return FailUnlockPassword(decision.UnlockBlob, mergePeer);
+                }
+                catch (Exception)
+                {
+                    return "Файл сейфа повреждён или имеет неизвестный формат.";
+                }
             }
-            int left = Lockout.AttemptsLeft(Fails);
-            return (left > 0
-                ? $"Неверный мастер-пароль. Осталось попыток без блокировки: {left}."
-                : "Неверный мастер-пароль.") + hint;
+            else return FailUnlockPassword(decision.UnlockBlob, null);
         }
         catch (Exception)
         {
             return "Файл сейфа повреждён или имеет неизвестный формат.";
         }
 
+        _vault = unlocked;
+        PersistMergedUnlock(mergePeer, decision.RemoteIsForeign);
         Fails = 0;
         LockedUntil = DateTimeOffset.MinValue;
         AfterUnlock();
         return null;
     }
 
+    private string FailUnlockPassword(byte[] primary, byte[]? secondary)
+    {
+        Fails++;
+        // Prefer the hint from the newer envelope when both sides are present.
+        string hintBlob = secondary is { Length: > 0 }
+            && string.CompareOrdinal(
+                IPasswrd.Core.Vault.MasterPasswordChangedAtOf(secondary),
+                IPasswrd.Core.Vault.MasterPasswordChangedAtOf(primary)) > 0
+            ? secondary : primary;
+        string hint = MasterChangeHint(hintBlob);
+        TimeSpan pen = Lockout.PenaltyFor(Fails);
+        if (pen > TimeSpan.Zero)
+        {
+            LockedUntil = DateTimeOffset.UtcNow + pen;
+            return $"Неверный мастер-пароль. Вход закрыт на {Fmt.Duration(pen)}.{hint}";
+        }
+        int left = Lockout.AttemptsLeft(Fails);
+        return (left > 0
+            ? $"Неверный мастер-пароль. Осталось попыток без блокировки: {left}."
+            : "Неверный мастер-пароль.") + hint;
+    }
+
     /// <summary>
-    /// Подсказка к неверному паролю: когда конверт ключа менялся. Перед вводом пароля файл
-    /// подтягивается из облака (pull-first), поэтому после смены пароля на ПК человек с
-    /// «правильным старым» паролем упирается в «неверно» — дата объясняет, что произошло,
-    /// и не выдаёт ничего, чего нет в самом файле.
+    /// Подсказка к неверному паролю: когда конверт ключа менялся. После смены пароля на ПК
+    /// дата со штампа в файле объясняет «неверно», не выдавая ничего сверх метаданных файла.
     /// </summary>
     private static string MasterChangeHint(byte[] blob)
     {
@@ -219,43 +254,85 @@ public sealed class AppState
     }
 
     /// <summary>
-    /// Перед разблокировкой мастер-паролем подтягиваем свежий файл из iCloud (pull-first):
-    /// так конверт ключа (соль/обёртка) всегда последний — смена мастер-пароля на Windows
-    /// не откатится записью со старым конвертом. Быстрой разблокировке это не нужно:
-    /// DEK не меняется при смене пароля.
+    /// Read local vault + optional cloud peer for unlock. Never overwrites local with remote:
+    /// offline edits must survive until <see cref="Vault.MergeFrom"/> (Windows GoogleSyncUi model).
+    /// A remote-only device materialises the cloud file onto disk once (nothing local to lose).
     /// </summary>
-    private async Task<byte[]?> PullLatestAsync()
+    private async Task<VaultUnlockSource.Decision> PrepareUnlockDecisionAsync()
     {
-        // Google Drive имеет приоритет, если вход выполнен (тот же файл, что на ПК).
+        byte[]? local = HasLocalVault ? File.ReadAllBytes(LocalVaultPath) : null;
+        byte[]? remote = await TryPullRemoteAsync();
+
+        if ((local is null || local.Length == 0) && remote is { Length: > 0 })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(LocalVaultPath)!);
+            File.WriteAllBytes(LocalVaultPath, remote);
+            local = remote;
+        }
+
+        return VaultUnlockSource.Decide(local, remote);
+    }
+
+    /// <summary>Best-effort cloud read. Google Drive wins over iCloud/external when connected.</summary>
+    private async Task<byte[]?> TryPullRemoteAsync()
+    {
         if (GoogleDrive.IsConnected)
         {
             try
             {
                 byte[]? g = await GoogleDrive.PullAsync();
-                if (g is { Length: > 0 })
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(LocalVaultPath)!);
-                    // Файл сейчас заменится привезённым с Диска — сначала копия того, что было на устройстве:
-                    // именно при таких подменах теряют данные, а не при обычных правках.
-                    VaultBackups.Snapshot(LocalVaultPath);
-                    File.WriteAllBytes(LocalVaultPath, g);
-                    return g;
-                }
+                if (g is { Length: > 0 }) return g;
             }
-            catch { /* оффлайн/сбой → откат к локальному */ }
+            catch { /* offline → local only */ }
         }
         if (Svc.External.IsConnected)
         {
-            byte[]? ext = await Svc.External.ReadAsync();
-            if (ext is { Length: > 0 })
+            try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(LocalVaultPath)!);
-                VaultBackups.Snapshot(LocalVaultPath);   // та же подмена, только из iCloud/файла
-                File.WriteAllBytes(LocalVaultPath, ext);
-                return ext;
+                byte[]? ext = await Svc.External.ReadAsync();
+                if (ext is { Length: > 0 }) return ext;
+            }
+            catch { /* offline → local only */ }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// After a successful unlock: merge the peer (if any), force-snapshot the previous local
+    /// file, and write the union. Skips merge when the remote is a foreign vaultId.
+    /// </summary>
+    private void PersistMergedUnlock(byte[]? mergePeer, bool remoteIsForeign)
+    {
+        if (_vault is null) return;
+        bool touched = false;
+        if (mergePeer is { Length: > 0 } && !remoteIsForeign)
+        {
+            try
+            {
+                string envBefore = _vault.MasterPasswordChangedAt;
+                int changed = _vault.MergeFrom(mergePeer, RequireAuthLocal());
+                touched = changed > 0
+                    || !string.Equals(_vault.MasterPasswordChangedAt, envBefore, StringComparison.Ordinal);
+            }
+            catch (VaultIntegrityException)
+            {
+                // Foreign / tampered peer — keep the unlocked side as-is.
             }
         }
-        return HasLocalVault ? File.ReadAllBytes(LocalVaultPath) : null;
+
+        // Always persist when we unlocked a blob that may not yet be what is on disk
+        // (newer remote envelope preferred), or when merge changed anything.
+        byte[] data = _vault.Serialize();
+        bool diskDiffers = !HasLocalVault
+            || !data.AsSpan().SequenceEqual(File.ReadAllBytes(LocalVaultPath));
+        if (!touched && !diskDiffers) return;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(LocalVaultPath)!);
+        // Destructive replace of the on-disk file — force past MinInterval so a save five
+        // minutes ago cannot suppress the only rollback copy of unsynced local bytes.
+        VaultBackups.Snapshot(LocalVaultPath, force: true);
+        File.WriteAllBytes(LocalVaultPath, data);
+        if (_vault.IsAuthenticated) MarkVaultAuthenticated(_vault);
     }
 
     // ================= быстрая разблокировка (Keychain + Face ID) =================
@@ -603,32 +680,70 @@ public sealed class AppState
         if (LockoutRemaining > TimeSpan.Zero)
             return $"Слишком много попыток. Подождите {Fmt.Duration(LockoutRemaining)}.";
 
-        byte[] blob;
-        try { blob = await PullLatestAsync() ?? throw new FileNotFoundException(); }
+        VaultUnlockSource.Decision decision;
+        try { decision = await PrepareUnlockDecisionAsync(); }
         catch { return "Файл сейфа не найден."; }
 
         Vault restored;
+        byte[]? mergePeer = decision.OtherBlobToMergeAfterUnlock;
         try
         {
-            restored = await Task.Run(() => IPasswrd.Core.Vault.UnlockWithRecoveryCode(blob, recoveryCode, RequireAuth(blob)));
+            restored = await Task.Run(() =>
+                IPasswrd.Core.Vault.UnlockWithRecoveryCode(
+                    decision.UnlockBlob, recoveryCode, RequireAuth(decision.UnlockBlob)));
+        }
+        catch (RecoveryNotEnabledException) when (mergePeer is { Length: > 0 })
+        {
+            // Recovery may exist only on the peer copy — try once before giving up.
+            try
+            {
+                restored = await Task.Run(() =>
+                    IPasswrd.Core.Vault.UnlockWithRecoveryCode(
+                        mergePeer, recoveryCode, RequireAuth(mergePeer)));
+                mergePeer = decision.UnlockBlob;
+            }
+            catch (RecoveryNotEnabledException)
+            {
+                return "Для этого сейфа код восстановления не создавался.";
+            }
+            catch (WrongRecoveryCodeException)
+            {
+                return FailUnlockRecovery();
+            }
+            catch (Exception)
+            {
+                return "Файл сейфа повреждён или имеет неизвестный формат.";
+            }
         }
         catch (RecoveryNotEnabledException)
         {
             return "Для этого сейфа код восстановления не создавался.";
         }
+        catch (WrongRecoveryCodeException) when (mergePeer is { Length: > 0 })
+        {
+            try
+            {
+                restored = await Task.Run(() =>
+                    IPasswrd.Core.Vault.UnlockWithRecoveryCode(
+                        mergePeer, recoveryCode, RequireAuth(mergePeer)));
+                mergePeer = decision.UnlockBlob;
+            }
+            catch (WrongRecoveryCodeException)
+            {
+                return FailUnlockRecovery();
+            }
+            catch (RecoveryNotEnabledException)
+            {
+                return FailUnlockRecovery();
+            }
+            catch (Exception)
+            {
+                return "Файл сейфа повреждён или имеет неизвестный формат.";
+            }
+        }
         catch (WrongRecoveryCodeException)
         {
-            Fails++;
-            TimeSpan pen = Lockout.PenaltyFor(Fails);
-            if (pen > TimeSpan.Zero)
-            {
-                LockedUntil = DateTimeOffset.UtcNow + pen;
-                return $"Неверный код восстановления. Вход закрыт на {Fmt.Duration(pen)}.";
-            }
-            int left = Lockout.AttemptsLeft(Fails);
-            return left > 0
-                ? $"Неверный код восстановления. Осталось попыток без блокировки: {left}."
-                : "Неверный код восстановления.";
+            return FailUnlockRecovery();
         }
         catch (Exception)
         {
@@ -640,11 +755,27 @@ public sealed class AppState
         catch (Exception) { return "Не удалось задать новый мастер-пароль."; }
 
         _vault = restored;
+        PersistMergedUnlock(mergePeer, decision.RemoteIsForeign);
         Fails = 0;
         LockedUntil = DateTimeOffset.MinValue;
         await SaveAsync();      // запишет уже с новым паролем + синк
         AfterUnlock();
         return null;
+    }
+
+    private string FailUnlockRecovery()
+    {
+        Fails++;
+        TimeSpan pen = Lockout.PenaltyFor(Fails);
+        if (pen > TimeSpan.Zero)
+        {
+            LockedUntil = DateTimeOffset.UtcNow + pen;
+            return $"Неверный код восстановления. Вход закрыт на {Fmt.Duration(pen)}.";
+        }
+        int left = Lockout.AttemptsLeft(Fails);
+        return left > 0
+            ? $"Неверный код восстановления. Осталось попыток без блокировки: {left}."
+            : "Неверный код восстановления.";
     }
 
     // ================= импорт из файла =================
