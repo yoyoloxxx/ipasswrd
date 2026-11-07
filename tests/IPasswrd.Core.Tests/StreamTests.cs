@@ -112,8 +112,11 @@ public class StreamTests
         v.Add(Account("poison", "b"));
         byte[] legacy = Mutate(v.Serialize(), root =>
         {
-            var rec = root["records"]!.AsArray()[1]!.AsObject();
-            rec["ciphertext"] = FlipByte((string)rec["ciphertext"]!, 5);
+            // Poison the non-good record by id — JSON array order is not a stable contract.
+            JsonObject poison = root["records"]!.AsArray()
+                .Select(n => n!.AsObject())
+                .First(r => (string?)r["id"] != good);
+            poison["ciphertext"] = FlipByte((string)poison["ciphertext"]!, 5);
             root.Remove("mac");
         });
 

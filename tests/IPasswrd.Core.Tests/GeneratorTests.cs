@@ -49,4 +49,21 @@ public class GeneratorTests
         var o = new GeneratorOptions(Lower: false, Upper: false, Digits: false, Symbols: false);
         Assert.Equal("", Generator.Generate(o));
     }
+
+    // L1: uniform draws from the combined pool alone can omit a selected class; reserved slots fix that.
+    [Fact]
+    public void Includes_Every_Selected_Class_When_Length_Allows()
+    {
+        var o = new GeneratorOptions(Length: 4, Lower: true, Upper: true, Digits: true, Symbols: true);
+        const string symbols = "!@#$%^&*?-_=+";
+        for (int i = 0; i < 300; i++)
+        {
+            string p = Generator.Generate(o);
+            Assert.Equal(4, p.Length);
+            Assert.Contains(p, char.IsLower);
+            Assert.Contains(p, char.IsUpper);
+            Assert.Contains(p, char.IsDigit);
+            Assert.Contains(p, c => symbols.Contains(c));
+        }
+    }
 }
