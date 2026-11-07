@@ -18,7 +18,7 @@ public sealed class AppState
     private const int QuickUnlockDays = 30;
 
     private Vault? _vault;
-    private DateTimeOffset _backgroundedAt = DateTimeOffset.MaxValue;
+    private DateTimeOffset _backgroundedAt = Autolock.NotBackgrounded;
 
     public event Action? LockedChanged;      // разблокировали или заблокировали
     public event Action? VaultChanged;       // содержимое изменилось (после Save/Sync)
@@ -385,13 +385,33 @@ public sealed class AppState
 
     public void OnBackgrounded() => _backgroundedAt = DateTimeOffset.UtcNow;
 
-    public void OnResumed()
+    /// <summary>
+    /// Wipe the in-memory vault if background idle time has reached <see cref="AutolockMinutes"/>.
+    /// Must be called from Autofill / Accessibility before reading <see cref="IsUnlocked"/> /
+    /// <see cref="Vault"/>: those services run while the MAUI window stays stopped, so
+    /// <see cref="OnResumed"/> never fires and credentials would otherwise keep serving.
+    /// </summary>
+    public void EnforceAutolock()
     {
         if (_vault is null) return;
-        int m = AutolockMinutes;
-        if (m > 0 && DateTimeOffset.UtcNow - _backgroundedAt >= TimeSpan.FromMinutes(m))
+        if (Autolock.IsDue(AutolockMinutes, _backgroundedAt, DateTimeOffset.UtcNow))
             Lock();
-        _backgroundedAt = DateTimeOffset.MaxValue;
+    }
+
+    /// <summary>Vault still open after applying autolock — prefer on fill paths over raw <see cref="Vault"/>.</summary>
+    public Vault? ActiveVault
+    {
+        get
+        {
+            EnforceAutolock();
+            return _vault;
+        }
+    }
+
+    public void OnResumed()
+    {
+        EnforceAutolock();
+        _backgroundedAt = Autolock.NotBackgrounded;
     }
 
     // ================= сохранение и синхронизация =================
