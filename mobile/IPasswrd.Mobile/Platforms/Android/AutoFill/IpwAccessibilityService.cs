@@ -53,12 +53,20 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
     public static bool IsRunning { get; private set; }
 
+    /// <summary>Package/domain diagnostics — Debug only (audit L10).</summary>
+    private static void Dbg(string msg)
+    {
+#if DEBUG
+        Console.WriteLine(msg);
+#endif
+    }
+
     protected override void OnServiceConnected()
     {
         base.OnServiceConnected();
         IsRunning = true;
         Svc.State.LockedChanged += OnLockedChanged;
-        Console.WriteLine("[IPW-A11Y] connected");
+        Dbg("[IPW-A11Y] connected");
     }
 
     public override void OnDestroy()
@@ -112,7 +120,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
                 if (f is not null && f.Editable) focus = f;
             }
             if (e.EventType == EventTypes.ViewFocused)
-                Console.WriteLine("[IPW-A11Y] focusEvt ed=" + (focus is not null) + " cls=" + (e.Source?.ClassName ?? "-") + " id=" + (e.Source?.ViewIdResourceName ?? "-"));
+                Dbg("[IPW-A11Y] focusEvt ed=" + (focus is not null) + " cls=" + (e.Source?.ClassName ?? "-") + " id=" + (e.Source?.ViewIdResourceName ?? "-"));
             if (focus is null)
             {
                 // фокус ушёл с поля — окошко больше не нужно (прячем только на смене фокуса/окна)
@@ -138,7 +146,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
         }
         catch (Exception ex)
         {
-            Console.WriteLine("[IPW-A11Y] event error: " + ex.Message);
+            Dbg("[IPW-A11Y] event error: " + ex.Message);
         }
     }
 
@@ -215,7 +223,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
         { Gravity = GravityFlags.Top | GravityFlags.Start, X = x, Y = y };
 
         try { wm.AddView(panel, lp); _menu = panel; }
-        catch (Exception ex) { Console.WriteLine("[IPW-A11Y] addSuggest: " + ex.Message); }
+        catch (Exception ex) { Dbg("[IPW-A11Y] addSuggest: " + ex.Message); }
     }
 
     // ================= кнопка-триггер =================
@@ -256,7 +264,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
         };
 
         try { wm.AddView(btn, lp); _button = btn; _btnParams = lp; }
-        catch (Exception ex) { Console.WriteLine("[IPW-A11Y] addButton: " + ex.Message); }
+        catch (Exception ex) { Dbg("[IPW-A11Y] addButton: " + ex.Message); }
     }
 
     private void HideButton()
@@ -367,7 +375,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
         };
 
         try { wm.AddView(panel, lp); _menu = panel; }
-        catch (Exception ex) { Console.WriteLine("[IPW-A11Y] addMenu: " + ex.Message); }
+        catch (Exception ex) { Dbg("[IPW-A11Y] addMenu: " + ex.Message); }
     }
 
     /// <summary>In-overlay phishing warning before unmatched accounts can be filled.</summary>
@@ -424,7 +432,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
         };
 
         try { wm.AddView(panel, lp); _menu = panel; }
-        catch (Exception ex) { Console.WriteLine("[IPW-A11Y] addWarn: " + ex.Message); }
+        catch (Exception ex) { Dbg("[IPW-A11Y] addWarn: " + ex.Message); }
     }
 
     private void HideMenu()
@@ -459,9 +467,9 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
             var edits = new List<AccessibilityNodeInfo>();
             CollectEditable(root, edits);
-            Console.WriteLine("[IPW-A11Y] fields=" + edits.Count + " [" +
+            Dbg("[IPW-A11Y] fields=" + edits.Count + " [" +
                 string.Join(", ", edits.Take(6).Select(n => ((n.ClassName ?? "").ToString()?.Split('.').LastOrDefault() ?? "") + (n.Password ? ":pw" : ""))) + "]");
-            if (edits.Count == 0) { Console.WriteLine("[IPW-A11Y] no editable fields (win search)"); return; }
+            if (edits.Count == 0) { Dbg("[IPW-A11Y] no editable fields (win search)"); return; }
 
             AccessibilityNodeInfo? passField = edits.FirstOrDefault(n => n.Password);
             AccessibilityNodeInfo? userField = null;
@@ -484,12 +492,12 @@ public sealed class IpwAccessibilityService : AccessibilityService
             if (userField is not null && c.Login.Length > 0) SetText(userField, c.Login);
             if (passField is not null && c.Password.Length > 0) SetText(passField, c.Password);
 
-            Console.WriteLine($"[IPW-A11Y] filled user={(userField != null)} pass={(passField != null)} edits={edits.Count} dom={_domain}");
+            Dbg($"[IPW-A11Y] filled user={(userField != null)} pass={(passField != null)} edits={edits.Count} dom={_domain}");
             Toast.MakeText(this, "IPasswrd: заполнено", ToastLength.Short)?.Show();
         }
         catch (Exception ex)
         {
-            Console.WriteLine("[IPW-A11Y] fill error: " + ex.Message);
+            Dbg("[IPW-A11Y] fill error: " + ex.Message);
         }
     }
 
@@ -535,7 +543,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
             }
             catch (Exception) { }
         }
-        Console.WriteLine("[IPW-A11Y] setText ok=" + ok + " len=" + value.Length);
+        Dbg("[IPW-A11Y] setText ok=" + ok + " len=" + value.Length);
     }
 
     // ================= оеход дерева =================
@@ -625,7 +633,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
 
         Walk(root);
         string? result = byId;
-        Console.WriteLine($"[IPW-A11Y] domain byId={byId}({dbgIds}) -> {result} pkg={_pkg}");
+        Dbg($"[IPW-A11Y] domain byId={byId}({dbgIds}) -> {result} pkg={_pkg}");
         return result;
     }
 

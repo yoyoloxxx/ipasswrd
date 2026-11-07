@@ -55,6 +55,15 @@ public sealed class RecoverPage : ContentPage
         };
     }
 
+    protected override void OnDisappearing()
+    {
+        // Audit L11: clear recovery/password fields when leaving the page.
+        _code.Text = "";
+        _new.Text = "";
+        _confirm.Text = "";
+        base.OnDisappearing();
+    }
+
     private static View Card(View inner)
     {
         var border = new Border { Padding = new Thickness(16, 6), StrokeThickness = 0, Content = inner };

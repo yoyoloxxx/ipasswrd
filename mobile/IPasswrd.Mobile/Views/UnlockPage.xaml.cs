@@ -32,6 +32,14 @@ public partial class UnlockPage : ContentPage
         }
     }
 
+    protected override void OnDisappearing()
+    {
+        // Audit L11: master-password entry must not linger in the Entry widgets.
+        PasswordBox.Text = "";
+        ConfirmBox.Text = "";
+        base.OnDisappearing();
+    }
+
     private void Refresh()
     {
         _creating = !Svc.State.HasLocalVault && !Svc.External.IsConnected;
