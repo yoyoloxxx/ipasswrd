@@ -333,22 +333,34 @@ public sealed class GoogleDriveSync
         }
     }
 
-    /// <summary>Locate our vault file on Drive, caching its id + parent. Returns (id, modifiedTime) or null if none yet.</summary>
+    /// <summary>Locate our vault file on Drive, caching its id + parent. Returns (id, modifiedTime) or null if none yet.
+    /// Scoped to the IPasswrd folder so a stray vault.ipvault elsewhere on Drive is never picked; if several
+    /// copies exist in that folder, the newest by modifiedTime wins.</summary>
     public async Task<(string id, string modifiedTime)?> FindAsync(CancellationToken ct = default)
     {
+        string folderId = await EnsureFolderAsync(ct);
         string url = DriveFiles +
             "?spaces=drive&pageSize=10&fields=" + Uri.EscapeDataString("files(id,modifiedTime,name,parents)") +
-            "&q=" + Uri.EscapeDataString($"name = '{_fileName}' and trashed = false");
+            "&orderBy=" + Uri.EscapeDataString("modifiedTime desc") +
+            "&q=" + Uri.EscapeDataString($"name = '{_fileName}' and '{folderId}' in parents and trashed = false");
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         using var resp = await SendAuthed(req, ct);
         if (!resp.IsSuccessStatusCode) throw new InvalidOperationException("drive_list_failed");
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
         if (!doc.RootElement.TryGetProperty("files", out var files) || files.GetArrayLength() == 0) return null;
-        var f = files[0];
-        _fileId = f.GetProperty("id").GetString();
-        _fileParent = f.TryGetProperty("parents", out var ps) && ps.GetArrayLength() > 0 ? ps[0].GetString() : null;
-        string mt = f.TryGetProperty("modifiedTime", out var m) ? (m.GetString() ?? "") : "";
-        return (_fileId!, mt);
+
+        // orderBy already prefers newest; still pick max modifiedTime in case the API ignores it.
+        JsonElement best = files[0];
+        string bestMt = best.TryGetProperty("modifiedTime", out var m0) ? (m0.GetString() ?? "") : "";
+        for (int i = 1; i < files.GetArrayLength(); i++)
+        {
+            var cand = files[i];
+            string mt = cand.TryGetProperty("modifiedTime", out var m) ? (m.GetString() ?? "") : "";
+            if (string.CompareOrdinal(mt, bestMt) > 0) { best = cand; bestMt = mt; }
+        }
+        _fileId = best.GetProperty("id").GetString();
+        _fileParent = best.TryGetProperty("parents", out var ps) && ps.GetArrayLength() > 0 ? ps[0].GetString() : folderId;
+        return (_fileId!, bestMt);
     }
 
     /// <summary>Cheap change-probe: the current modifiedTime of the remote vault (null if it doesn't exist).</summary>
