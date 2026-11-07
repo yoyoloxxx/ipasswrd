@@ -23,4 +23,10 @@
     <ProjectReference Include="..\..\core\IPasswrd.Core\IPasswrd.Core.csproj" />
   </ItemGroup>
 
+  <!-- Pure Windows helpers (no Avalonia) — compile here so Ubuntu CI can cover audit L7/L8. -->
+  <ItemGroup>
+    <Compile Include="..\..\windows\IPasswrd.App\SmsRelayInfoFile.cs" Link="Linked\SmsRelayInfoFile.cs" />
+    <Compile Include="..\..\windows\IPasswrd.App\NativeHostLocator.cs" Link="Linked\NativeHostLocator.cs" />
+  </ItemGroup>
+
 </Project>

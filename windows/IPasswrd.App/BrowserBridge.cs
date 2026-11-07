@@ -30,6 +30,22 @@ public partial class MainWindow
     private string BridgeToken() => _bridgeToken ??= Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
     private static string PairFlagPath() => System.IO.Path.Combine(LocalDataDir(), "ext-paired.flag");   // remembers a one-time extension approval
 
+    /// <summary>True when the user has previously approved the loopback-HTTP extension pair
+    /// (the permanent flag from a past Allow click). Named-pipe traffic never needs this.</summary>
+    private static bool IsExtensionPaired()
+    {
+        try { return System.IO.File.Exists(PairFlagPath()); } catch { return false; }
+    }
+
+    /// <summary>Revoke the permanent HTTP-bridge pair so the next secret request over loopback
+    /// prompts again. Also drops the in-memory session token so an already-paired tab must re-pair.
+    /// Settings → «Отозвать доступ расширения».</summary>
+    private void RevokeExtensionPair()
+    {
+        try { if (System.IO.File.Exists(PairFlagPath())) System.IO.File.Delete(PairFlagPath()); } catch { }
+        _bridgeToken = null;
+    }
+
     /// <summary>UTF-8 compare that returns false on length mismatch. <see cref="CryptographicOperations.FixedTimeEquals"/>
     /// throws when lengths differ; that exception used to leak through the bridge catch as an error type name
     /// and was swallowed by the SMS relay catch — both paths must reject cleanly instead.</summary>
@@ -173,11 +189,10 @@ public partial class MainWindow
     /// path never needs this — it is CurrentUserOnly and already trusted.</summary>
     private async Task<bool> RequestExtensionPairAsync()
     {
-        // Approve ONCE: after the user allows the extension the first time, remember it and never
-        // prompt again, across restarts. HttpBridge has already pinned the loopback Origin to our
-        // extension id, so this stays a one-time human gate. (A same-user process forging that Origin
-        // is out of scope per SECURITY.md regardless.)
-        try { if (System.IO.File.Exists(PairFlagPath())) return true; } catch { }
+        // Approve once until revoked: after Allow, remember across restarts. Settings can clear the
+        // flag (RevokeExtensionPair) so the prompt returns. HttpBridge already pins Origin to our
+        // extension id. (Same-user Origin forgery is out of scope per SECURITY.md.)
+        if (IsExtensionPaired()) return true;
         return await Dispatcher.UIThread.InvokeAsync(async () =>
         {
             try { BringToFront(); } catch { /* best effort */ }
