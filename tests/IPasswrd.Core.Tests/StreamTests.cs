@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Text;
+using System.Text.Json.Nodes;
 using IPasswrd.Core;
 using Xunit;
 
@@ -17,6 +20,20 @@ public class StreamTests
         Title = title,
         Fields = { ["username"] = user, ["password"] = "p-" + user },
     };
+
+    private static byte[] Mutate(byte[] blob, Action<JsonObject> edit)
+    {
+        JsonObject root = JsonNode.Parse(blob)!.AsObject();
+        edit(root);
+        return Encoding.UTF8.GetBytes(root.ToJsonString());
+    }
+
+    private static string FlipByte(string b64, int index)
+    {
+        byte[] raw = Convert.FromBase64String(b64);
+        raw[index] ^= 0xFF;
+        return Convert.ToBase64String(raw);
+    }
 
     [Fact] // 1
     public void StreamYieldsTheSameRecordsAsItems()
@@ -84,5 +101,58 @@ public class StreamTests
 
         Assert.Single(v.Get(id).Attachments);
         Assert.Single(Vault.Unlock(v.Serialize(), Pw).Get(id).Attachments);
+    }
+
+    // M9: legacy (unauthenticated) vaults may skip a poison record, but must surface the skip count.
+    [Fact]
+    public void LegacyListing_SkipsPoisonRecord_AndReportsSkipCount()
+    {
+        var v = Vault.Create(Pw, Fast);
+        string good = v.Add(Account("good", "a"));
+        v.Add(Account("poison", "b"));
+        byte[] legacy = Mutate(v.Serialize(), root =>
+        {
+            var rec = root["records"]!.AsArray()[1]!.AsObject();
+            rec["ciphertext"] = FlipByte((string)rec["ciphertext"]!, 5);
+            root.Remove("mac");
+        });
+
+        Vault opened = Vault.Unlock(legacy, Pw);
+        Assert.False(opened.IsAuthenticated);
+
+        VaultEntry only = Assert.Single(opened.Items());
+        Assert.Equal(good, only.Id);
+        Assert.Equal(1, opened.LastSkippedIntegrityFailures);
+
+        Assert.Equal(good, Assert.Single(opened.Stream()).Id);
+        Assert.Equal(1, opened.LastSkippedIntegrityFailures);
+    }
+
+    // M9: authenticated vaults must fail listing closed when any live record fails decryption.
+    [Fact]
+    public void AuthenticatedListing_ThrowsOnPoisonRecord()
+    {
+        var v = Vault.Create(Pw, Fast);
+        v.Add(Account("good", "a"));
+        string poison = v.Add(Account("poison", "b"));
+        Vault sealedVault = Vault.Unlock(v.Serialize(), Pw);
+        Assert.True(sealedVault.IsAuthenticated);
+
+        // Document MAC already verified on unlock; corrupt a record in memory to exercise the
+        // listing fail-closed path (MAC would have rejected this blob on disk).
+        object records = typeof(Vault)
+            .GetField("_records", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(sealedVault)!;
+        foreach (object rec in (System.Collections.IEnumerable)records)
+        {
+            var idProp = rec.GetType().GetProperty("Id")!;
+            if ((string)idProp.GetValue(rec)! != poison) continue;
+            var ctProp = rec.GetType().GetProperty("Ciphertext")!;
+            ctProp.SetValue(rec, FlipByte((string)ctProp.GetValue(rec)!, 5));
+            break;
+        }
+
+        Assert.Throws<VaultIntegrityException>(() => sealedVault.Items());
+        Assert.Throws<VaultIntegrityException>(() => sealedVault.Stream().ToList());
     }
 }

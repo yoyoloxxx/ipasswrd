@@ -85,6 +85,11 @@ public sealed class Vault
     /// vault is false until it has been serialised and re-opened.</summary>
     public bool IsAuthenticated => _authenticated;
 
+    /// <summary>How many live records the last <see cref="Items"/> / <see cref="Stream"/> pass
+    /// skipped because decryption failed. Only set for unauthenticated (legacy) vaults —
+    /// authenticated vaults throw instead of skipping. Reset at the start of each listing.</summary>
+    public int LastSkippedIntegrityFailures { get; private set; }
+
     /// <summary>Clear-text lineage id straight from a serialised blob (no password needed), or "" if it
     /// cannot be read. Lets the app tell whether a file belongs to a vault it knows to be MAC-protected.</summary>
     public static string VaultIdOf(byte[] blob)
@@ -386,14 +391,19 @@ public sealed class Vault
 
     public IReadOnlyList<VaultEntry> Items()
     {
+        LastSkippedIntegrityFailures = 0;
         var list = new List<VaultEntry>();
         foreach (RecordDto rec in _records)
         {
             if (rec.Deleted) continue;
-            // A record that fails authentication (e.g. one injected by a tampered sync copy) must not
-            // take the whole vault down: skip it rather than throwing out of the entire listing.
+            // Authenticated vaults: any record failure means the seal and contents disagree —
+            // fail the listing closed instead of presenting a quietly incomplete vault.
+            // Legacy (unauthenticated) files: skip poison records but surface the skip count.
             try { list.Add(new VaultEntry(rec.Id, DecryptRecord(rec), rec.UpdatedAt)); }
-            catch (VaultIntegrityException) { }
+            catch (VaultIntegrityException) when (!_authenticated)
+            {
+                LastSkippedIntegrityFailures++;
+            }
         }
         return list;
     }
@@ -408,12 +418,17 @@ public sealed class Vault
     /// </summary>
     public IEnumerable<VaultEntry> Stream()
     {
+        LastSkippedIntegrityFailures = 0;
         foreach (RecordDto rec in _records)
         {
             if (rec.Deleted) continue;
             VaultEntry entry;
             try { entry = new VaultEntry(rec.Id, DecryptRecord(rec), rec.UpdatedAt); }
-            catch (VaultIntegrityException) { continue; }   // skip a poison record, keep streaming the rest
+            catch (VaultIntegrityException) when (!_authenticated)
+            {
+                LastSkippedIntegrityFailures++;
+                continue;   // legacy: skip a poison record, keep streaming the rest
+            }
             yield return entry;
         }
     }

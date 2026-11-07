@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 
 namespace IPasswrd.Core;
 
@@ -14,7 +13,16 @@ public sealed record TotpConfig(string Secret, int Digits, int Period, string Al
 
 public static class Totp
 {
-    /// <summary>Accepts a raw Base32 secret or a full <c>otpauth://totp/...</c> URI.</summary>
+    /// <summary>RFC-common digit count: 6 or 8 (7 is allowed by HOTP but rare).</summary>
+    public const int MinDigits = 6;
+    public const int MaxDigits = 8;
+
+    /// <summary>Period must be positive; cap absurd values that would stall UI countdowns.</summary>
+    public const int MinPeriod = 1;
+    public const int MaxPeriod = 3600;
+
+    /// <summary>Accepts a raw Base32 secret or a full <c>otpauth://totp/...</c> URI.
+    /// Rejects out-of-range <c>digits</c>/<c>period</c> and undecodable secrets.</summary>
     public static TotpConfig Parse(string input)
     {
         input = (input ?? "").Trim();
@@ -25,6 +33,8 @@ public static class Totp
             string secret = q.GetValueOrDefault("secret", "");
             int digits = int.TryParse(q.GetValueOrDefault("digits", "6"), out var d) ? d : 6;
             int period = int.TryParse(q.GetValueOrDefault("period", "30"), out var p) ? p : 30;
+            ValidateDigits(digits);
+            ValidatePeriod(period);
             string algo = q.GetValueOrDefault("algorithm", "SHA1");
             string label = Uri.UnescapeDataString(uri.AbsolutePath.Trim('/'));
 
@@ -37,9 +47,13 @@ public static class Totp
                 if (issuer.Length == 0) issuer = label[..sep].Trim();
                 account = label[(sep + 1)..].Trim();
             }
+            // Fail closed on a secret that is not decodable Base32 (typos must not look "valid").
+            if (secret.Length > 0) _ = Base32Decode(secret);
             return new TotpConfig(secret, digits, period, algo, label, issuer, account);
         }
-        return new TotpConfig(input.Replace(" ", ""), 6, 30, "SHA1", "");
+        string raw = input.Replace(" ", "");
+        if (raw.Length > 0) _ = Base32Decode(raw);
+        return new TotpConfig(raw, 6, 30, "SHA1", "");
     }
 
     /// <summary>True if <paramref name="secretOrUri"/> yields a usable code — a decodable Base32
@@ -65,6 +79,9 @@ public static class Totp
 
     public static string Generate(string secretBase32, long unixSeconds, int digits = 6, int period = 30, string algorithm = "SHA1")
     {
+        ValidateDigits(digits);
+        ValidatePeriod(period);
+
         byte[] key = Base32Decode(secretBase32);
         long counter = unixSeconds / period;
 
@@ -85,16 +102,21 @@ public static class Totp
                 | ((hash[offset + 2] & 0xFF) << 8)
                 | (hash[offset + 3] & 0xFF);
 
-        int otp = bin % (int)Math.Pow(10, digits);
+        int otp = bin % Pow10(digits);
         return otp.ToString().PadLeft(digits, '0');
     }
 
     public static int SecondsRemaining(long unixSeconds, int period = 30)
-        => period - (int)(unixSeconds % period);
+    {
+        ValidatePeriod(period);
+        return period - (int)(unixSeconds % period);
+    }
 
-    // RFC 4648 Base32 decode (upper/lowercase, ignores spaces and padding).
+    // RFC 4648 Base32 decode (upper/lowercase). Spaces, dashes, and padding are ignored;
+    // any other non-alphabet character is rejected so typos cannot silently shorten the key.
     public static byte[] Base32Decode(string s)
     {
+        if (s is null) throw new ArgumentNullException(nameof(s));
         const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
         var output = new List<byte>();
         int bits = 0, value = 0;
@@ -103,7 +125,8 @@ public static class Totp
             char c = char.ToUpperInvariant(raw);
             if (c == '=' || c == ' ' || c == '-') continue;
             int idx = alphabet.IndexOf(c);
-            if (idx < 0) continue;
+            if (idx < 0)
+                throw new FormatException($"invalid Base32 character: '{raw}'");
             value = (value << 5) | idx;
             bits += 5;
             if (bits >= 8)
@@ -114,6 +137,29 @@ public static class Totp
         }
         return output.ToArray();
     }
+
+    private static void ValidateDigits(int digits)
+    {
+        if (digits is < MinDigits or > MaxDigits)
+            throw new ArgumentOutOfRangeException(nameof(digits), digits,
+                $"TOTP digits must be between {MinDigits} and {MaxDigits}.");
+    }
+
+    private static void ValidatePeriod(int period)
+    {
+        if (period is < MinPeriod or > MaxPeriod)
+            throw new ArgumentOutOfRangeException(nameof(period), period,
+                $"TOTP period must be between {MinPeriod} and {MaxPeriod} seconds.");
+    }
+
+    /// <summary>10^n for the small digit range — avoids <see cref="Math.Pow"/> float overflow.</summary>
+    private static int Pow10(int digits) => digits switch
+    {
+        6 => 1_000_000,
+        7 => 10_000_000,
+        8 => 100_000_000,
+        _ => throw new ArgumentOutOfRangeException(nameof(digits)),
+    };
 
     private static Dictionary<string, string> ParseQuery(string query)
     {
