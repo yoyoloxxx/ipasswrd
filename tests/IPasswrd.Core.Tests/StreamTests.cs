@@ -109,13 +109,13 @@ public class StreamTests
     {
         var v = Vault.Create(Pw, Fast);
         string good = v.Add(Account("good", "a"));
-        v.Add(Account("poison", "b"));
+        string poisonId = v.Add(Account("poison", "b"));
+        // Corrupt by id — records[] order is not insertion order (sorted by id on serialize).
         byte[] legacy = Mutate(v.Serialize(), root =>
         {
-            // Poison the non-good record by id — JSON array order is not a stable contract.
             JsonObject poison = root["records"]!.AsArray()
                 .Select(n => n!.AsObject())
-                .First(r => (string?)r["id"] != good);
+                .First(r => (string?)r["id"] == poisonId);
             poison["ciphertext"] = FlipByte((string)poison["ciphertext"]!, 5);
             root.Remove("mac");
         });
