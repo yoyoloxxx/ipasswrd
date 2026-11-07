@@ -60,11 +60,21 @@ public static class Svc
 {
     public static IQrScanner Qr { get; private set; } = new NullQrScanner();
     public static IBiometricAuth Biometric { get; private set; } = new NullBiometric();
-    public static ISecureKeyStore KeyStore { get; private set; } = new PrefsKeyStore();
+    // Shipping iOS/Android TFMs must not default to PrefsKeyStore (audit L11).
+    public static ISecureKeyStore KeyStore { get; private set; } = CreateDefaultKeyStore();
     public static IBiometricSecret BiometricSecret { get; private set; } = new NullBiometricSecret();
     public static IExternalVaultFile External { get; private set; } = new NullExternalVaultFile();
     public static IImageShrink Shrink { get; private set; } = new NullImageShrink();
     public static AppState State { get; } = new();
+
+    private static ISecureKeyStore CreateDefaultKeyStore()
+    {
+#if IOS || ANDROID
+        return new UninitializedKeyStore();
+#else
+        return new PrefsKeyStore();
+#endif
+    }
 
     public static void Init(IQrScanner qr, IBiometricAuth biometric, ISecureKeyStore keyStore,
                             IExternalVaultFile external, IImageShrink? shrink = null,
@@ -98,7 +108,19 @@ public sealed class NullBiometricSecret : IBiometricSecret
     public void Delete(string name) { }
 }
 
-/// <summary>Небезопасный запасной вариант (только для отладки вне iOS).</summary>
+#if IOS || ANDROID
+/// <summary>Fail-closed stub until <see cref="Svc.Init"/> installs Keychain/Keystore.
+/// Exists so shipping TFMs never compile PrefsKeyStore (audit L11).</summary>
+internal sealed class UninitializedKeyStore : ISecureKeyStore
+{
+    private static InvalidOperationException Err() =>
+        new("Secure KeyStore was not initialized — MauiProgram.Init must install the platform store.");
+    public bool Save(string name, byte[] data) => throw Err();
+    public byte[]? Load(string name) => throw Err();
+    public void Delete(string name) => throw Err();
+}
+#else
+/// <summary>Небезопасный запасной вариант — только вне shipping iOS/Android TFMs (audit L11).</summary>
 public sealed class PrefsKeyStore : ISecureKeyStore
 {
     public bool Save(string name, byte[] data) { Preferences.Set("ks." + name, Convert.ToBase64String(data)); return true; }
@@ -109,6 +131,7 @@ public sealed class PrefsKeyStore : ISecureKeyStore
     }
     public void Delete(string name) => Preferences.Remove("ks." + name);
 }
+#endif
 
 public sealed class NullExternalVaultFile : IExternalVaultFile
 {

@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Автозаполнение через спец-возможности — для браузеров, которые не отдают формы
-     системному AutofillService (Яндекс, Opera, Firefox и т.п.). Chrome сюда не входит:
-     там работает обычное автозаполнение. Сервис видит поля на экране и по кнопке
-     вставляет логин/пароль. Данные не покидают устройство. -->
+<!-- Автозаполнение через спец-возможности — только для браузеров из C# allowlist
+     (IpwAccessibilityService.Browsers), где системный AutofillService не работает.
+     Chrome / Firefox / Edge / Opera / Brave и т.п. сюда НЕ входят: их заполняет
+     AutofillService. XML шире C# → лишние пакеты видели a11y события (audit L11). -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeViewFocused|typeWindowContentChanged|typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds"
     android:canRetrieveWindowContent="true"
-    android:packageNames="com.yandex.browser,com.yandex.browser.beta,com.yandex.browser.alpha,org.mozilla.firefox,org.mozilla.firefox_beta,com.opera.browser,com.opera.mini.native,com.huawei.browser,com.microsoft.emmx,com.brave.browser,com.duckduckgo.mobile.android"
+    android:packageNames="com.yandex.browser,com.yandex.browser.beta,com.yandex.browser.alpha,com.huawei.browser"
     android:notificationTimeout="200"
     android:description="@string/ipw_a11y_desc"
     />
