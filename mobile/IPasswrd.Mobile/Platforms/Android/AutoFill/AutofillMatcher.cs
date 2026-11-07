@@ -68,17 +68,15 @@ internal static class AutofillMatcher
 
     /// <summary>Только уверенные совпадения — их показываем сразу над клавиатурой.</summary>
     public static List<AutofillCandidate> Matches(Vault vault, string? webDomain, string? packageName)
-        => Rank(vault, webDomain, packageName).Where(c => c.Score > 0).ToList();
+        => AutofillOfferPolicy.Filter(Rank(vault, webDomain, packageName), c => c.Score, showAllConfirmed: false).ToList();
 
     /// <summary>
     /// Default fill UI is matches-only (score &gt; 0). The full ranked list is shown only after
     /// the user confirms a phishing warning — otherwise an unmatched pick can send a bank login
-    /// to a look-alike page.
+    /// to a look-alike page. Delegates to <see cref="AutofillOfferPolicy"/> so CI pins the rule.
     /// </summary>
     public static List<AutofillCandidate> ForDisplay(IEnumerable<AutofillCandidate> ranked, bool showAllConfirmed)
-        => showAllConfirmed
-            ? ranked.ToList()
-            : ranked.Where(c => c.Score > 0).ToList();
+        => AutofillOfferPolicy.Filter(ranked, c => c.Score, showAllConfirmed).ToList();
 
     /// <summary>Код проверки для записи: свой totp либо привязанный из «Кодов».</summary>
     public static string? CodeFor(Vault vault, VaultItem account)
