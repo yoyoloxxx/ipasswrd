@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json.Nodes;
 using IPasswrd.Core;
 using Xunit;
 
@@ -15,6 +17,13 @@ public class SessionKeyTests
         Title = "Т-Банк",
         Fields = new() { ["username"] = "u@example.com", ["password"] = "k4!Vr#92mQzL&wPn" },
     };
+
+    private static byte[] StripMac(byte[] blob)
+    {
+        JsonObject root = JsonNode.Parse(blob)!.AsObject();
+        root.Remove("mac");
+        return Encoding.UTF8.GetBytes(root.ToJsonString());
+    }
 
     [Fact]
     public void SessionKey_Reopens_Without_Password()
@@ -52,10 +61,46 @@ public class SessionKeyTests
     }
 
     [Fact]
-    public void EmptyVault_Accepts_AnyKey_ButStaysEmpty()
+    public void EmptyVault_Reopens_WithCorrectSessionKey()
     {
         var v = Vault.Create(Pw, Fast);
         var v2 = Vault.UnlockWithSessionKey(v.Serialize(), v.ExportSessionKey());
         Assert.Empty(v2.Items());
+        Assert.True(v2.IsAuthenticated);
+    }
+
+    // H6: without a live record the MAC is the only DEK proof — a wrong key must not be accepted.
+    [Fact]
+    public void EmptyVault_Rejects_WrongSessionKey()
+    {
+        var v = Vault.Create(Pw, Fast);
+        Assert.Throws<WrongMasterPasswordException>(
+            () => Vault.UnlockWithSessionKey(v.Serialize(), new byte[32]));
+    }
+
+    [Fact]
+    public void EmptyVault_Rejects_SessionKey_WhenMacStripped()
+    {
+        var v = Vault.Create(Pw, Fast);
+        byte[] stripped = StripMac(v.Serialize());
+
+        Assert.Throws<WrongMasterPasswordException>(
+            () => Vault.UnlockWithSessionKey(stripped, v.ExportSessionKey()));
+    }
+
+    [Fact]
+    public void TombstoneOnlyVault_Rejects_WrongSessionKey()
+    {
+        var v = Vault.Create(Pw, Fast);
+        string id = v.Add(Sample());
+        v.Delete(id);
+        Assert.Empty(v.Items());
+
+        Assert.Throws<WrongMasterPasswordException>(
+            () => Vault.UnlockWithSessionKey(v.Serialize(), new byte[32]));
+
+        var ok = Vault.UnlockWithSessionKey(v.Serialize(), v.ExportSessionKey());
+        Assert.Empty(ok.Items());
+        Assert.True(ok.IsAuthenticated);
     }
 }
