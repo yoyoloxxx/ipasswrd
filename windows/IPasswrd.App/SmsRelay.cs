@@ -727,8 +727,7 @@ public partial class MainWindow
             bool clipUp = ClipSyncEnabled && path == "/clip" && method == "POST";   // общий буфер выключен до после-релизной переработки
             bool clipDn = ClipSyncEnabled && path == "/clip" && method == "GET";
             if (!smsUp && !clipUp && !clipDn) { await Send("404 Not Found", "{\"ok\":false}"); return; }
-            if (_smsToken.Length == 0 || !CryptographicOperations.FixedTimeEquals(
-                    Encoding.UTF8.GetBytes(token), Encoding.UTF8.GetBytes(_smsToken)))
+            if (_smsToken.Length == 0 || !TokenEquals(token, _smsToken))
             { await Send("403 Forbidden", "{\"ok\":false}"); return; }
 
             // Handing the PC clipboard back over the LAN is the one route that can leak whatever was
