@@ -442,18 +442,9 @@ public partial class MainWindow
         if (!string.IsNullOrWhiteSpace(_extraExtensionId)) yield return _extraExtensionId.Trim();
     }
 
-    private static string? FirstExisting(params string[] paths) => paths.FirstOrDefault(File.Exists);
-
     /// <summary>Locate IPasswrd.Host.exe (the native-messaging bridge).</summary>
     private static string? ResolveHostExe()
-    {
-        string b = AppContext.BaseDirectory;
-        return FirstExisting(
-            Path.Combine(b, "IPasswrd.Host.exe"),
-            Path.GetFullPath(Path.Combine(b, "..", "dist-host", "IPasswrd.Host.exe")),
-            Path.GetFullPath(Path.Combine(b, "..", "IPasswrd.Host", "IPasswrd.Host.exe")),
-            @"D:\MyProjects\IPasswrd\dist-host\IPasswrd.Host.exe");
-    }
+        => NativeHostLocator.Resolve(AppContext.BaseDirectory);
 
     /// <summary>Write the native-messaging manifest next to the host exe and register it for all
     /// Chromium-family browsers on this account (HKCU). Idempotent. Returns the manifest path.</summary>
@@ -596,6 +587,57 @@ public partial class MainWindow
 
         if (_openExtensionSetup) _openExtensionSetup = false;   // legacy onboarding flag — the row no longer expands
 
+        // L6: permanent pair flag can be revoked so the Allow prompt returns on the next HTTP pair.
+        sp.Children.Add(Hairline());
+        sp.Children.Add(RevokeExtensionPairRow());
+
         return sp;
+    }
+
+    /// <summary>Settings control that clears <c>ext-paired.flag</c> and the in-memory HTTP bridge token.</summary>
+    private Control RevokeExtensionPairRow()
+    {
+        var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        left.Children.Add(new TextBlock
+        {
+            Text = Tr("Доступ расширения (локальный мост)"),
+            Foreground = Text, FontSize = 13.5, FontWeight = FontWeight.SemiBold,
+        });
+        left.Children.Add(new TextBlock
+        {
+            Text = Tr("Сбросить разовое разрешение. Следующий запрос из браузера снова спросит подтверждение."),
+            Foreground = Text3, FontSize = 11.5,
+        });
+        Grid.SetColumn(left, 0);
+
+        var revoke = new Button
+        {
+            Content = Tr("Отозвать"),
+            Padding = new Thickness(13, 6),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(revoke, 1);
+
+        void RefreshEnabled() => revoke.IsEnabled = IsExtensionPaired() || _bridgeToken is not null;
+        RefreshEnabled();
+
+        revoke.Click += (_, _) =>
+        {
+            PromptConfirm(
+                Tr("Отозвать доступ расширения?"),
+                Tr("Локальный мост перестанет принимать секретные запросы, пока вы снова не разрешите доступ во всплывающем окне."),
+                Tr("Отозвать"), danger: true,
+                () =>
+                {
+                    RevokeExtensionPair();
+                    RefreshEnabled();
+                    Toast(Tr("Доступ расширения отозван"));
+                });
+        };
+
+        var g = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(17, 13) };
+        g.Children.Add(left);
+        g.Children.Add(revoke);
+        return g;
     }
 }
