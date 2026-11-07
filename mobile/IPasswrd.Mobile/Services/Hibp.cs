@@ -19,21 +19,23 @@ public static class Hibp
         return await resp.Content.ReadAsStringAsync();
     }
 
-    /// <summary>Проверяет уникальные пароли; возвращает словарь пароль→число утечек (только найденные).</summary>
+    /// <summary>Проверяет уникальные пароли; возвращает словарь SHA-1 hex → число утечек
+    /// (только найденные). Never keyed by plaintext (audit M14).</summary>
     public static async Task<Dictionary<string, long>> CheckAsync(IEnumerable<string> passwords)
     {
-        var counts = new Dictionary<string, long>();
+        var counts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         var rangeCache = new Dictionary<string, string>();      // prefix → body, чтобы общий префикс дёргал API один раз
         foreach (var pw in passwords.Where(p => !string.IsNullOrEmpty(p)).Distinct())
         {
-            string prefix = BreachCheck.Prefix(pw);
+            string sha1 = BreachCheck.Sha1Hex(pw);
+            string prefix = sha1[..5];
             if (!rangeCache.TryGetValue(prefix, out var body))
             {
                 body = await FetchRangeAsync(prefix);
                 rangeCache[prefix] = body;
             }
             long n = BreachCheck.CountInBody(pw, body);
-            if (n > 0) counts[pw] = n;
+            if (n > 0) counts[sha1] = n;
         }
         return counts;
     }

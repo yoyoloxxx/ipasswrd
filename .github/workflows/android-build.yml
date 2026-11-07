@@ -153,8 +153,10 @@ jobs:
           VER=$(grep -o '<ApplicationDisplayVersion>[^<]*' IPasswrd.Mobile.csproj | cut -d'>' -f2)
           CODE=$(grep -o '<ApplicationVersion>[^<]*' IPasswrd.Mobile.csproj | cut -d'>' -f2)
           SIZE=$(stat -c%s out/IPasswrd.apk)
+          SHA=$(sha256sum out/IPasswrd.apk | cut -d' ' -f1)
           URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/IPasswrd.apk"
-          printf '{"versionName":"%s","versionCode":%s,"url":"%s","size":%s,"notes":""}\n' \
-            "$VER" "$CODE" "$URL" "$SIZE" > out/android-latest.json
+          # sha256 is required by the in-app updater (audit M2) before Install.
+          printf '{"versionName":"%s","versionCode":%s,"url":"%s","size":%s,"sha256":"%s","notes":""}\n' \
+            "$VER" "$CODE" "$URL" "$SIZE" "$SHA" > out/android-latest.json
           cat out/android-latest.json
           gh release upload "$TAG" out/IPasswrd.apk out/android-latest.json --repo "$GITHUB_REPOSITORY" --clobber

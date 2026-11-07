@@ -136,10 +136,17 @@ public static class GoogleDrive
 
     public static void SignOut()
     {
+        // Audit M3: revoke the refresh token at Google so "disconnect" actually invalidates it.
+        byte[]? rtBytes = LoadRefresh();
+        string? rt = rtBytes is { Length: > 0 } ? Encoding.UTF8.GetString(rtBytes) : null;
         StoreRefresh(null);
         Email = null;
         _accessToken = null; _accessExpiry = default;
         _folderId = _fileId = _fileParent = null;
+        SmallIds.Clear();
+        if (!string.IsNullOrEmpty(rt))
+            _ = Http.PostAsync(RevokeEndpoint, new FormUrlEncodedContent(
+                new Dictionary<string, string> { ["token"] = rt }));
     }
 
     private static async Task<string> EnsureAccessTokenAsync()
@@ -218,17 +225,35 @@ public static class GoogleDrive
 
     private static async Task<bool> FindAsync()
     {
+        // Audit M3: scope to the IPasswrd folder and prefer the newest modifiedTime —
+        // a Drive-wide name query can pick the wrong vault.ipvault when several exist.
+        string folderId = await EnsureFolderAsync();
+        string q = $"name = '{FileName}' and '{folderId}' in parents and trashed = false";
         string url = DriveFiles +
-            "?spaces=drive&pageSize=10&fields=" + Uri.EscapeDataString("files(id,modifiedTime,name,parents)") +
-            "&q=" + Uri.EscapeDataString($"name = '{FileName}' and trashed = false");
+            "?spaces=drive&pageSize=10&orderBy=" + Uri.EscapeDataString("modifiedTime desc") +
+            "&fields=" + Uri.EscapeDataString("files(id,modifiedTime,name,parents)") +
+            "&q=" + Uri.EscapeDataString(q);
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         using var resp = await SendAuthed(req);
         if (!resp.IsSuccessStatusCode) throw new InvalidOperationException("drive_list_failed");
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         if (!doc.RootElement.TryGetProperty("files", out var files) || files.GetArrayLength() == 0) return false;
-        var f = files[0];
-        _fileId = f.GetProperty("id").GetString();
-        _fileParent = f.TryGetProperty("parents", out var ps) && ps.GetArrayLength() > 0 ? ps[0].GetString() : null;
+
+        JsonElement best = default;
+        string bestMt = "";
+        foreach (JsonElement f in files.EnumerateArray())
+        {
+            string mt = f.TryGetProperty("modifiedTime", out var m) ? (m.GetString() ?? "") : "";
+            if (best.ValueKind == JsonValueKind.Undefined || string.CompareOrdinal(mt, bestMt) > 0)
+            {
+                best = f;
+                bestMt = mt;
+            }
+        }
+        if (best.ValueKind == JsonValueKind.Undefined) return false;
+        _fileId = best.GetProperty("id").GetString();
+        _fileParent = best.TryGetProperty("parents", out var ps) && ps.GetArrayLength() > 0
+            ? ps[0].GetString() : folderId;
         return true;
     }
 
@@ -302,8 +327,11 @@ public static class GoogleDrive
     private static async Task<string?> FindSmallAsync(string name)
     {
         if (SmallIds.TryGetValue(name, out string? cached)) return cached;
-        string url = DriveFiles + "?spaces=drive&pageSize=5&fields=" + Uri.EscapeDataString("files(id)") +
-            "&q=" + Uri.EscapeDataString($"name = '{name}' and trashed = false");
+        string folderId = await EnsureFolderAsync();
+        string q = $"name = '{name}' and '{folderId}' in parents and trashed = false";
+        string url = DriveFiles + "?spaces=drive&pageSize=5&orderBy=" + Uri.EscapeDataString("modifiedTime desc") +
+            "&fields=" + Uri.EscapeDataString("files(id,modifiedTime)") +
+            "&q=" + Uri.EscapeDataString(q);
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         using var resp = await SendAuthed(req);
         if (!resp.IsSuccessStatusCode) return null;
