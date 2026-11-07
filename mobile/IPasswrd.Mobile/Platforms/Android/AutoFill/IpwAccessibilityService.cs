@@ -182,7 +182,7 @@ public sealed class IpwAccessibilityService : AccessibilityService
         if (vault is not null)
         {
             List<AutofillCandidate> items = AutofillMatcher.Rank(vault, _domain.Length > 0 ? _domain : null, null);
-            foreach (AutofillCandidate c in items.Where(x => x.Score > 0).Take(3))
+            foreach (AutofillCandidate c in AutofillOfferPolicy.Filter(items, x => x.Score, showAllConfirmed: false).Take(3))
             {
                 var row = new AndroidButton(this) { Text = c.Title + (c.Login.Length > 0 ? "  ·  " + c.Login : "") };
                 row.SetAllCaps(false);
@@ -455,8 +455,8 @@ public sealed class IpwAccessibilityService : AccessibilityService
                 return;
             }
 
-            // Score 0 / unknown domain: refuse unless the user confirmed show-all.
-            if (c.Score <= 0 && !_showAllConfirmed)
+            // Score 0 / unknown domain: refuse unless the user confirmed show-all (AutofillOfferPolicy).
+            if (!AutofillOfferPolicy.IncludeInOffers(c.Score, _showAllConfirmed))
             {
                 Toast.MakeText(this, "Нет совпадения с сайтом — подтвердите «показать все»", ToastLength.Long)?.Show();
                 return;
