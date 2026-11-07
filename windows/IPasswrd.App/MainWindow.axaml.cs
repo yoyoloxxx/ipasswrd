@@ -258,6 +258,14 @@ public partial class MainWindow : Window
         // browser extension install
         ["Расширение для браузера"] = "Browser extension", ["Автозаполнение в Chrome, Edge и других"] = "Autofill in Chrome, Edge and others",
         ["Расширение подключено"] = "Extension connected", ["Расширение не подключено"] = "Extension not connected",
+        ["Доступ расширения (локальный мост)"] = "Extension access (local bridge)",
+        ["Сбросить разовое разрешение. Следующий запрос из браузера снова спросит подтверждение."]
+            = "Clear the one-time approval. The next browser request will ask for confirmation again.",
+        ["Отозвать"] = "Revoke",
+        ["Отозвать доступ расширения?"] = "Revoke extension access?",
+        ["Локальный мост перестанет принимать секретные запросы, пока вы снова не разрешите доступ во всплывающем окне."]
+            = "The local bridge will stop accepting secret requests until you allow access again in the prompt.",
+        ["Доступ расширения отозван"] = "Extension access revoked",
         ["Быстрый вход по Windows Hello"] = "Quick unlock with Windows Hello", ["Открывать сейф отпечатком, лицом или PIN. Мастер-пароль остаётся запасным."] = "Open the vault with fingerprint, face or PIN. The master password stays as a fallback.",
         ["Установить"] = "Install", ["Скрыть"] = "Hide",
         ["Открыть папку расширения"] = "Open the extension folder", ["Открыть страницу расширений"] = "Open the extensions page",
