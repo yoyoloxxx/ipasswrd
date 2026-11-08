@@ -23,14 +23,6 @@ public static class AppUpdate
     private const string LastCheckPref = "update.lastcheck";
     private const string SkipPref = "update.skip";           // сборка, от которой человек отказался
     private const string ApkName = "IPasswrd-update.apk";
-    private const string AllowedRepoPath = "/yoyoloxxx/ipasswrd/";
-
-    private static readonly HashSet<string> AllowedHosts = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "github.com",
-        "objects.githubusercontent.com",
-        "release-assets.githubusercontent.com",
-    };
 
     public sealed record UpdateInfo(string VersionName, long VersionCode, string Url, long Size, string Notes, string Sha256);
 
@@ -69,8 +61,9 @@ public static class AppUpdate
             Preferences.Default.Set(LastCheckPref, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             if (code <= CurrentCode || url.Length == 0) return null;
             // Audit M2: refuse unexpected hosts and require a content hash before offering install.
-            if (!IsAllowedDownloadUrl(url) || sha256.Length != 64) return null;
-            return new UpdateInfo(name, code, url, size, notes, sha256.ToLowerInvariant());
+            if (!AppUpdateIntegrity.IsAllowedDownloadUrl(url) || !AppUpdateIntegrity.IsValidSha256Hex(sha256))
+                return null;
+            return new UpdateInfo(name, code, url, size, notes, AppUpdateIntegrity.NormalizeSha256Hex(sha256));
         }
         catch (Exception)
         {
@@ -98,7 +91,8 @@ public static class AppUpdate
     public static async Task<string?> DownloadAsync(UpdateInfo info, IProgress<double>? progress = null,
                                                     CancellationToken ct = default)
     {
-        if (!IsAllowedDownloadUrl(info.Url) || info.Sha256.Length != 64) return null;
+        if (!AppUpdateIntegrity.IsAllowedDownloadUrl(info.Url) || !AppUpdateIntegrity.IsValidSha256Hex(info.Sha256))
+            return null;
 
         string path = Path.Combine(FileSystem.CacheDirectory, ApkName);
         try
@@ -110,7 +104,8 @@ public static class AppUpdate
                 await http.GetAsync(info.Url, HttpCompletionOption.ResponseHeadersRead, ct);
             resp.EnsureSuccessStatusCode();
             // Final URI after redirects must still be an allowed host.
-            if (resp.RequestMessage?.RequestUri is Uri final && !IsAllowedDownloadUrl(final.ToString()))
+            if (resp.RequestMessage?.RequestUri is Uri final
+                && !AppUpdateIntegrity.IsAllowedDownloadUrl(final.ToString()))
             {
                 TryDelete(path);
                 return null;
@@ -135,8 +130,8 @@ public static class AppUpdate
             if (total > 0 && done < total) { TryDelete(path); return null; }
 
             // Audit M2: verify SHA-256 before handing the file to the installer.
-            string actual = await Sha256FileAsync(path, ct);
-            if (!string.Equals(actual, info.Sha256, StringComparison.OrdinalIgnoreCase))
+            string actual = await AppUpdateIntegrity.Sha256FileHexAsync(path, ct);
+            if (!AppUpdateIntegrity.AcceptDownloadedApk(info.Url, info.Sha256, actual))
             {
                 TryDelete(path);
                 return null;
@@ -200,22 +195,7 @@ public static class AppUpdate
 
     /// <summary>HTTPS + allow-listed GitHub hosts; github.com paths must be this repo.</summary>
     internal static bool IsAllowedDownloadUrl(string url)
-    {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? u)) return false;
-        if (!string.Equals(u.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return false;
-        if (!AllowedHosts.Contains(u.Host)) return false;
-        if (u.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
-            && u.AbsolutePath.IndexOf(AllowedRepoPath, StringComparison.OrdinalIgnoreCase) < 0)
-            return false;
-        return true;
-    }
-
-    private static async Task<string> Sha256FileAsync(string path, CancellationToken ct)
-    {
-        await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        byte[] hash = await SHA256.HashDataAsync(fs, ct);
-        return Convert.ToHexString(hash).ToLowerInvariant();
-    }
+        => AppUpdateIntegrity.IsAllowedDownloadUrl(url);
 
     /// <summary>True when the APK's signing cert matches the installed package (or when we cannot check).</summary>
     private static bool SigningCertMatchesInstalled(string apkPath)

@@ -29,4 +29,9 @@
     <Compile Include="..\..\windows\IPasswrd.App\NativeHostLocator.cs" Link="Linked\NativeHostLocator.cs" />
   </ItemGroup>
 
+  <!-- Pure AppUpdate integrity gates (no MAUI) — audit M2 hash / host pin on Linux CI. -->
+  <ItemGroup>
+    <Compile Include="..\..\mobile\IPasswrd.Mobile\Services\AppUpdateIntegrity.cs" Link="Linked\AppUpdateIntegrity.cs" />
+  </ItemGroup>
+
 </Project>
