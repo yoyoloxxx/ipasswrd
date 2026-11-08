@@ -20,10 +20,16 @@ namespace IPasswrd.App;
 ///
 /// A portable copy (run straight from <c>dist</c>) is not a Velopack install; every method
 /// here degrades to "no updates" rather than pretending otherwise.
+///
+/// Trust root today is the official GitHub repository over HTTPS (stable releases only —
+/// no prereleases, no version downgrade). Packages are not Authenticode-signed until a
+/// real code-signing certificate is wired into <c>publish-installer.cmd</c>; see SECURITY.md §3.9.
+/// Velopack still verifies each package against the checksum published in the release feed.
 /// </summary>
 internal static class Updater
 {
-    private const string RepoUrl = "https://github.com/yoyoloxxx/ipasswrd";
+    /// <summary>Only this repository may feed desktop updates.</summary>
+    public const string OfficialRepoUrl = "https://github.com/yoyoloxxx/ipasswrd";
 
     private static UpdateManager? _mgr;
     private static bool _armed;
@@ -49,7 +55,10 @@ internal static class Updater
     }
 
     private static UpdateManager Manager =>
-        _mgr ??= new UpdateManager(new GithubSource(RepoUrl, accessToken: null, prerelease: false));
+        _mgr ??= new UpdateManager(
+            new GithubSource(OfficialRepoUrl, accessToken: null, prerelease: false),
+            // Stable channel only; never accept a lower version from a retracted feed entry.
+            new UpdateOptions { AllowVersionDowngrade = false });
 
     /// <summary>True when running from an installed copy that can update itself.</summary>
     public static bool IsManagedInstall

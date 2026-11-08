@@ -223,14 +223,21 @@ into a sibling's page.
 
 ### 3.9 Known residuals & roadmap
 
-- **Auto-update is not yet code-signed.** Desktop updates ship via Velopack from GitHub
-  Releases over HTTPS, but the packages are not signed with a code-signing certificate,
-  so the trust root is GitHub + TLS rather than a signature the app itself verifies.
-  Anyone able to publish a release (or MITM a client that trusts a rogue CA) could ship a
-  malicious update. This is an accepted trade-off of GitHub-based
-  distribution: releases are published only from the official repository over TLS, and
-  users should download from the official page (SmartScreen will warn about an unknown
-  publisher; the download page documents this).
+- **Desktop Velopack updates are not Authenticode-signed.** Packages ship from the official
+  GitHub repository (`yoyoloxxx/ipasswrd`) over HTTPS, stable releases only (prereleases and
+  version downgrades are refused). Velopack verifies each package against the checksum in the
+  release feed, and `upload-release.cmd` publishes a `SHA256SUMS.txt` asset for manual checks.
+  There is still no Authenticode / code-signing certificate in CI or local secrets, so the
+  trust root remains GitHub + TLS rather than a signature Windows or the app can pin to a
+  publisher identity. Anyone able to publish a release (or MITM a client that trusts a rogue
+  CA) could ship a malicious update. This is an accepted trade-off until a real cert exists:
+  wire it via `IPW_CODE_SIGN_PFX` + `IPW_CODE_SIGN_PASS` in `publish-installer.cmd` (do not
+  fake signing). SmartScreen will warn about an unknown publisher; download from the official
+  Releases page.
+- **Mobile AppUpdate pins SHA-256.** Android OTA reads `android-latest.json` (emitted by CI
+  with the APK's hex SHA-256), refuses download URLs outside the official GitHub Releases
+  hosts for this repo, hashes the APK before Install, and additionally requires the APK
+  signing certificate to match the installed app. A hash mismatch deletes the file and aborts.
 - **Mobile quick-unlock is hardware-crypto-gated (desktop parity shipped).** On Android the
   cached session key is RSA-wrapped by a hardware-Keystore keypair whose private half requires
   user authentication per use (BiometricPrompt + CryptoObject; explicit OAEP MGF1-SHA1
